@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ガラス耐風圧 簡易検討ツール</title>
+<style>
+  /* ==============================
+     CSS変数・リセット
+  ============================== */
+  :root {
+    --bg: #0f1117;
+    --surface: #181c27;
+    --surface2: #1e2336;
+    --border: #2a3050;
+    --accent: #4e8cff;
+    --accent2: #00d4aa;
+    --ok: #22c55e;
+    --ng: #ef4444;
+    --warn: #f59e0b;
+    --text: #e8eaf0;
+    --text2: #8b91a8;
+    --text3: #5a6080;
+    --font-mono: 'Courier New', monospace;
+    --radius: 12px;
+    --radius-sm: 8px;
+    --shadow: 0 4px 24px rgba(0,0,0,0.4);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic', sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ==============================
+     ヘッダー
+  ============================== */
+  header {
+    background: linear-gradient(135deg, #0d1525 0%, #111827 50%, #0a1420 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 20px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .header-icon {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+  .header-title {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--text);
+  }
+  .header-sub {
+    font-size: 11px;
+    color: var(--text3);
+    letter-spacing: 0.06em;
+    margin-top: 2px;
+  }
+
+  /* ==============================
+     レイアウト
+  ============================== */
+  .main-wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 24px 16px;
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+  @media (max-width: 800px) {
+    .main-wrap { grid-template-columns: 1fr; }
+  }
+
+  /* ==============================
+     カード
+  ============================== */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+  }
+  .card-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text3);
+    margin-bottom: 16px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ==============================
+     入力フォーム
+  ============================== */
+  .form-group {
+    margin-bottom: 14px;
+  }
+  label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text2);
+    margin-bottom: 6px;
+    letter-spacing: 0.04em;
+  }
+  input[type="number"], select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    font-size: 14px;
+    padding: 9px 12px;
+    outline: none;
+    transition: border-color 0.2s;
+    font-family: inherit;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  input[type="number"]:focus, select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(78,140,255,0.15);
+  }
+  select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%238b91a8'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 32px;
+    cursor: pointer;
+  }
+  select option { background: #1e2336; }
+
+  .input-unit {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .input-unit input { flex: 1; }
+  .unit-label {
+    font-size: 12px;
+    color: var(--text3);
+    white-space: nowrap;
+    min-width: 24px;
+  }
+
+  /* 補正係数スライダー */
+  .coeff-row {
+    display: flex; align-items: center; gap: 10px;
+  }
+  input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+    cursor: pointer;
+    height: 4px;
+  }
+  .coeff-val {
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--accent);
+    min-width: 36px;
+    text-align: right;
+  }
+
+  /* 計算ボタン */
+  .btn-calc {
+    width: 100%;
+    margin-top: 18px;
+    padding: 12px;
+    background: linear-gradient(135deg, var(--accent), #2266dd);
+    border: none;
+    border-radius: var(--radius-sm);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    transition: transform 0.1s, box-shadow 0.2s;
+    box-shadow: 0 2px 12px rgba(78,140,255,0.3);
+  }
+  .btn-calc:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(78,140,255,0.45); }
+  .btn-calc:active { transform: translateY(0); }
+
+  /* ==============================
+     結果エリア
+  ============================== */
+  .result-col { display: flex; flex-direction: column; gap: 16px; }
+
+  /* 結論カード */
+  .conclusion-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    box-shadow: var(--shadow);
+  }
+  .conclusion-inner {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    flex-wrap: wrap;
+  }
+  .judge-badge {
+    font-size: 26px;
+    font-weight: 900;
+    padding: 8px 22px;
+    border-radius: 8px;
+    letter-spacing: 0.08em;
+    flex-shrink: 0;
+  }
+  .judge-ok { background: rgba(34,197,94,0.15); color: var(--ok); border: 2px solid rgba(34,197,94,0.4); }
+  .judge-ng { background: rgba(239,68,68,0.15); color: var(--ng); border: 2px solid rgba(239,68,68,0.4); }
+  .conclusion-detail { flex: 1; min-width: 200px; }
+  .conclusion-glass {
+    font-size: 20px;
+    font-weight: 800;
+    color: var(--text);
+    letter-spacing: 0.02em;
+    margin-bottom: 6px;
+  }
+  .conclusion-meta {
+    display: flex; flex-wrap: wrap; gap: 10px;
+  }
+  .meta-chip {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 12px;
+    color: var(--text2);
+  }
+  .meta-chip span { color: var(--text); font-weight: 700; }
+
+  /* セクションタイトル */
+  .sec-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text3);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sec-title::before {
+    content: '';
+    display: block;
+    width: 3px; height: 14px;
+    background: var(--accent);
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* 計算根拠 */
+  .calc-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  @media (max-width: 600px) { .calc-grid { grid-template-columns: 1fr; } }
+
+  .calc-block {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px;
+  }
+  .calc-block-title {
+    font-size: 11px;
+    color: var(--text3);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    margin-bottom: 8px;
+  }
+  .calc-line {
+    font-size: 12px;
+    color: var(--text2);
+    margin: 3px 0;
+    line-height: 1.5;
+  }
+  .calc-line .val {
+    font-family: var(--font-mono);
+    color: var(--text);
+    font-weight: 600;
+  }
+  .calc-line .hl { color: var(--accent2); font-weight: 700; }
+  .formula {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    background: rgba(78,140,255,0.07);
+    border: 1px solid rgba(78,140,255,0.2);
+    border-radius: 6px;
+    padding: 8px 10px;
+    margin: 8px 0;
+    line-height: 1.8;
+    word-break: break-all;
+  }
+  .sep-line {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 8px 0;
+  }
+
+  /* 候補一覧テーブル */
+  .table-wrap { overflow-x: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th {
+    background: var(--surface2);
+    color: var(--text3);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    padding: 9px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  td {
+    padding: 9px 12px;
+    border-bottom: 1px solid rgba(42,48,80,0.5);
+    color: var(--text2);
+    vertical-align: middle;
+  }
+  tr:first-child td { color: var(--text); font-weight: 700; }
+  tr:first-child { background: rgba(78,140,255,0.05); }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+  .rank-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 700;
+  }
+  .rank-1 { background: rgba(255,215,0,0.2); color: #ffd700; border: 1px solid rgba(255,215,0,0.4); }
+  .rank-2 { background: rgba(192,192,192,0.15); color: #c0c0c0; border: 1px solid rgba(192,192,192,0.3); }
+  .rank-3 { background: rgba(205,127,50,0.15); color: #cd7f32; border: 1px solid rgba(205,127,50,0.3); }
+  .rank-n { background: var(--surface2); color: var(--text3); border: 1px solid var(--border); }
+  .badge-ok { color: var(--ok); font-weight: 700; }
+  .badge-ng { color: var(--ng); font-weight: 700; }
+  .glass-name { font-family: var(--font-mono); color: var(--text); font-size: 12px; }
+  .pval { font-family: var(--font-mono); }
+
+  /* 注意書き */
+  .notice {
+    background: rgba(245,158,11,0.07);
+    border: 1px solid rgba(245,158,11,0.2);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    font-size: 11px;
+    color: var(--text3);
+    line-height: 1.8;
+  }
+  .notice strong { color: var(--warn); }
+
+  /* プレースホルダー */
+  .placeholder {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text3);
+    font-size: 13px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-icon">🪟</div>
+  <div>
+    <div class="header-title">ガラス耐風圧 簡易検討ツール</div>
+    <div class="header-sub">4辺支持ガラス / 設計風圧自動判定 / 最小構成選定</div>
+  </div>
+</header>
+
+<div class="main-wrap">
+
+  <!-- ===== 左カラム：入力 ===== -->
+  <div>
+    <div class="card">
+      <div class="card-title">入力条件</div>
+
+      <div class="form-group">
+        <label>ガラス幅 W</label>
+        <div class="input-unit">
+          <input type="number" id="inp-W" value="1250" min="100" max="10000" step="1">
+          <span class="unit-label">mm</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>ガラス高さ H</label>
+        <div class="input-unit">
+          <input type="number" id="inp-H" value="2050" min="100" max="10000" step="1">
+          <span class="unit-label">mm</span>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>設置階数</label>
+        <select id="inp-floor">
+          <option value="1">1階</option>
+          <option value="2" selected>2階</option>
+          <option value="3">3階</option>
+          <option value="R">R階</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>部位</label>
+        <select id="inp-zone">
+          <option value="general" selected>一般部</option>
+          <option value="corner">隅角部</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>候補ガラス構成</label>
+        <select id="inp-type">
+          <option value="lowe_fl">複層ガラス：Low-E + A + FL</option>
+          <option value="fl_fl">複層ガラス：FL + A + FL</option>
+          <option value="fl_single">単板ガラス：FL</option>
+          <option value="tp_single">単板ガラス：TP（強化）</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>補正係数</label>
+        <div class="coeff-row">
+          <input type="range" id="inp-coeff" min="0.70" max="1.00" step="0.01" value="0.90">
+          <span class="coeff-val" id="coeff-display">0.90</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          1.00 = 理論式のまま　／　0.90 = 既存検討書傾向に合わせた係数
+        </div>
+      </div>
+
+      <button class="btn-calc" onclick="runCalc()">▶ 計算する</button>
+    </div>
+
+    <!-- 注意書き -->
+    <div class="notice" style="margin-top:16px;">
+      <strong>⚠ ご注意</strong><br>
+      本ツールは4辺支持ガラスの風圧検討を簡易的に行うためのものです。<br>
+      自重・衝撃・熱割れ・製作可否・サッシ納まり・支持条件の違い・法的適合性の最終判断は別途確認が必要です。<br>
+      <strong>最終的な設計判断にはメーカー検討書または専門技術者による確認を優先してください。</strong>
+    </div>
+  </div>
+
+  <!-- ===== 右カラム：結果 ===== -->
+  <div class="result-col" id="result-area">
+    <div class="card placeholder">
+      計算ボタンを押すと結果が表示されます
+    </div>
+  </div>
+
+</div>
+
+<script>
+/* ============================================================
+   定数定義（後から変更しやすいようにまとめる）
+============================================================ */
+
+// 設計風圧（正圧）：階数ごと [N/m²]
+const POSITIVE_PRESSURE = {
+  '1': 1297,
+  '2': 1525,
+  '3': 1695,
+  'R': 1729
+};
+
+// 設計風圧（負圧）：部位ごと [N/m²]（絶対値で使用）
+const NEGATIVE_PRESSURE = {
+  'general': 918,   // 一般部 -918 の絶対値
+  'corner':  1122   // 隅角部 -1122 の絶対値
+};
+
+// FL / Low-E 系 k1：ガラス種別係数（厚さ別）
+// Low-E は FL 相当として扱う
+function getK1_FL(t) {
+  if (t <= 8)  return 1.0;
+  if (t <= 12) return 0.9;
+  if (t <= 20) return 0.8;
+  return 0.75;
+}
+
+// TP 強化ガラス k1
+const K1_TP = 3.5;
+
+// 候補板厚リスト（FL / Low-E / TP 共通）
+const THICKNESS_LIST = [5, 6, 8, 10, 12, 15, 19];
+
+// ガラス構成の定義
+const GLASS_TYPES = {
+  'lowe_fl':   { label: 'Low-E + A + FL', igu: true,  outer: 'lowe', inner: 'fl' },
+  'fl_fl':     { label: 'FL + A + FL',    igu: true,  outer: 'fl',   inner: 'fl' },
+  'fl_single': { label: 'FL（単板）',      igu: false, pane: 'fl' },
+  'tp_single': { label: 'TP（単板）',      igu: false, pane: 'tp' },
+};
+
+/* ============================================================
+   補助関数
+============================================================ */
+
+// k2（複層ガラス構成係数）の計算
+// self: 評価するガラス, other: 相手側ガラス
+function calcK2_IGU(t_self, t_other) {
+  // 厚さ比（2.0を上限とする）
+  const ratio = Math.min(2.0, t_other / t_self);
+  return 0.75 * (1 + Math.pow(ratio, 3));
+}
+
+// 許容風圧計算（単板）
+// P = (300 × k1 × k2 / A) × t² × 補正係数
+function calcP_single(t, k1, k2, area, coeff) {
+  return (300 * k1 * k2 / area) * (t * t) * coeff;
+}
+
+// 複層ガラスの許容風圧計算
+// 外側・内側それぞれ計算し、小さい方を採用
+function calcP_IGU(t_outer, t_inner, k1_outer, k1_inner, area, coeff) {
+  const k2_outer = calcK2_IGU(t_outer, t_inner); // 外側を評価
+  const k2_inner = calcK2_IGU(t_inner, t_outer); // 内側を評価
+
+  const P_outer = calcP_single(t_outer, k1_outer, k2_outer, area, coeff);
+  const P_inner = calcP_single(t_inner, k1_inner, k2_inner, area, coeff);
+
+  return { P_outer, P_inner, k2_outer, k2_inner };
+}
+
+// ガラス表示名
+function glassLabel(type, t) {
+  if (type === 'lowe') return `Low-E${t}`;
+  if (type === 'fl')   return `FL${t}`;
+  if (type === 'tp')   return `TP${t}`;
+  return `${type}${t}`;
+}
+
+/* ============================================================
+   候補生成・選定ロジック
+============================================================ */
+
+function generateCandidates(typeKey, area, designP, coeff) {
+  const gt = GLASS_TYPES[typeKey];
+  const candidates = [];
+
+  if (!gt.igu) {
+    // ===== 単板ガラス =====
+    for (const t of THICKNESS_LIST) {
+      const k1 = (gt.pane === 'tp') ? K1_TP : getK1_FL(t);
+      const k2 = 1.0; // 単板
+      const P  = calcP_single(t, k1, k2, area, coeff);
+      const ok = P >= designP;
+      candidates.push({
+        label:    glassLabel(gt.pane, t),
+        t_max:    t,
+        t_total:  t,
+        P:        P,
+        ok:       ok,
+        detail: {
+          igu:    false,
+          t, k1, k2, area, coeff, P
+        }
+      });
+    }
+  } else {
+    // ===== 複層ガラス =====
+    for (const t_o of THICKNESS_LIST) {
+      for (const t_i of THICKNESS_LIST) {
+        const k1_outer = getK1_FL(t_o); // Low-E も FL 相当
+        const k1_inner = getK1_FL(t_i);
+
+        const { P_outer, P_inner, k2_outer, k2_inner } = calcP_IGU(t_o, t_i, k1_outer, k1_inner, area, coeff);
+        const P_IGU = Math.min(P_outer, P_inner);
+        const ok = P_IGU >= designP;
+
+        const outerLabel = glassLabel(gt.outer, t_o);
+        const innerLabel = glassLabel(gt.inner, t_i);
+
+        candidates.push({
+          label:   `${outerLabel} + A + ${innerLabel}`,
+          t_max:   Math.max(t_o, t_i),
+          t_total: t_o + t_i,
+          P:       P_IGU,
+          ok:      ok,
+          detail: {
+            igu:     true,
+            t_o, t_i, k1_outer, k1_inner,
+            k2_outer, k2_inner,
+            P_outer, P_inner, P_IGU,
+            outer_label: outerLabel,
+            inner_label: innerLabel,
+            area, coeff,
+            adopted_side: P_outer <= P_inner ? 'outer' : 'inner'
+          }
+        });
+      }
+    }
+  }
+
+  // ソート：最大板厚昇順 → 合計板厚昇順 → 名前順
+  candidates.sort((a, b) => {
+    if (a.t_max !== b.t_max) return a.t_max - b.t_max;
+    if (a.t_total !== b.t_total) return a.t_total - b.t_total;
+    return a.label.localeCompare(b.label);
+  });
+
+  return candidates;
+}
+
+/* ============================================================
+   HTML レンダリング
+============================================================ */
+
+function fmt(n, d = 0) {
+  return n.toFixed(d);
+}
+
+function renderResults(result) {
+  const {
+    W, H, area, floorKey, zoneKey,
+    posP, negP, designP,
+    coeff, typeKey, typeLabel,
+    best, allCandidates
+  } = result;
+
+  const floorLabel = floorKey === 'R' ? 'R階' : `${floorKey}階`;
+  const zoneLabel  = zoneKey === 'general' ? '一般部' : '隅角部';
+
+  // 判定バッジ
+  const judgeHtml = best
+    ? `<div class="judge-badge ${best.ok ? 'judge-ok' : 'judge-ng'}">${best.ok ? 'OK' : 'NG'}</div>`
+    : `<div class="judge-badge judge-ng">NG</div>`;
+
+  const bestLabel = best ? best.label : '（成立する構成なし）';
+  const bestP     = best ? fmt(best.P, 0) : '—';
+
+  // 結論カード
+  const conclusionHtml = `
+    <div class="conclusion-card">
+      <div class="sec-title">検討結果</div>
+      <div class="conclusion-inner">
+        ${judgeHtml}
+        <div class="conclusion-detail">
+          <div class="conclusion-glass">${bestLabel}</div>
+          <div class="conclusion-meta">
+            <div class="meta-chip">許容風圧 <span>${bestP} N/m²</span></div>
+            <div class="meta-chip">設計風圧 <span>${fmt(designP, 0)} N/m²</span></div>
+            <div class="meta-chip">補正係数 <span>${fmt(coeff, 2)}</span></div>
+          </div>
+        </div>
+      </div>
+    </div>`;
+
+  // 設計風圧の計算根拠
+  const maxSide = posP >= negP
+    ? `正圧 ${fmt(posP, 0)} ≧ |負圧| ${fmt(negP, 0)}`
+    : `|負圧| ${fmt(negP, 0)} ＞ 正圧 ${fmt(posP, 0)}`;
+
+  const windHtml = `
+    <div class="card">
+      <div class="sec-title">入力条件・設計風圧</div>
+      <div class="calc-grid">
+        <div class="calc-block">
+          <div class="calc-block-title">入力値</div>
+          <div class="calc-line">幅 W = <span class="val">${W} mm</span></div>
+          <div class="calc-line">高さ H = <span class="val">${H} mm</span></div>
+          <div class="calc-line">面積 A = <span class="val">${fmt(area, 6)} m²</span></div>
+          <div class="calc-line">階数 = <span class="val">${floorLabel}</span></div>
+          <div class="calc-line">部位 = <span class="val">${zoneLabel}</span></div>
+          <div class="calc-line">構成 = <span class="val">${typeLabel}</span></div>
+        </div>
+        <div class="calc-block">
+          <div class="calc-block-title">設計風圧の選定</div>
+          <div class="calc-line">正圧 = <span class="val">${fmt(posP, 0)} N/m²</span></div>
+          <div class="calc-line">負圧（絶対値）= <span class="val">${fmt(negP, 0)} N/m²</span></div>
+          <hr class="sep-line">
+          <div class="calc-line">${maxSide}</div>
+          <div class="calc-line">→ 設計風圧 = <span class="val hl">${fmt(designP, 0)} N/m²</span></div>
+        </div>
+      </div>
+    </div>`;
+
+  // ガラス許容風圧の計算根拠（最小構成の詳細）
+  let calcDetailHtml = '';
+  if (best) {
+    const d = best.detail;
+    if (!d.igu) {
+      // 単板
+      calcDetailHtml = `
+        <div class="card">
+          <div class="sec-title">ガラス許容風圧の計算根拠（採用構成）</div>
+          <div class="calc-block">
+            <div class="formula">P = (300 × k1 × k2 / A) × t² × 補正係数</div>
+            <div class="calc-line">ガラス種別 k1 = <span class="val">${fmt(d.k1, 2)}</span>（t=${d.t}mm）</div>
+            <div class="calc-line">構成係数 k2 = <span class="val">1.0</span>（単板）</div>
+            <div class="calc-line">面積 A = <span class="val">${fmt(d.area, 6)} m²</span></div>
+            <div class="calc-line">板厚 t = <span class="val">${d.t} mm</span></div>
+            <div class="calc-line">補正係数 = <span class="val">${fmt(d.coeff, 2)}</span></div>
+            <hr class="sep-line">
+            <div class="calc-line">P = (300 × ${fmt(d.k1,2)} × 1.0 / ${fmt(d.area,6)}) × ${d.t}² × ${fmt(d.coeff,2)}</div>
+            <div class="calc-line">　= <span class="val hl">${fmt(d.P, 1)} N/m²</span></div>
+          </div>
+        </div>`;
+    } else {
+      // 複層
+      const adoptedLabel = d.adopted_side === 'outer'
+        ? `外側（${d.outer_label}）が支配：P_outer = ${fmt(d.P_outer,1)} ≦ P_inner = ${fmt(d.P_inner,1)}`
+        : `内側（${d.inner_label}）が支配：P_inner = ${fmt(d.P_inner,1)} ≦ P_outer = ${fmt(d.P_outer,1)}`;
+
+      calcDetailHtml = `
+        <div class="card">
+          <div class="sec-title">ガラス許容風圧の計算根拠（採用構成）</div>
+          <div class="formula">P = (300 × k1 × k2 / A) × t² × 補正係数<br>k2_outer = 0.75 × { 1 + (t_inner/t_outer)³ }<br>k2_inner = 0.75 × { 1 + (t_outer/t_inner)³ }</div>
+          <div class="calc-grid">
+            <div class="calc-block">
+              <div class="calc-block-title">外側ガラス（${d.outer_label}）の評価</div>
+              <div class="calc-line">k1 = <span class="val">${fmt(d.k1_outer,2)}</span>（t_outer=${d.t_o}mm）</div>
+              <div class="calc-line">比率 = min(2.0, ${d.t_i}/${d.t_o}) = <span class="val">${fmt(Math.min(2.0,d.t_i/d.t_o),3)}</span></div>
+              <div class="calc-line">k2_outer = <span class="val">${fmt(d.k2_outer,4)}</span></div>
+              <div class="calc-line">P_outer = <span class="val">${fmt(d.P_outer,1)} N/m²</span></div>
+            </div>
+            <div class="calc-block">
+              <div class="calc-block-title">内側ガラス（${d.inner_label}）の評価</div>
+              <div class="calc-line">k1 = <span class="val">${fmt(d.k1_inner,2)}</span>（t_inner=${d.t_i}mm）</div>
+              <div class="calc-line">比率 = min(2.0, ${d.t_o}/${d.t_i}) = <span class="val">${fmt(Math.min(2.0,d.t_o/d.t_i),3)}</span></div>
+              <div class="calc-line">k2_inner = <span class="val">${fmt(d.k2_inner,4)}</span></div>
+              <div class="calc-line">P_inner = <span class="val">${fmt(d.P_inner,1)} N/m²</span></div>
+            </div>
+          </div>
+          <div style="margin-top:10px;" class="calc-block">
+            <div class="calc-line">${adoptedLabel}</div>
+            <div class="calc-line">→ P_IGU = min(P_outer, P_inner) = <span class="val hl">${fmt(d.P_IGU,1)} N/m²</span></div>
+          </div>
+        </div>`;
+    }
+  }
+
+  // 候補一覧（上位10件）
+  const top10 = allCandidates.slice(0, 10);
+  const rows = top10.map((c, i) => {
+    const rankClass = i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : i === 2 ? 'rank-3' : 'rank-n';
+    return `<tr>
+      <td><span class="rank-badge ${rankClass}">${i+1}</span></td>
+      <td class="glass-name">${c.label}</td>
+      <td style="font-family:var(--font-mono)">${c.t_max}mm</td>
+      <td class="pval">${fmt(c.P, 0)}</td>
+      <td class="${c.ok ? 'badge-ok' : 'badge-ng'}">${c.ok ? '✓ OK' : '✗ NG'}</td>
+    </tr>`;
+  }).join('');
+
+  const tableHtml = `
+    <div class="card">
+      <div class="sec-title">候補一覧（上位${top10.length}件）</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>順位</th>
+              <th>ガラス構成</th>
+              <th>最大板厚</th>
+              <th>許容風圧 N/m²</th>
+              <th>判定</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+
+  document.getElementById('result-area').innerHTML =
+    conclusionHtml + windHtml + calcDetailHtml + tableHtml;
+}
+
+/* ============================================================
+   メイン計算処理
+============================================================ */
+
+function runCalc() {
+  // 入力値取得
+  const W        = parseFloat(document.getElementById('inp-W').value);
+  const H        = parseFloat(document.getElementById('inp-H').value);
+  const floorKey = document.getElementById('inp-floor').value;
+  const zoneKey  = document.getElementById('inp-zone').value;
+  const typeKey  = document.getElementById('inp-type').value;
+  const coeff    = parseFloat(document.getElementById('inp-coeff').value);
+
+  // バリデーション
+  if (!W || !H || W <= 0 || H <= 0) {
+    alert('幅・高さに正の数値を入力してください。');
+    return;
+  }
+
+  // 面積計算（m²）
+  const area = (W * H) / 1_000_000;
+
+  // 設計風圧の決定
+  const posP    = POSITIVE_PRESSURE[floorKey];
+  const negP    = NEGATIVE_PRESSURE[zoneKey];
+  const designP = Math.max(posP, negP);
+
+  // 候補生成・ソート
+  const allCandidates = generateCandidates(typeKey, area, designP, coeff);
+
+  // OK 候補の先頭（最小構成）
+  const okCandidates = allCandidates.filter(c => c.ok);
+  const best         = okCandidates.length > 0 ? okCandidates[0] : null;
+
+  // 結果描画
+  renderResults({
+    W, H, area,
+    floorKey, zoneKey,
+    posP, negP, designP,
+    coeff,
+    typeKey,
+    typeLabel: GLASS_TYPES[typeKey].label,
+    best,
+    allCandidates   // OK のみでなく全候補を表示（OKが上位に来るようソート済み）
+  });
+}
+
+/* ============================================================
+   イベント：補正係数スライダーの表示更新
+============================================================ */
+
+document.getElementById('inp-coeff').addEventListener('input', function() {
+  document.getElementById('coeff-display').textContent = parseFloat(this.value).toFixed(2);
+});
+
+/* ============================================================
+   初期表示時に自動計算
+============================================================ */
+
+window.addEventListener('DOMContentLoaded', function() {
+  runCalc();
+});
+
+</script>
+</body>
+</html>
