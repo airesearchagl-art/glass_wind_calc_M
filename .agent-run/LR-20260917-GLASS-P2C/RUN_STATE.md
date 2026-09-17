@@ -1,6 +1,6 @@
 # RUN_STATE — LR-20260917-GLASS-P2C
 
-最終更新: Consolidated Closure Wave（RF-01〜RF-04）完了時点。
+最終更新: Run Artifact Final-State Reconciliation（本ファイル自身を含むartifact-syncコミット）時点。
 
 ## Identity
 
@@ -11,15 +11,34 @@ Horizon: 4H
 Repository: airesearchagl-art/glass_wind_calc_M
 Working branch: claude/phase2c-generic-manual-mode
 Base SHA: dcb4919b0111ce9d9eea078e058331b6a4088b56
-Current wave: Consolidated Closure Wave（Wave 0〜5完了後のRepair Wave）
-Last successful checkpoint: Wave 5（commit 67e974b1f517cd66efac5e5908f7623c6f4be942）。本Closure Waveのcommitはこれから作成する。
+Current wave: Run Artifact Final-State Reconciliation（Consolidated Closure Wave RF-01〜RF-04完了後の、Run Artifact自身の状態整合のみを行うfollow-up）
 Task Packet ID: LRP-20260917-GLASS-P2C
 revision: 1
 snapshot path: .agent-run/LR-20260917-GLASS-P2C/TASK_PACKET_SNAPSHOT.md
 SHA-256 digest: 74b0855f8c0827fd8edabee4680da6ee276ff158d8771352ecf5349e13aca4b1
 ```
 
-「Current head」はこのRun Artifactを含むCloser Waveのcommit自身であるため、自己参照を避けるために本文中では記載しない。`git log -1`またはPR #4の現在headを正とする。
+## Head contract（自己参照問題の明示的な扱い）
+
+Run Artifact自身を更新するcommitのSHAは、そのcommit自身の内容として確定する前に本文へ固定値で埋め込むことができない（自己参照）。したがって「head」は2種類に分けて扱う。
+
+```yaml
+implementation_checkpoint_head: 612e66133a5af51e16bbe7911f6416ca8ba232f3
+  # Consolidated Closure Wave（RF-01〜RF-03のコード修正 + RF-04のRun Artifact初版）の
+  # 実装チェックポイント。commit済み・push済み・PR #4の当時のheadと一致確認済み。
+  # この値は静的なfactとして固定してよい（この値を含むcommit自身より後に確定した値のため）。
+
+current_artifact_sync_head: RESOLVE_DYNAMICALLY
+  # このRun Artifact Final-State Reconciliationコミット自身のSHA。
+  # 解決方法: `git rev-parse HEAD`（このファイルをcommitした直後）、または
+  # PR #4の現在head（GitHub側で確認）。
+  # 理由: このファイルはartifact-syncコミットに含まれるため、そのコミットの
+  # SHAを同じコミット内の本文へhard-codeすると自己参照になり、コミット前に
+  # 確定できない。したがって「動的に解決するcontract」として明示し、
+  # 値を黙って省略しない。
+```
+
+「Last successful checkpoint」は `implementation_checkpoint_head`（`612e66133a5af51e16bbe7911f6416ca8ba232f3`）である。本Reconciliationコミット自体も成立すれば新たなcheckpointとなるが、そのSHAは上記の理由により本文中に固定値としては書かない。
 
 ## Acceptance Criteria status + evidence
 
@@ -34,8 +53,8 @@ SHA-256 digest: 74b0855f8c0827fd8edabee4680da6ee276ff158d8771352ecf5349e13aca4b1
 | AC-07 | Disclosure boundary | PASS | Closure Wave時点で拡張したprivacy sweep（URL scheme/www/既知プロバイダ名/Windowsパス/UNCパス/Unix絶対パス/長いopaqueトークン）をrepository全体に実施し、実際の非公開識別子の混入なしを確認（ヒットはすべてパターン定義コード・テストfixture・policy説明文のみ）。`getPublicLabel()`境界維持、`みよし案件`ラベル維持。 |
 | AC-08 | UI state clarity | PASS | モードセレクタでMiyoshi preset / Manual・Genericを区別。Miyoshi modeの既存warning（「⚠ 参考計算 — 案件実寸未確認」「⚠ 設計風圧プリセット — 原典照合未完了」）を維持。Manual modeは別のwarningを表示。RF-01でMiyoshi-specific文言のManual mode漏れを閉じた。 |
 | AC-09 | Full regression | PASS | node --test: 91/91 pass（0 fail）。内訳: calc.test.js 23 / project-config.test.js 43 / manual-config.test.js 19 / ui-mode-separation.test.js 6。AC-09が要求する最低限カテゴリ（manual mode pressure selection / no Miyoshi leakage / invalid inputs / evidence silent coercion rejection / verified case validator / invalid verified case rejection / private URL・ID rejection / publicLabel boundary / Miyoshi regression / candidate regression）はすべてカバー。 |
-| AC-10 | Browser / Preview | PASS（Preview READYは前回head時点で確認済み。本Closure Wave commit後に再確認要 — 下記Remaining tasks参照） | Playwright実機（headless Chromium、`file://`）で、Miyoshi mode（プリセット表示・1250×2050警告・wind provenance警告・1756 OK・1500幅で1463 NG）とManual mode（`innerText`ベースの可視ページ全体チェックでMiyoshi-specific文言なし、W1250/H2050/pos1400/neg-1000→designP=1400、モード選択肢名以外に「みよし」が出現しないこと）を確認。 |
-| AC-11 | Draft PR | PASS（Draft維持） | PR #4作成済み・open・draft: true・merged: false。Closure Wave分のpush後、PR本文へRF-01〜RF-04の内容を追記予定。 |
+| AC-10 | Browser / Preview | PASS | Playwright実機（headless Chromium、`file://`）で、Miyoshi mode（プリセット表示・1250×2050警告・wind provenance警告・1756 OK・1500幅で1463 NG）とManual mode（`innerText`ベースの可視ページ全体チェックでMiyoshi-specific文言なし、W1250/H2050/pos1400/neg-1000→designP=1400、モード選択肢名以外に「みよし」が出現しないこと）を確認。Vercel Previewは`implementation_checkpoint_head`（`612e6613...`）で state: success「Deployment has completed」を確認済み。本Reconciliationコミット自身のexact headについても、Full convergence手順内で再確認する（下記参照）。 |
+| AC-11 | Draft PR | PASS（Draft維持） | PR #4作成済み・open・draft: true・merged: false。Closure Wave分のpush後、PR本文へRF-01〜RF-04の内容を追記済み。 |
 
 ## Completed
 
@@ -43,7 +62,11 @@ SHA-256 digest: 74b0855f8c0827fd8edabee4680da6ee276ff158d8771352ecf5349e13aca4b1
 - Consolidated Closure Wave RF-01（Manual mode Miyoshi-specific表示漏れの解消）。
 - Consolidated Closure Wave RF-02（public-safe Evidence boundaryのnested evidenceまでの拡張、共通関数への集約）。
 - Consolidated Closure Wave RF-03（Manual input safety contract: extraFactorの0<value<=1.0境界、positive=negative=0の拒否）。
-- Consolidated Closure Wave RF-04（本Run Artifact一式の復旧）。
+- Consolidated Closure Wave RF-04（Run Artifact一式の初版作成・復旧）。
+- Consolidated Closure Wave実装分のcommit（`612e66133a5af51e16bbe7911f6416ca8ba232f3`）・push・PR #4本文更新・Vercel Preview exact-head確認（すべて完了）。
+- Full convergence（node --test / full diff review / browser smoke ×2 / privacy search / digest verification / git status / PR fresh head verification / Vercel exact-head READY）。
+- Completion Report作成・提示（Consolidated Closure Wave分）。
+- Run Artifact Final-State Reconciliation（本ファイルを含む、stale状態の是正・Manual Evidence schema記述の是正・recovery metadataのpublic-safe化）。
 
 ## Current implementation state
 
@@ -104,7 +127,9 @@ none
 
 DECISIONS.md参照。
 
-## Files changed（Consolidated Closure Wave分）
+## Files changed
+
+### Consolidated Closure Wave実装分（commit `612e66133a5af51e16bbe7911f6416ca8ba232f3`）
 
 ```text
 index.html（RF-01: mode-aware notice分離、overclaim文言の是正）
@@ -113,27 +138,40 @@ project-config/manual.js（RF-03: extraFactor範囲チェック、positive/negat
 tests/project-config.test.js（RF-02関連テスト追加）
 tests/manual-config.test.js（RF-03関連テスト追加）
 tests/ui-mode-separation.test.js（新規、RF-01のsource-level回帰テスト）
-.agent-run/LR-20260917-GLASS-P2C/*（新規、RF-04）
+.agent-run/LR-20260917-GLASS-P2C/*（新規、RF-04初版）
 ```
+
+### Run Artifact Final-State Reconciliation分（本コミット。source codeは変更していない）
+
+```text
+.agent-run/LR-20260917-GLASS-P2C/RUN_STATE.md（RF-A: stale state是正、head自己参照contractの明示）
+.agent-run/LR-20260917-GLASS-P2C/TASK_QUEUE.md（RF-B: actual stateへ同期）
+.agent-run/LR-20260917-GLASS-P2C/EVIDENCE.md（RF-C: Manual schema記述の是正）
+.agent-run/LR-20260917-GLASS-P2C/RUN_MANIFEST.md（RF-D: recovery metadataのpublic-safe化、checkpoint mapping同期）
+.agent-run/LR-20260917-GLASS-P2C/DECISIONS.md（RF-D: recovery metadataのpublic-safe化）
+.agent-run/LR-20260917-GLASS-P2C/QUALITY_DEBT.md（RF-D: recovery metadataのpublic-safe化）
+.agent-run/LR-20260917-GLASS-P2C/TASK_PACKET_SNAPSHOT.md（RF-D: wrapper metadataのpublic-safe化。Task Packet本文exact verbatim部分・digestは無変更）
+```
+
+`calc.js` / `index.html` / `project-config/*.js` / `tests/*.js` は本Reconciliationでは変更していない。
 
 ## Remaining tasks
 
 ```text
-1. 本Closure Wave分の変更をcommit・push（Checkpoint）
-2. PR #4の説明文へRF-01〜RF-04の内容を追記
-3. push後のexact headでVercel Previewが READY であることを再確認
-4. Final convergenceチェックリストの実施
-5. Completion Reportの作成・提示
+1. Independent Focused Review（Human側）
+2. Human Gate（Ready / merge authorization判断）
 ```
+
+Implementation側（コード修正・テスト・commit・push・PR本文更新・Vercel確認・Completion Report）はすべて完了済み。
 
 ## Next action
 
-上記Remaining tasksを順に実施する。
+Independent Focused Review → Human Gate。Ready化・mergeを自動実行しない。
 
 ## Stop conditions status
 
 ```text
-Fresh / Recovery Gate: PASS（Closure Wave開始時点で確認済み。branch/head/base/working tree clean/tracked 0/untracked 0すべて一致）
+Fresh / Recovery Gate: PASS（Closure Wave開始時点、および本Run Artifact Final-State Reconciliation開始時点の両方で確認済み。branch/head（612e66133a5af51e16bbe7911f6416ca8ba232f3）/base/working tree clean/tracked 0/untracked 0すべて一致）
 Hard Check BLOCKED: なし
 ```
 

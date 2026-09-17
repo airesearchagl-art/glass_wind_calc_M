@@ -38,6 +38,28 @@ Campaign全体（Wave 1〜5、Consolidated Closure Wave）を通じて、これ�
 
 いずれも「検証ロジックの強化」であり、Miyoshiの現在値・verificationStatusを変更するものではない。
 
-## Manual / Genericモードのevidence的位置づけ
+## Manual / Genericモードのevidence的位置づけ（RF-C: actual implementationへ修正）
 
-`project-config/manual.js`が生成する値は、`verificationStatus: 'unverified'`・`evidence.level: 'none'`・`source: 'user_input'`で固定されている。本モジュールが独自にEvidenceを収集・主張することはなく、「ツールが検証していない入力値である」ことを明示するためだけにEvidence相当のフィールドを持つ。
+`project-config/manual.js`は、性質の異なる2つのオブジェクトを持つ。両者を混同しないよう明確に分離して記述する。
+
+### Manual calculation input（`config.buildManualDesignInput()`の戻り値）
+
+```text
+source: 'user_input'
+verificationStatus: 'unverified'
+```
+
+実装上、この戻り値オブジェクトに`evidence`プロパティは付与していない（`W`/`H`/`positivePressure`/`negativePressure`/`designP`/`extraFactor`/`source`/`verificationStatus`のみを持つ）。「ツールが検証していない入力値である」ことは`source`/`verificationStatus`の2フィールドで表現しており、Evidence構造体（`level`/`checkedAt`/`publicDescription`/`privateReferenceAvailable`）は計算結果には付与していない。
+
+### Manual config identity（`config.identity`）
+
+```text
+identity.verificationStatus: 'unverified'
+identity.disclosureStatus: 'public'
+identity.evidence.level: 'none'
+identity.evidence.checkedAt: null
+identity.evidence.publicDescription: 'ユーザーがその場で入力した値。特定の案件プリセットではなく、本ツールによる案件原典との照合は行っていない。'
+identity.evidence.privateReferenceAvailable: false
+```
+
+`identity`はモジュール全体としての識別情報オブジェクトであり、`miyoshi.js`の`identity`と対をなす構造として`evidence`を保持している。`buildManualDesignInput()`の戻り値とは別物であり、両者を同一視して「Manual modeの計算結果にevidence.level='none'が付与される」と主張しない。

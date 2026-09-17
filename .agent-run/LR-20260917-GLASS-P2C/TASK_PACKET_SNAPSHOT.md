@@ -8,7 +8,7 @@ task_packet_digest_sha256: 74b0855f8c0827fd8edabee4680da6ee276ff158d8771352ecf53
 repository: airesearchagl-art/glass_wind_calc_M
 working_branch: claude/phase2c-generic-manual-mode
 recovered_at: 2026-09-17 (Consolidated Closure Wave, RF-04)
-recovery_source: このセッション自身のtranscript（/root/.claude/projects/-home-user/51cd8323-8717-5a66-9baa-93e6db2120bf.jsonl、queue-operation/enqueueおよび対応するuserメッセージの2箇所で内容が完全一致することを確認した上で復元）
+recovery_source: execution-session transcript（queue-operation/enqueueレコードと、対応するuserメッセージの2箇所で内容が完全一致することを確認した上で復元）
 ```
 
 ## 復元に関する注記（Recovery note）
@@ -18,7 +18,7 @@ recovery_source: このセッション自身のtranscript（/root/.claude/projec
 
 本ファイルは、Phase 2C Consolidated Closure Wave（RF-04）の指示に基づき、後から透明性をもって復旧（recovery）したものである。
 過去のWave 1〜3チェックポイントの時点で「当時Run Artifactが存在した」と偽って記録することはしていない。
-下記の完全一致するTask Packet本文は、このセッション自身のtranscriptファイル（`/root/.claude/projects/-home-user/51cd8323-8717-5a66-9baa-93e6db2120bf.jsonl`）から復元した。当該transcript中、Phase 2C Long-Run Campaignの起点となった`queue-operation`（`operation: enqueue`）レコードの`content`フィールドと、それに続く`type: user`メッセージの本文は、SHA-256ダイジェストが完全一致するバイト同一のテキストであることを確認済みである。したがって以下は要約・言い換えではなく、Humanから渡されたTask Packetのexact contentである。
+下記の完全一致するTask Packet本文は、execution sessionのtranscriptから復元した。当該transcript中、Phase 2C Long-Run Campaignの起点となった`queue-operation`（`operation: enqueue`）レコードの`content`フィールドと、それに続く`type: user`メッセージの本文は、SHA-256ダイジェストが完全一致するバイト同一のテキストであることを確認済みである。したがって以下は要約・言い換えではなく、Humanから渡されたTask Packetのexact contentである。実行環境固有の絶対パス・session識別子等の内部実装の詳細は、public repositoryのため本ファイルには記載しない。
 
 ## Task Packet 本文（exact, verbatim）
 
