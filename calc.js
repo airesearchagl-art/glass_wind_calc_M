@@ -77,13 +77,39 @@
   }
   var K1_TP = 3.5;
 
+  // 板硝子協会「4辺支持板ガラスの耐風圧強度計算法」表2.2.1に示された、
+  // 強化ガラス k1=3.5 が適用される呼び厚の全範囲（協会表そのもの）。
+  // 19mmはこの表に含まれないため、k1=3.5をそのまま適用できない
+  // （＝出典の適用範囲外）。
+  var K1_TP_SUPPORTED_THICKNESSES_MM = [4, 5, 6, 8, 10, 12, 15];
+
+  function getK1_TP(t) {
+    if (K1_TP_SUPPORTED_THICKNESSES_MM.indexOf(t) === -1) {
+      // 板硝子協会表2.2.1の適用範囲外の呼び厚。k1=3.5を無条件には
+      // 適用せず、NaNを返して「算定不可（P>=designPが常にfalseになる）」
+      // ことを明示する。
+      return NaN;
+    }
+    return K1_TP;
+  }
+
   // 強度種別（strengthType）ごとの k1・候補板厚。
   // Low-E は coating（表面コーティング）属性として独立させ、
   // 強度計算には影響させない。将来、熱強化(HS)等の強度種別を
   // 追加する場合はここにエントリを増やすだけでよい。
+  //
+  // thicknessList は「本ツールが自動推奨する候補厚」であり、
+  // 出典（協会表・告示）が示す全呼び厚の一覧とは区別している：
+  //   - FL: 板硝子協会k1表（getK1_FL）はt>20mmにも対応するが、
+  //     本ツールの自動候補は 5〜19mm に限定している。
+  //   - TP: 板硝子協会表2.2.1の全呼び厚は 4,5,6,8,10,12,15mm
+  //     （K1_TP_SUPPORTED_THICKNESSES_MM）。本ツールの自動候補は
+  //     さらに絞った 5〜15mm とし、19mmは表に無いため除外、
+  //     4mmは外壁ガラス候補としての実用下限（ツール側の制約）として
+  //     除外している。
   var STRENGTH_TYPES = {
     FL: { label: 'FL', k1: getK1_FL, thicknessList: [5, 6, 8, 10, 12, 15, 19] },
-    TP: { label: 'TP', k1: function () { return K1_TP; }, thicknessList: [5, 6, 8, 10, 12, 15, 19] }
+    TP: { label: 'TP', k1: getK1_TP, thicknessList: [5, 6, 8, 10, 12, 15] }
   };
 
   var COATINGS = {
@@ -261,6 +287,8 @@
     UNVERIFIED_DEFAULT_DIMENSIONS_MM: UNVERIFIED_DEFAULT_DIMENSIONS_MM,
     getK1_FL: getK1_FL,
     K1_TP: K1_TP,
+    K1_TP_SUPPORTED_THICKNESSES_MM: K1_TP_SUPPORTED_THICKNESSES_MM,
+    getK1_TP: getK1_TP,
     STRENGTH_TYPES: STRENGTH_TYPES,
     COATINGS: COATINGS,
     GLASS_TYPES: GLASS_TYPES,

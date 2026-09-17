@@ -16,10 +16,14 @@ const {
   calcK2_IGU,
   calcP_IGU,
   getK1_FL,
+  getK1_TP,
   K1_TP,
+  K1_TP_SUPPORTED_THICKNESSES_MM,
   IGU_APPLICABLE_RATIO_MAX,
   POSITIVE_PRESSURE_MIYOSHI_PRESET,
-  UNVERIFIED_DEFAULT_DIMENSIONS_MM
+  UNVERIFIED_DEFAULT_DIMENSIONS_MM,
+  STRENGTH_TYPES,
+  generateCandidates
 } = require('../calc.js');
 
 const AREA = 1.0;
@@ -147,4 +151,55 @@ test('寸法感度・境界回帰: 2階プリセット設計風圧に対しW=125
   const P1500 = calcP_notification(6, getK1_FL(6), 1.0, area1500);
   assert.ok(P1250 >= designP, `W=1250: P=${P1250} は設計風圧${designP}以上のはず（OK）`);
   assert.ok(P1500 < designP, `W=1500: P=${P1500} は設計風圧${designP}未満のはず（NG）`);
+});
+
+/* ============================================================
+   TP（強化ガラス）候補厚の適用範囲テスト
+   板硝子協会「4辺支持板ガラスの耐風圧強度計算法」表2.2.1では、
+   強化ガラス k1=3.5 の呼び厚は 4,5,6,8,10,12,15mm のみで、
+   19mmはこの表に含まれない。TP19を自動候補・OK判定してはならない。
+============================================================ */
+
+test('TP thicknessList に 19 が存在しない', () => {
+  assert.deepEqual(STRENGTH_TYPES.TP.thicknessList, [5, 6, 8, 10, 12, 15]);
+  assert.ok(STRENGTH_TYPES.TP.thicknessList.indexOf(19) === -1);
+});
+
+test('generateCandidates("tp_single", ...) に label === "TP19" が存在しない', () => {
+  // designP を極端に低く設定し、19mmが候補リストに含まれていれば
+  // 必ずOK候補として出現するはずの条件で確認する。
+  const candidates = generateCandidates('tp_single', 1.0, 1, 1.0);
+  const labels = candidates.map(c => c.label);
+  assert.ok(labels.indexOf('TP19') === -1, `候補一覧にTP19が含まれてはならない: ${labels.join(', ')}`);
+});
+
+test('TP15は候補として存在し k1=3.5', () => {
+  const candidates = generateCandidates('tp_single', 1.0, 1, 1.0);
+  const tp15 = candidates.find(c => c.label === 'TP15');
+  assert.ok(tp15, 'TP15が候補に存在するはず');
+  assert.equal(tp15.detail.k1, 3.5);
+});
+
+test('TP候補の板厚下限はツール仕様どおり5mm（4mmは協会表には含まれるが自動候補には含まれない）', () => {
+  const candidates = generateCandidates('tp_single', 1.0, 1, 1.0);
+  const labels = candidates.map(c => c.label);
+  assert.ok(labels.indexOf('TP4') === -1, '本ツールの自動候補にTP4は含まれない仕様');
+  assert.ok(labels.indexOf('TP5') !== -1, 'TP5は自動候補の下限として存在するはず');
+  // 協会表そのもの（K1_TP_SUPPORTED_THICKNESSES_MM）には4mmが含まれ、
+  // getK1_TP(4) は k1=3.5 を返す（ツールの候補範囲とは別軸であることの確認）。
+  assert.ok(K1_TP_SUPPORTED_THICKNESSES_MM.indexOf(4) !== -1);
+  assert.equal(getK1_TP(4), 3.5);
+});
+
+test('getK1_TP: 板硝子協会表2.2.1の範囲外（19mm等）はk1=3.5を無条件に返さない', () => {
+  assert.ok(Number.isNaN(getK1_TP(19)), '19mmはk1=3.5をそのまま適用できないためNaNを返すべき');
+  assert.equal(getK1_TP(15), 3.5);
+  assert.equal(K1_TP, 3.5); // K1_TP定数自体は変更されていないことの確認
+});
+
+test('FL19は従来どおり候補として残る（TP修正がFL候補へ波及していない）', () => {
+  assert.deepEqual(STRENGTH_TYPES.FL.thicknessList, [5, 6, 8, 10, 12, 15, 19]);
+  const candidates = generateCandidates('fl_single', 1.0, 1, 1.0);
+  const labels = candidates.map(c => c.label);
+  assert.ok(labels.indexOf('FL19') !== -1, 'FL19は従来どおり候補に存在するはず');
 });
