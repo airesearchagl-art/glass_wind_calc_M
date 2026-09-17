@@ -404,10 +404,31 @@
       <div class="card-title">入力条件</div>
 
       <div class="form-group" style="margin-bottom:16px;">
+        <label>入力モード</label>
+        <select id="inp-mode">
+          <option value="miyoshi" selected>案件プリセット（みよし案件 / Miyoshi）</option>
+          <option value="manual">手入力 / Generic（Manual）</option>
+        </select>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          「案件プリセット」は特定案件用の固定値（検証状況付き）、「手入力 / Generic」は
+          その場で入力した任意の値です。手入力モードの値は<strong>本ツールが案件原典と照合したものではありません</strong>。
+        </div>
+      </div>
+
+      <div class="mode-field mode-field-miyoshi form-group" style="margin-bottom:16px;">
         <div class="meta-chip" style="display:inline-block;">
           案件プリセット: <span id="preset-name-label">—</span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;" id="preset-identity-note"></div>
+      </div>
+
+      <div class="mode-field mode-field-manual form-group" style="margin-bottom:16px;">
+        <div class="meta-chip" style="display:inline-block;">
+          入力モード: <span id="manual-mode-label">手入力 (Manual / Generic)</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          ⚠ ユーザーがその場で入力した値です。案件原典（構造計算書・製品資料等）との照合は本ツールでは行っていません。
+        </div>
       </div>
 
       <div class="form-group">
@@ -430,7 +451,7 @@
         </div>
       </div>
 
-      <div class="form-group">
+      <div class="mode-field mode-field-miyoshi form-group">
         <label>設置階数</label>
         <select id="inp-floor">
           <option value="1">1階</option>
@@ -440,7 +461,7 @@
         </select>
       </div>
 
-      <div class="form-group">
+      <div class="mode-field mode-field-miyoshi form-group">
         <label>部位</label>
         <select id="inp-zone">
           <option value="general" selected>一般部</option>
@@ -448,6 +469,25 @@
         </select>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;">
           正圧・負圧は<strong>「みよし案件プリセット」</strong>の設計風圧値です。告示から自動算定した値ではありません。他案件に流用する場合は妥当性を個別に確認してください。
+        </div>
+      </div>
+
+      <div class="mode-field mode-field-manual form-group">
+        <label>正圧 positivePressure</label>
+        <div class="input-unit">
+          <input type="number" id="inp-manual-pos" value="1400" step="1">
+          <span class="unit-label">N/m²</span>
+        </div>
+      </div>
+
+      <div class="mode-field mode-field-manual form-group">
+        <label>負圧 negativePressure</label>
+        <div class="input-unit">
+          <input type="number" id="inp-manual-neg" value="-1000" step="1">
+          <span class="unit-label">N/m²</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          設計風圧は正圧・負圧のうち絶対値が大きい方を採用します（符号は自動判定）。
         </div>
       </div>
 
@@ -497,13 +537,36 @@
 
 <script src="calc.js"></script>
 <script src="project-config/miyoshi.js"></script>
+<script src="project-config/manual.js"></script>
 <script>
 /* ============================================================
    計算ロジックは calc.js（GlassCalc、案件非依存の汎用計算コア）に、
    案件固有プリセットは project-config/miyoshi.js
-   （MiyoshiProjectConfig）に、それぞれ分離済み（Phase 2A）。
-   ここでは UI（入力取得・DOM描画・両モジュールの橋渡し）のみを扱う。
+   （MiyoshiProjectConfig）に、「手入力 / Generic」入力契約は
+   project-config/manual.js（ManualProjectConfig）に、それぞれ
+   分離済み（Phase 2A / Phase 2C）。
+   ここでは UI（入力取得・モード切替・DOM描画・各モジュールの橋渡し）
+   のみを扱う。manual.jsはmiyoshi.jsに一切依存しないため、Manual
+   モードでみよし案件プリセットの値が暗黙適用されることはない。
 ============================================================ */
+
+/* ============================================================
+   入力モード切替
+============================================================ */
+
+function getInputMode() {
+  return document.getElementById('inp-mode').value;
+}
+
+function applyModeVisibility() {
+  var mode = getInputMode();
+  document.querySelectorAll('.mode-field-miyoshi').forEach(function (el) {
+    el.style.display = mode === 'miyoshi' ? '' : 'none';
+  });
+  document.querySelectorAll('.mode-field-manual').forEach(function (el) {
+    el.style.display = mode === 'manual' ? '' : 'none';
+  });
+}
 
 /* ============================================================
    HTML レンダリング
@@ -515,7 +578,7 @@ function fmt(n, d = 0) {
 
 function renderResults(result) {
   const {
-    W, H, area, floorKey, zoneKey,
+    mode, W, H, area, floorKey, zoneKey,
     posP, negP, designP, windStatus,
     extraFactor, typeKey, typeLabel,
     best, okCandidates, ngCandidates, outOfScopeCandidates,
@@ -533,15 +596,23 @@ function renderResults(result) {
   const bestLabel = best ? best.label : '（告示適用範囲内で成立する構成なし）';
   const bestP     = best ? fmt(best.P, 0) : '—';
 
-  // 未検証既定値（UNVERIFIED PROJECT DEFAULT）警告
+  // 未検証既定値（UNVERIFIED PROJECT DEFAULT）警告（案件プリセットモードのみ）。
   // 1250×2050mm は本ツールの初期値として導入されただけで、案件確定寸法として
   // 検証された記録がない。この値のまま計算した結果を「案件適合OK」と
   // 誤解させないよう、明示的な状態表示を行う。
-  const unverifiedHtml = isUnverifiedDefault ? `
+  //
+  // 手入力 / Generic モードは常にユーザー入力値（source: 'user_input',
+  // verificationStatus: 'unverified'）であり、案件プリセットの
+  // 「未検証な既定値」警告とは別の注記を表示する（AC-03 / AC-08）。
+  const unverifiedHtml = mode === 'manual' ? `
+      <div class="notice" style="margin-bottom:14px;border-color:rgba(245,158,11,0.4);">
+        <strong style="color:var(--warn);">⚠ ユーザー入力値 — 案件原典との照合は本ツールでは未実施</strong><br>
+        W/H/正圧/負圧はすべてその場で入力した値（source: user_input）です。本ツールはこれらの値を案件図・構造計算書等の原典と照合していません。「案件適合OK」の根拠として扱わず、必要に応じてメーカー検討書または専門技術者による確認を行ってください。
+      </div>` : (isUnverifiedDefault ? `
       <div class="notice" style="margin-bottom:14px;border-color:rgba(245,158,11,0.4);">
         <strong style="color:var(--warn);">⚠ 参考計算 — 案件実寸未確認</strong><br>
         入力寸法 ${W}×${H}mm は本ツールの<strong>未検証な既定値（UNVERIFIED PROJECT DEFAULT）</strong>です。特定案件のガラス確定寸法として検証されたものではありません。この判定結果を「案件適合OK」の根拠として扱わず、案件図・メーカー資料の実寸を確認のうえ再計算してください。
-      </div>` : '';
+      </div>` : '');
 
   // 結論カード
   const conclusionHtml = `
@@ -566,13 +637,24 @@ function renderResults(result) {
     ? `正圧 ${fmt(posP, 0)} ≧ |負圧| ${fmt(negP, 0)}`
     : `|負圧| ${fmt(negP, 0)} ＞ 正圧 ${fmt(posP, 0)}`;
 
-  // 設計風圧プリセットの検証状況警告（Task 4）。
+  // 設計風圧プリセットの検証状況警告（Task 4、案件プリセットモードのみ）。
   // V0=34m/s・地表面粗度区分IIIとの数値整合は確認済みだが、元の構造計算書・
   // 各階評価高さZとの厳密な対応付けは未確認（wind.status !== 'verified'）。
   // 既存の「告示から自動算定した値ではない」という警告を弱めるものではなく、
   // 追加の注記として表示する。
-  const windStatusWarningHtml = windStatus !== 'verified' ? `
+  const windStatusWarningHtml = (mode === 'miyoshi' && windStatus !== 'verified') ? `
       <div class="calc-line" style="margin-top:4px;color:var(--warn);">⚠ 設計風圧プリセット — 原典照合未完了（V0=34m/s・地表面粗度区分IIIとの数値整合は確認済みだが、元の構造計算書・各階評価高さZとの厳密な対応付けは未確認。verificationStatus: ${windStatus}）</div>` : '';
+
+  // 入力値ブロックの階数/部位行は案件プリセットモードにのみ存在する
+  // （手入力モードには floor/zone の概念がない）。
+  const floorZoneLinesHtml = mode === 'miyoshi' ? `
+          <div class="calc-line">階数 = <span class="val">${floorLabel}</span></div>
+          <div class="calc-line">部位 = <span class="val">${zoneLabel}</span></div>` : '';
+
+  const windSelectionTitle = mode === 'miyoshi' ? '設計風圧の選定（みよし案件プリセット）' : '設計風圧の選定（手入力値）';
+  const windSelectionNote = mode === 'miyoshi'
+    ? '※ 正圧・負圧は告示から自動算定した値ではなく、みよし案件プリセット値です。'
+    : '※ 正圧・負圧はユーザーが入力した値です（source: user_input）。案件原典との照合は本ツールでは行っていません。';
 
   const windHtml = `
     <div class="card">
@@ -582,19 +664,17 @@ function renderResults(result) {
           <div class="calc-block-title">入力値</div>
           <div class="calc-line">幅 W（見付寸法） = <span class="val">${W} mm</span></div>
           <div class="calc-line">高さ H（見付寸法） = <span class="val">${H} mm</span></div>
-          <div class="calc-line">面積 A = <span class="val">${fmt(area, 6)} m²</span></div>
-          <div class="calc-line">階数 = <span class="val">${floorLabel}</span></div>
-          <div class="calc-line">部位 = <span class="val">${zoneLabel}</span></div>
+          <div class="calc-line">面積 A = <span class="val">${fmt(area, 6)} m²</span></div>${floorZoneLinesHtml}
           <div class="calc-line">構成 = <span class="val">${typeLabel}</span></div>
         </div>
         <div class="calc-block">
-          <div class="calc-block-title">設計風圧の選定（みよし案件プリセット）</div>
+          <div class="calc-block-title">${windSelectionTitle}</div>
           <div class="calc-line">正圧 = <span class="val">${fmt(posP, 0)} N/m²</span></div>
           <div class="calc-line">負圧（絶対値）= <span class="val">${fmt(negP, 0)} N/m²</span></div>
           <hr class="sep-line">
           <div class="calc-line">${maxSide}</div>
           <div class="calc-line">→ 設計風圧 = <span class="val hl">${fmt(designP, 0)} N/m²</span></div>
-          <div class="calc-line" style="margin-top:6px;color:var(--text3);">※ 正圧・負圧は告示から自動算定した値ではなく、みよし案件プリセット値です。</div>
+          <div class="calc-line" style="margin-top:6px;color:var(--text3);">${windSelectionNote}</div>
           ${windStatusWarningHtml}
         </div>
       </div>
@@ -727,11 +807,10 @@ function renderResults(result) {
 ============================================================ */
 
 function runCalc() {
-  // 入力値取得
+  // 入力値取得（モード非依存の共通項目）
+  const mode        = getInputMode(); // 'miyoshi' | 'manual'
   const W           = parseFloat(document.getElementById('inp-W').value);
   const H           = parseFloat(document.getElementById('inp-H').value);
-  const floorKey    = document.getElementById('inp-floor').value;
-  const zoneKey     = document.getElementById('inp-zone').value;
   const typeKey     = document.getElementById('inp-type').value;
   const extraFactor = parseFloat(document.getElementById('inp-coeff').value);
 
@@ -744,19 +823,52 @@ function runCalc() {
   // 面積計算（m²）：W・Hはガラス見付寸法
   const area = (W * H) / 1_000_000;
 
-  // 案件プリセット（project-config/miyoshi.js）から寸法既定値・検証状況を取得。
-  // calc.js側の同名定数は非推奨の後方互換複製であり、UIはここでは参照しない。
-  const dflt = MiyoshiProjectConfig.getDefaultDimensionsMM();
-  const isUnverifiedDefault =
-    (W === dflt.W && H === dflt.H) && MiyoshiProjectConfig.dimensions.status !== 'verified';
+  let floorKey = null, zoneKey = null, posP, negP, designP, windStatus, isUnverifiedDefault;
 
-  // 設計風圧の決定（案件プリセット。告示から自動算定した値ではない）
-  const posP       = MiyoshiProjectConfig.getPositivePressure(floorKey);
-  const negP       = MiyoshiProjectConfig.getNegativePressure(zoneKey);
-  const designP    = Math.max(posP, negP);
-  const windStatus = MiyoshiProjectConfig.wind.status; // 'verified' | 'partially_verified' | 'unverified'
+  if (mode === 'manual') {
+    // 手入力 / Generic モード（project-config/manual.js、Phase 2C）。
+    // MiyoshiProjectConfigの値は一切参照しない（AC-02: 暗黙適用の防止）。
+    const rawPos = parseFloat(document.getElementById('inp-manual-pos').value);
+    const rawNeg = parseFloat(document.getElementById('inp-manual-neg').value);
 
-  // 候補生成・OK / NG / 適用範囲外 に分離（汎用計算コア：calc.js）
+    let manualInput;
+    try {
+      manualInput = ManualProjectConfig.buildManualDesignInput({
+        W: W, H: H, positivePressure: rawPos, negativePressure: rawNeg, extraFactor: extraFactor
+      });
+    } catch (e) {
+      alert('入力値が不正です: ' + e.message);
+      return;
+    }
+
+    // 表示用にposP/negPは正圧・負圧それぞれの絶対値として揃える
+    // （案件プリセットモードの getPositivePressure/getNegativePressure と
+    // 同じ「正の大きさ」表現に統一し、renderResults()の表示ロジックを
+    // モード間で共用する）。
+    posP         = Math.abs(manualInput.positivePressure);
+    negP         = Math.abs(manualInput.negativePressure);
+    designP      = manualInput.designP;
+    windStatus   = manualInput.verificationStatus; // 常に 'unverified'（AC-03）
+    isUnverifiedDefault = false; // 手入力モードの注記はunverifiedHtml側でmode別に分岐済み
+  } else {
+    // 案件プリセットモード（project-config/miyoshi.js、Phase 2A〜）
+    floorKey = document.getElementById('inp-floor').value;
+    zoneKey  = document.getElementById('inp-zone').value;
+
+    // 案件プリセットから寸法既定値・検証状況を取得。
+    // calc.js側の同名定数は非推奨の後方互換複製であり、UIはここでは参照しない。
+    const dflt = MiyoshiProjectConfig.getDefaultDimensionsMM();
+    isUnverifiedDefault =
+      (W === dflt.W && H === dflt.H) && MiyoshiProjectConfig.dimensions.status !== 'verified';
+
+    // 設計風圧の決定（案件プリセット。告示から自動算定した値ではない）
+    posP       = MiyoshiProjectConfig.getPositivePressure(floorKey);
+    negP       = MiyoshiProjectConfig.getNegativePressure(zoneKey);
+    designP    = Math.max(posP, negP);
+    windStatus = MiyoshiProjectConfig.wind.status; // 'verified' | 'partially_verified' | 'unverified'
+  }
+
+  // 候補生成・OK / NG / 適用範囲外 に分離（汎用計算コア：calc.js、モード非依存）
   const allCandidates = GlassCalc.generateCandidates(typeKey, area, designP, extraFactor);
   const { okCandidates, ngCandidates, outOfScopeCandidates } = GlassCalc.splitCandidates(allCandidates);
 
@@ -765,6 +877,7 @@ function runCalc() {
 
   // 結果描画
   renderResults({
+    mode,
     W, H, area,
     floorKey, zoneKey,
     posP, negP, designP, windStatus,
@@ -811,9 +924,21 @@ window.addEventListener('DOMContentLoaded', function() {
 
   // 入力欄の既定値は project-config を正として反映する
   // （HTML属性のvalueは、JS無効時のフォールバック表示用に残している）。
+  // この既定値は「モード切替前の初期表示用サンプル値」であり、Manual
+  // モードに切り替えても、みよし案件の正圧・負圧プリセットが暗黙適用
+  // されることはない（floor/zone選択に基づく getPositivePressure() /
+  // getNegativePressure() は案件プリセットモードのrunCalc()分岐でしか
+  // 呼び出されない）。
   var dflt = cfg.getDefaultDimensionsMM();
   document.getElementById('inp-W').value = dflt.W;
   document.getElementById('inp-H').value = dflt.H;
+
+  // モード切替UIの初期化（Phase 2C, AC-08）
+  document.getElementById('inp-mode').addEventListener('change', function () {
+    applyModeVisibility();
+    runCalc();
+  });
+  applyModeVisibility();
 
   runCalc();
 });
