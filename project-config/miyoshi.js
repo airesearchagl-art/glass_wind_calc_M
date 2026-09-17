@@ -86,6 +86,45 @@
  *   - `verifiedCases`（下記）は、将来ガラス実寸・風圧根拠の両方が確認できた
  *     案件ケースを追加するための配列。現時点では実寸が未確認のため、
  *     架空のverified caseを作らず空配列のまま維持する。
+ *
+ * Phase 2C（2026-09-17）Evidence contract hardening:
+ *   - `makeEvidence()` はfactoryの入口で level・checkedAt を検証するように
+ *     変更した。従来の `checkedAt: checkedAt || null` は ''・false・0 等の
+ *     不正な入力を無言でnullへ丸め込んでいたため、null/undefined以外の
+ *     不正なcheckedAtは例外を投げるようにした（silent coercionの排除）。
+ *   - `validateVerifiedCase()` を新設。`verifiedCases` へ将来ケースを追加
+ *     する際、必須フィールド（caseId/floor/zone/widthMm/heightMm/
+ *     glassType/designPressure/evidence/publicEvidenceDescription）と、
+ *     pane W・pane H・pressureそれぞれのevidenceが 'verified'
+ *     （level==='primary' かつ妥当なcheckedAt）であることを
+ *     assertEvidenceConsistency() 経由で強制する。公開説明文への内部限定
+ *     識別子混入も拒否する。このvalidatorはテスト・将来の追加作業向けで
+ *     あり、本Campaignでは `verifiedCases` へ実ケースを追加していない。
+ *
+ * Phase 2C Consolidated Closure Wave（2026-09-17）RF-02:
+ *   - public-safe boundaryを、`validateVerifiedCase()` のtop-level
+ *     `publicEvidenceDescription` だけでなく、nested evidence
+ *     （`evidence.widthEvidence.publicDescription` /
+ *     `heightEvidence.publicDescription` / `pressureEvidence.publicDescription`）
+ *     にまで拡張した。重複したregexではなく、共通関数
+ *     `assertPublicSafeEvidenceText(text, label)` へ集約し、
+ *     `makeEvidence()` の入口（＝すべてのevidence構築経路）と
+ *     `validateVerifiedCase()` の双方から呼び出す。
+ *   - `assertPublicSafeEvidenceText()` が検出するのは、既知のURLスキーム
+ *     （http/https/file等）・`www.`・既知の非公開プロバイダ名
+ *     （Drive/Notion/SharePoint/Dropbox）・Windows絶対パス（`C:\`）・
+ *     UNCパス（`\\server\share`）・Unix系ホームディレクトリ/絶対パス
+ *     （`~/`・`/Users/`・`/home/`・`/mnt/`）・長いopaqueトークン
+ *     （28文字以上の英数字/_/-の連続）という**既知パターンのみ**である。
+ *     正式案件名・機密名称など、パターンマッチでは検出できない秘匿情報は
+ *     このガードでは検出できない。**「すべての秘密文字列を自動判定できる」
+ *     という主張はしない。** 正式案件名等のrepository-wide reviewは、
+ *     引き続き人（Human review）が担う。
+ *   - `makeEvidence()` は `publicDescription` に対しても
+ *     `assertPublicSafeEvidenceText()` を適用し、`privateReferenceAvailable`
+ *     を厳密なboolean型のみ許容するよう変更した（`!!privateReferenceAvailable`
+ *     という従来のsilent coercionでは、`"false"`・`1`・`0`・`{}`のような
+ *     非boolean値も黙ってtruthy/falsyに変換されてしまっていた）。
  */
 (function (global, factory) {
   var mod = factory();
@@ -147,18 +186,78 @@
     return true;
   }
 
+  // public-safe boundary（RF-02）: publicDescription（および将来
+  // publicEvidenceDescription等）へ渡してよいテキストかどうかを検証する
+  // 共通ガード。既知のURL/パス/プロバイダ/opaqueトークンのパターンに
+  // マッチした場合のみ拒否する「既知パターンの自動検出」であり、
+  // 正式案件名・機密名称等の非パターン文字列までは検出できない
+  // （repository-wide review・Human reviewが別途必要）。
+  var PUBLIC_UNSAFE_TEXT_PATTERNS = [
+    { name: 'url-scheme', pattern: /\b[a-z][a-z0-9+.-]*:\/\//i },
+    { name: 'www', pattern: /\bwww\./i },
+    { name: 'known-private-provider', pattern: /drive\.google|docs\.google|notion\.(so|com)|sharepoint|dropbox/i },
+    { name: 'windows-absolute-path', pattern: /[A-Za-z]:\\/ },
+    { name: 'unc-path', pattern: /\\\\[^\\\s]+\\[^\\\s]*/ },
+    { name: 'unix-home-or-absolute-path', pattern: /(^|\s)(~\/|\/Users\/|\/home\/|\/mnt\/)/ },
+    { name: 'opaque-long-token', pattern: /\b[A-Za-z0-9_-]{28,}\b/ }
+  ];
+
+  function assertPublicSafeEvidenceText(text, label) {
+    if (typeof text !== 'string' || !text) {
+      throw new Error((label || 'publicDescription') + ' must be a non-empty string');
+    }
+    for (var i = 0; i < PUBLIC_UNSAFE_TEXT_PATTERNS.length; i++) {
+      var entry = PUBLIC_UNSAFE_TEXT_PATTERNS[i];
+      if (entry.pattern.test(text)) {
+        throw new Error(
+          (label || 'publicDescription') + ' must not contain private URLs/paths/identifiers (matched known-unsafe pattern: ' + entry.name + ')'
+        );
+      }
+    }
+    return true;
+  }
+
   // Evidence記述オブジェクトを組み立てるヘルパー。
   // publicDescription / privateReferenceAvailable のみを保持し、
   // 実際のURL・ファイルID・ファイル名は一切保持しない設計とする
   // （呼び出し側がそれらを渡すこと自体を想定していない）。
-  // level・checkedAtの厳密な契約検証は assertEvidenceConsistency() 側で
-  // 一元的に行う（verifiedValue()・identity構築のいずれも必ずこれを通る）。
+  //
+  // Phase 2C AC-05（Evidence factory hardening）: 従来は
+  // `checkedAt: checkedAt || null` という実装で、''・false・0・undefined等の
+  // 不正な入力を静かに（例外を投げずに）null へ丸め込んでいた。これは
+  // 「呼び出し側の実装ミスでchecked日付を渡し忘れた」ケースと「意図的に
+  // 未確認を表すnull/undefinedを渡した」ケースを区別できず、契約違反を
+  // 検知できないまま通過させてしまう危険があった。
+  // ここでは level・checkedAt の両方を factory の入口で検証し、
+  // null/undefined 以外の不正な checkedAt は即座に例外を投げる
+  // （assertEvidenceConsistency() へ委ねる事後検証だけに依存しない）。
+  //
+  // Phase 2C Closure Wave RF-02: publicDescription にも
+  // assertPublicSafeEvidenceText() を適用し（public-safe boundaryを
+  // factory入口まで前倒し）、privateReferenceAvailable は
+  // `!!privateReferenceAvailable` という従来のsilent boolean coercionを
+  // やめ、厳密なboolean型のみ許容するようにした。
   function makeEvidence(level, checkedAt, publicDescription, privateReferenceAvailable) {
+    if (EVIDENCE_LEVELS.indexOf(level) === -1) {
+      throw new Error('makeEvidence(): invalid evidence level: ' + JSON.stringify(level) + ' (must be one of ' + EVIDENCE_LEVELS.join(', ') + ')');
+    }
+    var normalizedCheckedAt = (checkedAt === undefined || checkedAt === null) ? null : checkedAt;
+    if (!isValidCheckedAt(normalizedCheckedAt)) {
+      throw new Error(
+        'makeEvidence(): checkedAt must be null/undefined or a valid "YYYY-MM-DD" date string, got: ' + JSON.stringify(checkedAt)
+      );
+    }
+    assertPublicSafeEvidenceText(publicDescription, 'makeEvidence(): publicDescription');
+    if (typeof privateReferenceAvailable !== 'boolean') {
+      throw new Error(
+        'makeEvidence(): privateReferenceAvailable must be a boolean (true/false), got: ' + JSON.stringify(privateReferenceAvailable)
+      );
+    }
     return {
       level: level,
-      checkedAt: checkedAt || null,
+      checkedAt: normalizedCheckedAt,
       publicDescription: publicDescription,
-      privateReferenceAvailable: !!privateReferenceAvailable
+      privateReferenceAvailable: privateReferenceAvailable
     };
   }
 
@@ -457,6 +556,92 @@
 
     return violations;
   };
+
+  // ============================================================
+  // Verified project case validator（Phase 2C, AC-06）
+  //
+  // `verifiedCases` は現時点で空配列のまま維持する（架空のケースを追加
+  // しない）。このvalidatorは、将来ガラス1枚の実見付W/Hと設計風圧の根拠
+  // （元計算書・評価高さZ）の両方が確認できたケースを安全に追加できる
+  // よう、必須フィールドと厳格な条件をhard checkするためのものであり、
+  // 今回のCampaignで実際のケースをverifiedCasesへ追加するものではない。
+  // ============================================================
+
+  var VERIFIED_CASE_REQUIRED_FIELDS = [
+    'caseId', 'floor', 'zone', 'widthMm', 'heightMm',
+    'glassType', 'designPressure', 'evidence', 'publicEvidenceDescription'
+  ];
+  var VERIFIED_CASE_VALID_FLOORS = ['1', '2', '3', 'R'];
+  var VERIFIED_CASE_VALID_ZONES = ['general', 'corner'];
+
+  // verified caseの妥当性を検証する。違反があれば例外を投げる（true以外は
+  // 返さない）。呼び出し側は try/catch するか、事前に妥当性が既知の
+  // ケースにのみ使うこと。
+  function validateVerifiedCase(caseObj) {
+    if (!caseObj || typeof caseObj !== 'object') {
+      throw new Error('verified case must be an object');
+    }
+    for (var i = 0; i < VERIFIED_CASE_REQUIRED_FIELDS.length; i++) {
+      var field = VERIFIED_CASE_REQUIRED_FIELDS[i];
+      if (!(field in caseObj)) {
+        throw new Error('verified case is missing required field: ' + field);
+      }
+    }
+    if (typeof caseObj.caseId !== 'string' || !caseObj.caseId) {
+      throw new Error('verified case caseId must be a non-empty string');
+    }
+    if (VERIFIED_CASE_VALID_FLOORS.indexOf(caseObj.floor) === -1) {
+      throw new Error('verified case floor must be one of ' + VERIFIED_CASE_VALID_FLOORS.join(', '));
+    }
+    if (VERIFIED_CASE_VALID_ZONES.indexOf(caseObj.zone) === -1) {
+      throw new Error('verified case zone must be one of ' + VERIFIED_CASE_VALID_ZONES.join(', '));
+    }
+    if (typeof caseObj.widthMm !== 'number' || !isFinite(caseObj.widthMm) || caseObj.widthMm <= 0) {
+      throw new Error('verified case widthMm must be a positive finite number');
+    }
+    if (typeof caseObj.heightMm !== 'number' || !isFinite(caseObj.heightMm) || caseObj.heightMm <= 0) {
+      throw new Error('verified case heightMm must be a positive finite number');
+    }
+    if (typeof caseObj.glassType !== 'string' || !caseObj.glassType) {
+      throw new Error('verified case glassType must be a non-empty string');
+    }
+    if (typeof caseObj.designPressure !== 'number' || !isFinite(caseObj.designPressure) || caseObj.designPressure <= 0) {
+      throw new Error('verified case designPressure must be a positive finite number');
+    }
+    // RF-02: top-levelのpublicEvidenceDescriptionは共通ガード
+    // assertPublicSafeEvidenceText() で検証する（重複regexを廃止）。
+    assertPublicSafeEvidenceText(caseObj.publicEvidenceDescription, 'verified case publicEvidenceDescription');
+
+    var evidence = caseObj.evidence;
+    if (!evidence || typeof evidence !== 'object') {
+      throw new Error('verified case evidence must be an object with widthEvidence/heightEvidence/pressureEvidence');
+    }
+    // pane W / pane H / pressure のそれぞれについて、
+    // 「primary evidence かつ妥当なcheckedAt」というhard conditionを、
+    // 既存のassertEvidenceConsistency('verified', ...) を再利用して強制する
+    // （検証ロジックを重複させない）。
+    // RF-02: 各evidenceのpublicDescriptionにもpublic-safe boundaryを適用する
+    // （top-levelのpublicEvidenceDescriptionだけでなく、nested evidenceの
+    // publicDescriptionまで閉じる）。makeEvidence()経由で構築されたevidence
+    // であればここでの再検証は冗長になるが、caseObjのevidenceがmakeEvidence()
+    // を経由せず直接組み立てられる可能性を考慮し、validateVerifiedCase()側
+    // でも独立して強制する（defense in depth）。
+    ['widthEvidence', 'heightEvidence', 'pressureEvidence'].forEach(function (key) {
+      var entryEvidence = evidence[key];
+      assertEvidenceConsistency('verified', entryEvidence, 'verifiedCase.' + caseObj.caseId + '.' + key);
+      assertPublicSafeEvidenceText(
+        entryEvidence && entryEvidence.publicDescription,
+        'verifiedCase.' + caseObj.caseId + '.' + key + '.publicDescription'
+      );
+    });
+
+    return true;
+  }
+
+  config.makeEvidence = makeEvidence;
+  config.isValidCheckedAt = isValidCheckedAt;
+  config.validateVerifiedCase = validateVerifiedCase;
+  config.assertPublicSafeEvidenceText = assertPublicSafeEvidenceText;
 
   return config;
 });
