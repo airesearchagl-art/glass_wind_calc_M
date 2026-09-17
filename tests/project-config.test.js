@@ -6,8 +6,19 @@
  * - calc.js に残る非推奨(deprecated)の後方互換定数と、
  *   project-config/miyoshi.js の値が完全に一致することを確認する
  *   （config分離が値のズレを生んでいないことの保証）。
- * - dimensions/wind の verificationStatus が誤って "verified" に
- *   昇格していないことを確認する。
+ * - 各値のverificationStatusが実態どおりであることを確認する
+ *   （2026-09-17 Provenance Required Fix時点）：
+ *     - identity: "verified"（社内資料で確認済み。ただし公開repoでは
+ *       disclosureStatus="redacted"とし、identity.publicLabelのみ開示）
+ *     - wind.V0 / wind.roughnessCategory: "verified"
+ *       （社内基本設計資料の外構風荷重条件で直接確認済み）
+ *     - wind.status（positivePressureByFloor / negativePressureByZoneの
+ *       各値を含む）: "partially_verified"のまま
+ *       （V0/roughness自体の確認と、階別ガラス風圧プリセット値の元となる
+ *       外装材/ガラス構造計算書・各階評価高さZとの対応付けの確認は別軸）
+ *     - dimensions（defaultW / defaultH）: "unverified"のまま
+ *   いずれも誤って想定より高いverificationStatusへ昇格・降格していないこと、
+ *   および内部限定識別子（Drive/Notion等のURL）を含まないことを確認する。
  * - 代表ケース（FL6, W=1250/1500, H=2050, 2F, general, extraFactor=1.00）で、
  *   project-configの値をcalc.jsの汎用計算コアに渡した結果が、
  *   Phase 1時点の既知の値と完全に一致すること（config分離前後で
@@ -49,6 +60,21 @@ test('project-config: identity — 社内確認済み状態を表現でき、pub
   // sourceDescription等に内部限定識別子（Drive URL/ファイルID等）を含まないこと
   const serialized = JSON.stringify(identity);
   assert.doesNotMatch(serialized, /drive\.google|docs\.google|notion\.(so|com)|sharepoint|dropbox\.com/i);
+});
+
+test('project-config: getPublicLabel() — disclosure-safeなidentity.publicLabelのみを返す（fail-closed）', () => {
+  assert.equal(MiyoshiProjectConfig.getPublicLabel(), 'みよし案件');
+  assert.equal(MiyoshiProjectConfig.getPublicLabel(), MiyoshiProjectConfig.identity.publicLabel);
+
+  // publicLabelが欠落している場合、projectName等へフォールバックせず
+  // 例外を投げること（公開UIの表示元をfail-closedにする境界の確認）。
+  const saved = MiyoshiProjectConfig.identity.publicLabel;
+  delete MiyoshiProjectConfig.identity.publicLabel;
+  try {
+    assert.throws(() => MiyoshiProjectConfig.getPublicLabel());
+  } finally {
+    MiyoshiProjectConfig.identity.publicLabel = saved;
+  }
 });
 
 test('project-config: wind.V0 — 社内基本設計資料で直接確認済み（verified）、checkedAt=2026-09-17', () => {

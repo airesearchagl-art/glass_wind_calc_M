@@ -90,11 +90,12 @@
     },
 
     dimensions: {
-      // W=1250mmは旧アプリの初期値のままで、社内資料上もガラス1枚の見付幅W
-      // と直接対応する記録は確認できていない。
+      // W=1250mmは旧アプリの初期値のまま。今回確認できた社内資料の範囲では、
+      // ガラス1枚の見付幅Wと直接対応付けられる根拠は確認できていない
+      // （社内資料全体に存在しないことまで確認・証明したものではない）。
       defaultW: verifiedValue(
         1250, 'mm', 'unverified',
-        'リポジトリ初回リリースコミット（feat: 初版リリース）でindex.htmlの初期値として導入されたのみで、算定根拠の記載なし。社内資料上もガラス1枚の見付幅Wと直接対応する記録は確認できていない。',
+        'リポジトリ初回リリースコミット（feat: 初版リリース）でindex.htmlの初期値として導入されたのみで、算定根拠の記載なし。今回確認できた社内資料の範囲では、ガラス1枚の見付幅Wと直接対応付けられる根拠は確認できていない（社内資料全体に存在しないことまでは確認・証明していない）。',
         null, null
       ),
       // H=2050mmは旧アプリの初期値。社内の見積資料にはACW（アルミカーテン
@@ -108,7 +109,7 @@
         null, null
       ),
       status: 'unverified',
-      source: 'リポジトリ初回リリースコミットのindex.html初期値（UNVERIFIED PROJECT DEFAULT）。Wは対応する社内資料の記録なし。HはACW全体寸法として類似値の記録候補があるのみ。',
+      source: 'リポジトリ初回リリースコミットのindex.html初期値（UNVERIFIED PROJECT DEFAULT）。今回確認できた社内資料の範囲では、Wと直接対応付けられる根拠は確認できていない。HはACW全体寸法として類似値の記録候補があるのみ。',
       note: '特定案件のガラス1枚の確定見付寸法として検証された値ではない。ACW全体寸法とガラス1枚の見付寸法は別物であり、両者の対応関係は未確認。pane実寸が案件図・メーカー資料で確認できるまで、UI上は常に「参考計算 — 案件実寸未確認」として扱い、verifiedへ昇格させないこと。'
     },
 
@@ -162,6 +163,18 @@
   // 全体としての検証ステータスが 'verified' かどうか（両方とも 'verified' の場合のみtrue）。
   config.isFullyVerified = function () {
     return config.dimensions.status === 'verified' && config.wind.status === 'verified';
+  };
+  // 公開UI・公開ドキュメントが表示してよい案件ラベルの唯一の取得口
+  // （disclosure-safeなフィールドのみを経由させる境界）。
+  // projectName（社内呼称としての後方互換フィールド）にはフォールバック
+  // しない。identity.publicLabel が未設定の場合は、公開表示側の実装が
+  // 誤って非公開情報（例: 将来 projectName に内部正式名称が入った場合の
+  // その値）を表示してしまわないよう、ここでfail-closedにエラーとする。
+  config.getPublicLabel = function () {
+    if (!config.identity || !config.identity.publicLabel) {
+      throw new Error('Public project label is required.');
+    }
+    return config.identity.publicLabel;
   };
 
   return config;

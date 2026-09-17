@@ -794,13 +794,14 @@ window.addEventListener('DOMContentLoaded', function() {
 
   // 案件プリセット名の表示（Task 4）。
   // 案件識別情報は社内資料で確認済み（cfg.identity.verificationStatus）だが、
-  // 本リポジトリは公開のため cfg.identity.publicLabel のみを表示し、
-  // 固有名詞・社内資料参照は表示しない（disclosureStatus: 'redacted'）。
-  // 識別情報自体が未確認（verificationStatus !== 'verified'）の場合のみ、
-  // その旨の注記を表示する。
+  // 本リポジトリは公開のため、表示元は必ず disclosure-safe な
+  // cfg.getPublicLabel()（= cfg.identity.publicLabel）経由とする。
+  // cfg.projectName（社内呼称としての後方互換フィールド）は公開UIの
+  // 表示元として使用しない。将来 projectName に内部正式名称が入っても、
+  // このUIコードが誤ってそれを表示することはない（fail-closed）。
   var nameLabel = document.getElementById('preset-name-label');
   if (nameLabel) {
-    nameLabel.textContent = cfg.projectName + '（projectId: ' + cfg.projectId + '）';
+    nameLabel.textContent = cfg.getPublicLabel() + '（projectId: ' + cfg.projectId + '）';
   }
   var identityNote = document.getElementById('preset-identity-note');
   if (identityNote && cfg.identity.verificationStatus !== 'verified') {
