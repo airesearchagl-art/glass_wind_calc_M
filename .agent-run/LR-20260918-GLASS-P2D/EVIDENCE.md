@@ -51,3 +51,42 @@ baseline   : npm test → 91 pass / 0 fail
              calc 23 / manual-config 19 / project-config 43 / ui-mode-separation 6
 node       : v22.22.2
 ```
+
+## Phase 2D実装後のevidence（Wave 1〜5）
+
+### Miyoshi facts（無変更であることの確認）
+
+`tests/project-config.test.js`（43件）が、V0=34 / roughness III / 階別正圧 1297・1525・1695・1729 / 部位別負圧 918・1122 / 既定寸法1250×2050 / `dimensions.mode='sample_default'` / `dimensions.status='unverified'` / defaultW `unverified`+`none` / defaultH `unverified`+`indirect` をすべて固定している。Phase 2Dでこれらの値・`verificationStatus`・`evidence` を変更していない。1250×2050をverified pane dimensionへ昇格させていない。
+
+Phase 2Dで `miyoshi.js` に加えた変更は、registered presetマーカー `hasFixedPreset: true` の追加と、実態に合わせたコメント同期のみ。
+
+### calculation core purity
+
+`calc.js` のexportは18件で、案件固有定数は含まれない（requireして `undefined` であることを確認）。ソースに `MIYOSHI` / `Miyoshi` / `みよし` / 階別・部位別風圧値 / 案件既定寸法 / `verificationStatus` / `evidence` のいずれも存在しない（grep 0件）。`tests/calc.test.js` のcore purityテスト2件が継続的に検査する。
+
+### trust boundaryのevidence
+
+| 攻撃 | 結果 |
+|---|---|
+| payloadが `sourceKind: registered_preset` を主張 | `imported_unverified` へdowngrade（node test + ブラウザ実機） |
+| payloadが `verificationStatus: verified` を主張 | `unverified` へdowngrade |
+| payloadが案件ラベルを主張 | 中立ラベルへ置換、`sourceId` もnull |
+| 取り込んだpackageをregistryへ登録 | 例外で拒否 |
+| `__proto__` / `prototype` / `constructor` | 拒否。prototype pollutionなし |
+| HTMLタグ / `javascript:` スキーム | 拒否。ブラウザ実機でscript未実行 |
+| 16KB超payload / 深さ8超 / 不正JSON | 拒否 |
+
+### 計算回帰のevidence
+
+```text
+Miyoshi FL6 W=1250 H=2050 2F general factor=1.00 → 1756.09756 N/m² / designP 1525 → OK
+Miyoshi FL6 W=1500 H=2050 2F general factor=1.00 → 1463.41463 N/m² / designP 1525 → NG
+Manual  W=1250 H=2050 positive=1400 negative=-1000 → designP 1400
+Export → Import roundtrip: 計算に用いる全フィールドと候補一覧（先頭構成・許容風圧）が一致
+```
+
+いずれもnode test（128 pass / 0 fail）とブラウザ実機（Playwright / Chromium / file://）の双方で確認済み。
+
+### Explicit unresolved evidenceの状態
+
+Phase 2D開始時と変わらず未解決のまま。実見付W/H・階別正圧の元計算書・負圧の元計算根拠・評価高さZとのmappingについて、repository内で新たなEvidenceは得られておらず、推測でverifiedへ昇格させていない。
