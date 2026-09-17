@@ -29,7 +29,7 @@ pull_request: "#4"
 ```text
 Node.js: v22.22.2
 test command: npm test （= node --test。tests/配下を自動検出）
-browser: Playwright + headless Chromium（/opt/pw-browsers/chromium）
+browser: Playwright + headless Chromium（execution environmentで利用可能）
 Vercel: プロジェクト連携済み（PRごとに自動Preview Deployment）
 ```
 
