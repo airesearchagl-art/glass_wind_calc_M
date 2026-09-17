@@ -39,7 +39,8 @@
 - 複層ガラスの厚板/薄板比が板硝子協会計算法の適用範囲（≦2.5）を超える組合せは、自動推奨から除外し、警告表示
 - 告示外の追加低減係数をスライダーで調整（0.70 〜 1.00、既定値 1.00 = 告示準拠のまま）
 - レスポンシブ対応（PC・タブレット・スマートフォン）
-- **入力モード切替**（Phase 2C）：「案件プリセット（みよし案件）」と「手入力 / Generic」をUI上で切り替え可能。詳細は下記「入力モード」セクション参照
+- **入力モード切替**（Phase 2C〜2D）：「案件プリセット（みよし案件）」「手入力 / Generic」「取り込みデータ（Imported / Unverified）」をUI上で切り替え可能。詳細は下記「入力モード」セクション参照
+- **入力条件のExport / Import**（Phase 2D）：現在の入力条件をversioned JSON（Project Input Package）として書き出し／読み込み。取り込んだデータは常に未検証として扱われます
 
 ---
 
@@ -76,13 +77,21 @@ cd glass_wind_calc_M
 
 > W・H はサッシ枠を含む建具全体寸法ではなく、**ガラス1枚の見付寸法**（面積算定に用いる寸法）です。
 >
-> ⚠️ **初期値 W=1250mm / H=2050mm は UNVERIFIED PROJECT DEFAULT（未検証な既定値）です。** リポジトリ初回リリースコミットで `index.html` の初期値として導入されましたが、コミットメッセージ・README・設計根拠資料のいずれにも算定根拠の記載がなく、特定案件のガラス確定寸法として検証された値ではありません（正は `project-config/miyoshi.js` の `dimensions.defaultW` / `dimensions.defaultH`。`calc.js` の `UNVERIFIED_DEFAULT_DIMENSIONS_MM` は非推奨の後方互換複製）。社内の見積資料にはACW（アルミカーテンウォール）全体高さとしてH=2050mmに類する記録が存在しますが、これはACW全体寸法であり、ガラス1枚の見付高さと同一であることは確認できていません。今回確認できた社内資料の範囲では、ガラス1枚の見付幅W=1250mmと直接対応付けられる根拠は確認できていません（社内資料全体に存在しないことまで確認・証明したものではありません）。この初期値のまま計算した結果は「参考計算」であり、案件適合の根拠として扱わず、必ず案件図・メーカー資料でガラス1枚の実見付寸法を確認のうえ入力し直してください。
+> ⚠️ **初期値 W=1250mm / H=2050mm は UNVERIFIED PROJECT DEFAULT（未検証な既定値）です。** リポジトリ初回リリースコミットで `index.html` の初期値として導入されましたが、コミットメッセージ・README・設計根拠資料のいずれにも算定根拠の記載がなく、特定案件のガラス確定寸法として検証された値ではありません（正は `project-config/miyoshi.js` の `dimensions.defaultW` / `dimensions.defaultH`。Phase 2Dで `calc.js` 側の複製は削除済み）。社内の見積資料にはACW（アルミカーテンウォール）全体高さとしてH=2050mmに類する記録が存在しますが、これはACW全体寸法であり、ガラス1枚の見付高さと同一であることは確認できていません。今回確認できた社内資料の範囲では、ガラス1枚の見付幅W=1250mmと直接対応付けられる根拠は確認できていません（社内資料全体に存在しないことまで確認・証明したものではありません）。この初期値のまま計算した結果は「参考計算」であり、案件適合の根拠として扱わず、必ず案件図・メーカー資料でガラス1枚の実見付寸法を確認のうえ入力し直してください。
 
 ---
 
-## 入力モード（Phase 2C）
+## 入力モード（Phase 2C〜2D）
 
-本ツールは「入力モード」セレクタで、以下の2つのモードを切り替えられます。**両モードは完全に独立したモジュールであり、手入力モードにみよし案件のプリセット値が暗黙的に適用されることはありません**（`project-config/manual.js` は `project-config/miyoshi.js` を一切 `require`/参照しません）。
+本ツールは「入力モード」セレクタで、以下の3つのモードを切り替えられます。**各モードは独立したモジュールであり、手入力・取り込みデータにみよし案件のプリセット値が暗黙的に適用されることはありません**（`project-config/manual.js` は `project-config/miyoshi.js` を一切 `require`/参照しません）。
+
+| モード | sourceKind | 信頼度 | 値の出どころ |
+|---|---|---|---|
+| 案件プリセット（みよし案件） | `registered_preset` | プリセットの検証状況をそのまま保持（現状 `partially_verified`） | repository内のbuilt-in config（`project-config/miyoshi.js`） |
+| 手入力 / Generic | `manual` | 常に `unverified` | ユーザーがその場で入力した値 |
+| 取り込みデータ | `imported_unverified` | **常に `unverified`** | 外部から読み込んだJSON |
+
+**取り込みデータは、payloadが「検証済み」「案件プリセット」と主張していても、本ツールはそれを検証済みとして扱いません**（詳細は下記「Project Input Package」）。
 
 ### 案件プリセット（みよし案件 / Miyoshi）
 
@@ -97,13 +106,113 @@ Phase 1〜2Bで確立した既存動作そのものです。`project-config/miyo
 - 固定のdimensions/windプリセットを一切保持しません（`hasFixedPreset: false`）。案件識別情報も保持しません（`identity.disclosureStatus: "public"` — そもそも非公開情報を持たないため）。
 - 不正な入力（数値以外・NaN・0以下の寸法・非有限の圧力値等）は `buildManualDesignInput()` が例外を投げ、UIはアラート表示のうえ計算を中断します。
 
+### 取り込みデータ（Imported / Unverified）
+
+外部から読み込んだProject Input Packageで計算するモードです。Import操作の成功時に自動的にこのモードへ切り替わります。
+
+- 取り込んだデータは**常に** `sourceKind: "imported_unverified"` / `verificationStatus: "unverified"` へ落とされます。
+- payloadが `sourceKind: "registered_preset"` や `verificationStatus: "verified"`、案件ラベルを主張していても採用しません（案件ラベル・preset idは引き継がれず、中立ラベルに置き換えられます）。
+- 画面には「⚠ 取り込みデータ（未検証）」を常時表示します。案件プリセットのprovenance表示は出しません。
+
+---
+
+## Project Input Package（Phase 2D）
+
+入力条件（寸法・正圧・負圧・ガラス構成・追加低減係数・provenance）を、モードによらず共通のversioned schemaで表現するパッケージです。実装は `project-config/project-input.js`。
+
+### schemaVersion
+
+```
+schemaVersion: 1
+```
+
+サポート外の `schemaVersion` は読み込み時に拒否されます（将来の形式変更時に、古い実装が新しいpackageを誤って解釈しないための境界）。
+
+### package構造
+
+| フィールド | 説明 |
+|---|---|
+| `schemaVersion` | 現在は `1` のみ |
+| `sourceKind` | `registered_preset` / `manual` / `imported_unverified` |
+| `sourceId` | registered presetのprojectId（それ以外は `null`） |
+| `widthMm` / `heightMm` | ガラス1枚の見付寸法（> 0） |
+| `positivePressure` / `negativePressure` | 設計風圧の入力値（符号は強制しない） |
+| `designPressure` | **常に再計算される**（下記） |
+| `glassType` | `calc.js` の `GLASS_TYPES` に存在するキーのみ |
+| `extraFactor` | 告示外の追加低減係数（`0 < value <= 1.0`） |
+| `provenance` | `publicLabel` / `verificationStatus` / `note`（公開してよい情報のみ） |
+
+### designPressureは常に再計算する
+
+```
+designPressure = max(abs(positivePressure), abs(negativePressure))
+```
+
+シリアライズされた `designPressure` の値は**信用しません**。読み込み時・生成時のいずれでも上式から再計算するため、payloadが矛盾した設計風圧を主張しても計算には反映されません。正圧・負圧の片方が0であることは許容しますが、両方0（`designPressure = 0`）は実設計入力として意味を持たないため拒否します。
+
+### validator（共通）
+
+`schemaVersion` / `sourceKind` の値域、有限数であること、W/H > 0、`designPressure` > 0、`0 < extraFactor <= 1.0`、既知の `glassType` のみ、公開して安全な文字列であること、文字列長上限、必須フィールドの存在、未知フィールドの拒否、決定的な正規化（キー順固定）を行います。
+
+### 信頼モデル（trust model）
+
+- `registered_preset` の検証状況を持てるのは、**repository内のbuilt-in config だけ**です。registryは外部入力からpresetを登録する経路を一切持ちません。
+- `manual` / `imported_unverified` は `verificationStatus: "unverified"` 以外を名乗れません（validatorが拒否します）。
+- したがって、外部から取り込んだデータが案件の検証済みprovenanceを偽装することはできません。
+
+---
+
+## Preset registry（Phase 2D）
+
+`project-config/registry.js` が、案件presetを `projectId` で登録・参照する境界を提供します。
+
+| API | 動作 |
+|---|---|
+| `registerPreset(config)` | built-in presetの登録。重複 `projectId` は例外で拒否 |
+| `getPreset(projectId)` | 未知の `projectId` は `undefined` を返さず**例外**（fail closed） |
+| `hasPreset(projectId)` | 真偽値 |
+| `listPresets()` | `[{ projectId, publicLabel }]`。ラベルは `getPublicLabel()` 境界のみを経由 |
+| `createRegistry()` | 独立したregistryインスタンス（テスト用途等） |
+
+- 登録できるのは `hasFixedPreset === true` を持つbuilt-in案件configだけです。手入力（`manual.js`、`hasFixedPreset: false`）は**trusted presetとして登録できません**。
+- 公開ラベルは各configの `getPublicLabel()` のみを経由します（内部呼称 `projectName` へフォールバックしません）。
+
+---
+
+## 入力条件のExport / Import（Phase 2D）
+
+現在の入力条件をJSONとして書き出し／読み込みできます。backendもlocalStorageも使わず、`file://` で直接開いた場合でも動作します。
+
+- **Export**: 現在のモードの入力条件をdeterministicなJSONとしてtextareaへ出力します。
+- **Import**: textareaのJSONを読み込み、成功時はW/H・ガラス構成・係数をUIへ反映して「取り込みデータ」モードで再計算します。
+- Export → Import を往復しても、**計算に用いる値と計算結果は一致します**（信頼度だけが `imported_unverified` へ落ちます）。
+
+### セキュリティ境界
+
+読み込みは次を拒否または無害化します。
+
+| 対象 | 扱い |
+|---|---|
+| `__proto__` / `prototype` / `constructor` キー | 拒否（生テキスト段階とparse後の再帰走査の二段で遮断） |
+| payloadサイズ | 16KB超は拒否 |
+| ネスト深さ | 8を超えたら拒否 |
+| 未知のtop-level / provenanceフィールド | 拒否 |
+| 不正なJSON | 拒否 |
+| HTMLタグ・`javascript:`スキーム・URL・Windows/Unix絶対パス・制御文字を含む文字列 | 拒否 |
+| 文字列長 | 上限超過は拒否 |
+
+- `eval` / `Function` / 動的script挿入は使用しません（`JSON.parse` のみ）。
+- 取り込んだ文字列をDOMへ表示する場合は `textContent` のみを使用し、`innerHTML` へ未サニタイズで流しません。
+
+> ⚠️ これらは**既知パターンに対する境界**です。「あらゆる悪意あるpayloadを自動的に無害化できる」とは主張しません。信頼できない入力を扱う際は、内容を人が確認してください。
+
 ---
 
 ## 設計定数
 
 ### 設計風圧（正圧・負圧）＝「みよし案件プリセット」値
 
-以下の設計風圧は、**告示から自動算定した値ではありません**。みよし案件の設計風圧をそのまま定数化した固定プリセット値です。**Phase 2A以降、正（authoritative source）は `project-config/miyoshi.js`（`wind.positivePressureByFloor` / `wind.negativePressureByZone`、`verificationStatus`付き）です。** `calc.js` の `POSITIVE_PRESSURE_MIYOSHI_PRESET` / `NEGATIVE_PRESSURE_MIYOSHI_PRESET` は同じ値を保持する非推奨の後方互換複製です。他案件に流用する場合は、その案件の構造計算書等で妥当性を個別に確認してください。
+以下の設計風圧は、**告示から自動算定した値ではありません**。みよし案件の設計風圧をそのまま定数化した固定プリセット値です。**Phase 2A以降、正（authoritative source）は `project-config/miyoshi.js`（`wind.positivePressureByFloor` / `wind.negativePressureByZone`、`verificationStatus`付き）です。Phase 2Dで `calc.js` 側の後方互換複製は削除され、正はこの1箇所だけになりました。**他案件に流用する場合は、その案件の構造計算書等で妥当性を個別に確認してください。
 
 #### 監査メモ（2026-09-17時点）
 
@@ -196,16 +305,57 @@ glass_wind_calc_M/
 ├── calc.js                       # 汎用計算コア（k1・k2・許容耐風圧・candidate generation等。案件非依存）
 ├── project-config/
 │   ├── miyoshi.js                # 「みよし案件」固有プリセット（設計風圧・初期寸法）＋検証状況・Evidenceメタデータ
-│   └── manual.js                 # 「手入力 / Generic」モードの入力契約（Phase 2C）。miyoshi.jsに非依存
+│   ├── manual.js                 # 「手入力 / Generic」モードの入力契約（Phase 2C）。miyoshi.jsに非依存
+│   ├── registry.js               # generic preset registry（Phase 2D）。built-in presetのみ登録可・unknownはfail closed
+│   └── project-input.js          # versioned Project Input Package（Phase 2D）。validator / serialize / 安全なimport
 ├── tests/
-│   ├── calc.test.js              # 汎用計算コアの known-answer test（node:test）
+│   ├── calc.test.js              # 汎用計算コアの known-answer test + core purity（node:test）
 │   ├── project-config.test.js    # project-config分離の整合性・Evidence契約・代表ケース回帰テスト
-│   └── manual-config.test.js     # 手入力モードの回帰・不正入力・Miyoshi非依存性のテスト（Phase 2C）
+│   ├── manual-config.test.js     # 手入力モードの回帰・不正入力・Miyoshi非依存性のテスト（Phase 2C）
+│   ├── project-input.test.js     # Project Input Package / registry / import security のテスト（Phase 2D）
+│   └── ui-mode-separation.test.js # 入力モードのUI契約テスト（Phase 2C〜2D）
 ├── package.json
 └── README.md                     # このファイル
 ```
 
-`index.html` は UI（入力取得・入力モード切替・DOM描画）のみを担当し、`calc.js`（案件非依存の汎用計算コア）・`project-config/miyoshi.js`（案件プリセット）・`project-config/manual.js`（手入力 / Genericモード）の橋渡しを行います。いずれのファイルも `<script src="...">` によるブラウザ読み込みと、Node.js の `require(...)` の両方に対応しています。
+`index.html` は UI（入力取得・入力モード切替・Export / Import・DOM描画）のみを担当します。Phase 2D以降、入力条件はモードによらず `project-config/project-input.js` のProject Input Packageへ正規化してから `calc.js`（案件非依存の汎用計算コア）へ渡します。案件presetは `project-config/registry.js` 経由でlookupします。いずれのファイルも `<script src="...">` によるブラウザ読み込みと、Node.js の `require(...)` の両方に対応しています（ビルド不要・`file://` 互換）。
+
+読み込み順（`index.html`）: `calc.js` → `miyoshi.js` → `manual.js` → `registry.js` → `project-input.js`
+
+### Phase 2D：calculation coreの完全な案件非依存化とmigration
+
+Phase 2A〜2Cでは、案件固有値の正（authoritative source）を `project-config/` へ移しつつ、既存の挙動とテストを壊さないために `calc.js` 側へ**非推奨（deprecated）の複製**を残していました。Phase 2Dで全consumerの移行が完了したため、これらを削除しました。
+
+**削除した `calc.js` のexport:**
+
+| 削除したexport | 現在の正（authoritative source） |
+|---|---|
+| `POSITIVE_PRESSURE_MIYOSHI_PRESET` | `MiyoshiProjectConfig.wind.positivePressureByFloor` / `getPositivePressure(floorKey)` |
+| `NEGATIVE_PRESSURE_MIYOSHI_PRESET` | `MiyoshiProjectConfig.wind.negativePressureByZone` / `getNegativePressure(zoneKey)` |
+| `UNVERIFIED_DEFAULT_DIMENSIONS_MM` | `MiyoshiProjectConfig.dimensions` / `getDefaultDimensionsMM()` |
+
+**移行方法:**
+
+```js
+// Phase 2C まで（削除済み。現在は undefined を返します）
+const designP = GlassCalc.POSITIVE_PRESSURE_MIYOSHI_PRESET['2'];
+const dflt = GlassCalc.UNVERIFIED_DEFAULT_DIMENSIONS_MM;
+
+// Phase 2D 以降
+const preset = PresetRegistry.getPreset('miyoshi');
+const designP = preset.getPositivePressure('2');
+const dflt = preset.getDefaultDimensionsMM();
+
+// あるいは Project Input Package 経由（推奨）
+const pkg = ProjectInput.fromPreset(preset, {
+  floorKey: '2', zoneKey: 'general',
+  widthMm: 1250, heightMm: 2050,
+  glassType: 'fl_single', extraFactor: 1.0
+});
+// pkg.designPressure は max(|正圧|, |負圧|) から常に再計算される
+```
+
+`calc.js` には現在、案件固有の値・ラベル・provenance（`verificationStatus` / `evidence`）が一切含まれていません。これは `tests/calc.test.js` のcore purityテストがソースレベルで継続的に検査します。**案件固有値を `calc.js` へ再び複製しないでください。**
 
 ### Phase 2A：案件固有入力と汎用計算コアの分離
 
@@ -213,7 +363,7 @@ Phase 1（告示式是正）に続き、Phase 2Aでは「案件固有入力」�
 
 - **`calc.js`**：原則、告示・板硝子協会資料に基づく計算式・candidate generation/sorting/splitのみを担当する「汎用計算コア」。案件を問わず再利用可能。
 - **`project-config/miyoshi.js`**：「みよし案件」固有のプリセット値（`dimensions`：初期寸法、`wind`：階別正圧・部位別負圧・V0・地表面粗度区分）と、値ごとの検証状況メタデータを保持するモジュール。`index.html` はこのモジュールを案件プリセットの正（authoritative source）として参照します。
-- **後方互換について**：`calc.js` には `POSITIVE_PRESSURE_MIYOSHI_PRESET` / `NEGATIVE_PRESSURE_MIYOSHI_PRESET` / `UNVERIFIED_DEFAULT_DIMENSIONS_MM` が引き続き存在しますが、これらは非推奨（deprecated）の後方互換用の複製です。値は `project-config/miyoshi.js` と完全に一致しており（`tests/project-config.test.js` で保証）、将来のフェーズで全消費者が `project-config/` 側へ移行した後、`calc.js` 側からは削除予定です。
+- **後方互換について**：Phase 2A〜2Cの間、`calc.js` には案件固有プリセットの非推奨（deprecated）な複製が残っていましたが、全consumerの移行完了に伴い**Phase 2Dで削除済み**です。移行方法は上記「Phase 2D：calculation coreの完全な案件非依存化とmigration」を参照してください。
 - **JSONではなくJSにした理由**：静的HTML/JS構成・ビルド不要という制約と、`index.html` をブラウザで直接開く（`file://`）運用を維持するため。`file://` からの `fetch()` はブラウザのセキュリティ制限で失敗することがありますが、`<script src>` によるJS読み込みは `file://` でも動作します。
 
 #### 検証状況（verification status）モデル
@@ -309,6 +459,16 @@ npm test
 node --test
 ```
 
+### テストファイル構成
+
+| ファイル | 対象 |
+|---|---|
+| `tests/calc.test.js` | 汎用計算コアのknown-answer test、寸法感度、TP適用範囲、**core purity**（案件固有値がcalc.jsに存在しないこと） |
+| `tests/project-config.test.js` | 案件presetの値・`verificationStatus`・Evidence契約・代表ケース回帰 |
+| `tests/manual-config.test.js` | 手入力モードの入力契約・不正入力・Miyoshi非依存性 |
+| `tests/project-input.test.js` | Project Input Package / preset registry / trust boundary / import security |
+| `tests/ui-mode-separation.test.js` | 入力モードのUI契約（表示分離・textContent境界・package経由の計算） |
+
 ### 必須ケース
 
 | ケース | A [m²] | k1 | k2 | 期待値 P [N/m²] |
@@ -378,6 +538,46 @@ Phase 2Aで `project-config/miyoshi.js` を分離したことに伴うテスト�
 - `extraFactor` 省略時は既定値1.00、明示指定も可能であること
 - 不正なW/H（0・負値・NaN・非数値・null/undefined・object）、不正な圧力値（NaN・非数値・null/undefined・object・±Infinity）、不正な `extraFactor`（0以下・非数値）、および入力自体がobjectでない場合が、それぞれ例外で拒否されること
 
+### Project Input Package / registry / import securityのテスト（`tests/project-input.test.js`、Phase 2D）
+
+**preset registry**
+
+- Miyoshi presetをregistry経由でlookupでき、ラベルが `getPublicLabel()` 境界を経由すること
+- 重複 `projectId` の登録が例外で拒否されること
+- 未知の `projectId` が `undefined` を返さず例外になること（fail closed）
+- 手入力（`hasFixedPreset: false`）がtrusted presetとして登録できないこと
+- 不正なconfig（非object・`projectId` 欠落・`getPublicLabel()` なし・不正な形式のID）が拒否されること
+
+**package schema / validator**
+
+- 妥当なpackageを受理し、キー順まで決定的に正規化すること
+- `designPressure` がpayload値を信用せず常に再計算されること（嘘の値を主張しても上書きされる）
+- サポート外の `schemaVersion` / `sourceKind` の拒否
+- 未知のtop-level・`provenance` フィールドの拒否
+- NaN・±Infinity・数値文字列・null等の拒否
+- W/H ≦ 0 と過大値の拒否
+- `extraFactor` が `0 < v <= 1.0` の範囲外（特に1.0超）で拒否されること
+- 正圧・負圧がともに0（`designPressure = 0`）の拒否、片方0は許容
+- `calc.js` の `GLASS_TYPES` に存在しない `glassType` の拒否
+- `manual` / `imported_unverified` が `verified` を名乗れないこと
+
+**trust boundary（AC-05）**
+
+- payloadが `sourceKind: "registered_preset"` / `verificationStatus: "verified"` / 案件ラベルを主張しても、取り込み時に `imported_unverified` / `unverified` / 中立ラベルへdowngradeされ、`sourceId` も引き継がれないこと
+- 取り込んだpackageをregistryへpresetとして登録できないこと
+
+**import security（AC-07）**
+
+- `__proto__` / `prototype` / `constructor` キーの拒否と、prototype pollutionが発生しないことの確認
+- 16KB超のpayload、深さ8超のネスト、不正なJSONの拒否
+- HTMLタグ・`javascript:` スキーム・URL・Windows/Unix絶対パス・制御文字を含む文字列の拒否
+- `eval` / `new Function` を使用していないことのソースレベル確認
+
+**roundtrip（AC-06）**
+
+- Export → Import で計算に用いる値がすべて一致し、生成される候補一覧（先頭の構成・許容風圧）まで一致すること
+- 同じpackageから常に同じJSONが生成されること（deterministic serialization）
+
 ---
 
 ## 注意事項
@@ -396,6 +596,8 @@ Phase 2Aで `project-config/miyoshi.js` を分離したことに伴うテスト�
 >
 > 手入力 / Genericモードで入力したW/H・正圧・負圧は、本ツールが案件原典（構造計算書・製品資料等）と照合したものではありません。あくまでユーザーが入力した値そのものです。
 >
+> 取り込みデータ（Imported）モードで読み込んだ入力条件は、取り込み元が「検証済み」と記載していても本ツールは検証していません。常に未検証（unverified）として扱われます。
+>
 > **最終的な設計判断にはメーカー検討書または専門技術者による確認を優先してください。**
 
 ---
@@ -404,6 +606,7 @@ Phase 2Aで `project-config/miyoshi.js` を分離したことに伴うテスト�
 
 | バージョン | 日付 | 内容 |
 |-----------|------|------|
+| v1.5.0-phase2d | 2026-09-18 | **Phase 2D：calculation coreの完全な案件非依存化 + Project Input Package。**（1）`calc.js` からPhase 2A〜2Cの後方互換用に残していた案件固有プリセットの複製3件（階別正圧 / 部位別負圧 / 案件既定寸法）を、定義・export・案件固有コメントとも削除。`calc.js` は k1・k2・告示式・複層計算・candidate generation/sorting/split のみを担当する汎用計算コアになり、案件固有値・ラベル・provenance（`verificationStatus` / `evidence`）を一切持たない。全consumer（tests / README）を移行し、移行方法をREADMEへ記録。（2）`project-config/project-input.js` を新設し、versioned Project Input Package（`schemaVersion: 1`、`sourceKind`: `registered_preset` / `manual` / `imported_unverified`）を導入。共通validator（値域・有限数・W/H>0・designP>0・`0<extraFactor<=1.0`・known glassTypeのみ・public-safe string・長さ上限・未知フィールド拒否・決定的正規化）と、`designPressure` を常に `max(|正圧|, |負圧|)` から再計算する契約を実装。（3）`project-config/registry.js` を新設し、generic preset registry（`registerPreset` / `getPreset` / `listPresets`、重複reject、unknownはfail closed、`getPublicLabel()` 境界維持）を導入。登録できるのは `hasFixedPreset: true` を持つrepository内built-in configだけで、手入力はtrusted presetにできない。（4）入力条件のExport / Importを追加（backend不要・localStorage不使用・`file://` 互換）。取り込んだデータは payload が `registered_preset` / `verified` / 案件ラベルを主張していても常に `imported_unverified` / `unverified` / 中立ラベルへdowngradeされ、案件のverified provenanceを偽装できない。（5）import security: `__proto__`/`prototype`/`constructor` キー・16KB超payload・深さ8超ネスト・未知フィールド・不正JSON・HTML/script/URL/絶対パス/制御文字を含む文字列を拒否。`eval`/`Function` 不使用、取り込み文字列は `textContent` のみでDOMへ渡す。（6）UIへ「取り込みデータ（Imported / Unverified）」モードを追加し、`runCalc()` をモードによらずProject Input Package経由へ統一。案件presetはregistry経由でlookupする。告示1458号式・k1・k2・IGU ratio・TP rules・Low-Eモデル・`extraFactor` 既定値・みよし案件の風圧値/V0=34/roughness III/W=1250・H=2050・`verificationStatus`・`evidence` はいずれも無変更（1250×2050をverified pane dimensionへ昇格させていない）。テストは baseline 91 →  128（新規37件、削除1件は同等カバレッジを既存テストが保持）。 |
 | v1.4.0-phase2c | 2026-09-17 | **Phase 2C：案件プリセットと手入力 / Genericモードの安全な共存。**（1）Evidence契約のhardening：`makeEvidence()` の `checkedAt` 黙示的丸め込み（`checkedAt \|\| null`）を廃止し、不正な `checkedAt`/`level` はfactory入口で例外を投げるように変更。将来 `verifiedCases` へ実ケースを追加する際の入力契約 `validateVerifiedCase()` を新設（必須フィールド・floor/zone値域・寸法/圧力の正数・W/H/pressure evidenceのprimary要求・private URL/ID混入拒否）。**まだどのケースにも適用しておらず、`verifiedCases` は引き続き空配列。**（2）新規 `project-config/manual.js`（`ManualProjectConfig`）を追加：「手入力 / Generic」モードの入力契約。`project-config/miyoshi.js` に一切依存せず、みよし案件の正圧・負圧プリセットを暗黙適用しない。`buildManualDesignInput()` はW/H/正圧/負圧/extraFactorを検証し `designP = max(|正圧|, |負圧|)` を算出、結果には常に `source: "user_input"` と `verificationStatus: "unverified"` を付与（本ツールが手入力値を「verified」と主張することはない）。固定dimensions/windプリセットは一切保持しない。（3）`index.html` に入力モードセレクタ（既定値: 案件プリセット）を追加し、案件プリセットモードの既存挙動を完全維持したまま、手入力モードでは階数/部位セレクトを隠し、正圧/負圧の直接入力欄を表示。結果表示は手入力モードで「みよし案件プリセット」等の文言を一切表示せず、代わりに「⚠ ユーザー入力値 — 案件原典との照合は本ツールでは未実施」を常時表示。汎用計算コア（`calc.js`）はモード非依存のまま両モードで共用。（4）告示1458号式・k1・k2・IGU ratio・TP候補ルール・Low-Eモデル・extraFactor既定値・みよし案件の風圧数値/V0=34/roughness III/W=1250・H=2050・`calc.js`はいずれも無変更。新規テスト（`tests/manual-config.test.js` 14件、`tests/project-config.test.js` へのEvidence hardening関連10件）を追加し、既存72テスト構成（calc 23 + project-config 35 + manual-config 14）全pass。ブラウザ実機（Playwright, headless Chromium）で両モードの表示・計算・警告文言・Miyoshi非漏洩を確認済み。Draft PRを作成し、Human Gateでの Ready/merge判断待ち（本バージョンではマージ・Production反映は行っていない）。 |
 | v1.3.1-phase2b | 2026-09-17 | **Evidence Guard Required Fix。**Evidence promotion guardのhard contractを強化。RF-01: `identity`（`verifiedValue()`を経由しないため唯一module-load時点のguardを素通りしていた）の構築直後に`assertEvidenceConsistency('verified', identityEvidence, 'identity')`を明示的に呼び出すよう変更し、`identity`の`evidence`が契約違反の場合、`require()`/`<script>`実行そのものが例外で失敗するようにした（`validateAllEvidence()`頼みの事後検出ではない）。RF-02: `VERIFICATION_STATUSES = ['verified','partially_verified','unverified']`を定数化し、`assertEvidenceConsistency()`冒頭でこれ以外の値（タイプミス・大文字小文字違い・null・undefined・空文字列等）を即rejectするようにした。RF-03: `evidence.checkedAt`を単なるtruthy判定ではなく、`null`または実在するカレンダー日付を表す`"YYYY-MM-DD"`形式の文字列であることを検証するhard validationに変更（`isValidCheckedAt()`。不正な形式・存在しない日付は例外）。RF-04: `dimensions.defaultH.evidence.checkedAt`を、ACW全体高さの記録候補を確認した実際の日付である`'2026-09-17'`に修正（`null`のままだったのは実態と不整合。`verificationStatus`は引き続き`"unverified"`、`evidence.level`は引き続き`"indirect"`を維持し、H=2050をverifiedへ昇格したわけではない）。告示1458号式・k1・k2・IGU ratio・TP rules・Low-E model・extraFactor・風圧数値・V0=34・roughness III・W=1250/H=2050・candidate generation/sorting・publicLabel boundary・`verifiedCases`への実ケース追加はいずれも変更なし。`calc.js`は今回変更なし。既存44テストを維持し、RF-01〜RF-04を直接検証する新規テスト4件（`identity`のmodule-load時fail-fastは、ソースを一時的に書き換えたコピーを実際に`require()`して確認）を追加、計48テスト全pass。 |
 | v1.3.0-phase2b | 2026-09-17 | **Phase 2B：Evidenceモデルの導入。**案件入力値とその根拠（evidence）を安全にbindingできるdata contractを整備。`project-config/miyoshi.js` の各値に `evidence: { level, checkedAt, publicDescription, privateReferenceAvailable }`（`level`は`primary`/`indirect`/`none`）を追加し、`verificationStatus`（値の検証状況）と`evidence`（根拠の状況）を分離。`assertEvidenceConsistency()`によるEvidence promotion guardを導入し、`verificationStatus: "verified"`の値は`evidence.level === "primary"`かつ`evidence.checkedAt`必須という制約をモジュール読み込み時に強制（違反時は例外）。`config.validateAllEvidence()`でconfig全体の整合性を検証可能に。`identity`/`wind.V0`/`wind.roughnessCategory`は`evidence.level: "primary"`を維持（値・verificationStatusは変更なし）、階別正圧・部位別負圧プリセットは`evidence.level: "indirect"`（`partially_verified`のまま）、`dimensions.defaultW`/`defaultH`は`evidence.level: "none"/"indirect"`（`unverified`のまま）。`dimensions.mode = "sample_default"`を追加し、現在のW/H既定値がサンプル値であり検証済み案件確定寸法ではないことをコード上で明示。`verifiedCases: []`（将来、実寸・風圧根拠の両方が確認できた案件ケースを追加するための空配列。架空ケースは追加せず）を新設。README「Evidence Status」セクションを追加。告示1458号式・k1・k2・IGU ratio・TP候補ルール・Low-E strength model・extraFactor・既存風圧数値・V0=34・roughness III・W=1250/H=2050・candidate generation/sorting・publicLabel境界はいずれも変更なし。既存37テストを土台に、identity/V0/roughnessのフィールド参照を新schemaへ追随させたうえでEvidence関連7件を追加し、計44テスト全pass。`calc.js`は今回変更なし。 |
