@@ -34,9 +34,9 @@ Phase 2Cで成立した「Miyoshi preset + Manual / Generic + Evidence contract�
 - [x] AC-09 Regression — **PASS**。Miyoshi FL6 W1250→1756 OK / W1500→1463 NG、Manual designP=1400 をnode testとブラウザ実機で確認。テスト数 baseline 91 → 128（純増37）。削除1件は同等カバレッジを既存テストが保持（下記「テスト増減の説明」）
 - [x] AC-10 Phase 2D new tests — **PASS**。要求20カテゴリすべてを実テスト名にマッピングして充足を確認（MISSINGなし）
 - [x] AC-11 Browser verification — **PASS**。Playwright/Chromium/file:// でMiyoshi・Manual・imported・export/import roundtrip・偽装payload・XSS payload・`__proto__` payload・モード復帰・JSエラーなしを確認
-- [ ] AC-12 Vercel Preview exact-head — **pending**（Draft PR作成後に最終headで確認）
+- [x] AC-12 Vercel Preview exact-head — **PASS**。Draft PR #5 のexact head `da13ca9098925d76b9d244d81ee7939f7a1ca968` で state: success「Deployment has completed」を確認。Productionへはdeployしていない
 - [x] AC-13 Privacy / Disclosure — **PASS**。repository全体sweep（既知プロバイダ / URL / 実行環境パス / session UUID / credential語彙）で新規の実識別子なし。ヒットはパターン定義・Task Packet本文・架空のテストfixtureのみ
-- [ ] AC-14 Documentation — **概ねPASS**（README同期済み、commit fbcdfc9f）。PR本文の同期がDraft PR作成時に残る
+- [x] AC-14 Documentation — **PASS**。README同期済み（commit fbcdfc9f）。PR #5 本文をactual final behaviorへ同期済み（Run ID / Task Packet binding / checks / Quality Debt / explicit unverified items / Checkpoint・Resume location / Human Gate / Documentation Sync Trigger を含む）
 
 ### テスト増減の説明（AC-09）
 
@@ -86,7 +86,7 @@ browser smoke (Miyoshi)        : PASS（1756 OK / 1463 NG）
 browser smoke (Manual)         : PASS（designP=1400）
 browser smoke (Imported)       : PASS（roundtrip / 偽装payload downgrade / XSS reject / __proto__ reject）
 independent verification       : 実行中（別contextのverifier。結果待ち）
-Vercel Preview exact-head      : pending（Draft PR作成後）
+Vercel Preview exact-head      : PASS（PR #5 head da13ca90 で success）
 ```
 
 ## Hard Checks（Quality Debt化禁止）
@@ -151,12 +151,11 @@ tests/ui-mode-separation.test.js       （Phase 2D UI契約 5件追加）
 ## Remaining tasks
 
 ```text
-1. Independent Verifierの結果を反映（findingがあればscope内でrepair）
-2. Draft PR作成（OPEN / Draft / merged=false）
-3. Vercel Preview exact-head READY確認（AC-12）
-4. PR本文をactual final behaviorへ同期（AC-14の残り）
-5. Run Artifact最終収束 + Completion Report
+1. Independent Verifierの結果を反映（findingがあればscope内でrepair→再verify）
+2. Run Artifact最終収束 + Completion Report
 ```
+
+Draft PR #5 は作成済み（OPEN / Draft / merged=false）。Vercel Preview は exact head で READY 確認済み。PR本文も同期済み。
 
 ## Next action
 
