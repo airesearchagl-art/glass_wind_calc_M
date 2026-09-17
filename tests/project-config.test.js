@@ -331,6 +331,124 @@ test('Evidence: verifiedCasesに架空のケースが存在しない（空配列
   assert.equal(MiyoshiProjectConfig.verifiedCases.length, 0);
 });
 
+/* ============================================================
+   Phase 2C AC-05: Evidence factory hardening
+   makeEvidence()のcheckedAtが ''・false・0 等を黙ってnullへ丸め込まず、
+   例外を投げること（mutation / boundary test）。
+============================================================ */
+
+test('AC-05: makeEvidence() は不正なcheckedAtを黙ってnullへ丸め込まず例外を投げる', () => {
+  const invalidCheckedAtValues = ['', false, 0, 'abc', '2026/09/17', '2026-9-17', '2026-13-40', '2026-02-30', true, 123, NaN];
+  for (const bad of invalidCheckedAtValues) {
+    assert.throws(
+      () => MiyoshiProjectConfig.makeEvidence('primary', bad, 'desc', true),
+      `checkedAt=${JSON.stringify(bad)} は例外を投げるはず（silent coercion禁止）`
+    );
+  }
+});
+
+test('AC-05: makeEvidence() はnull/undefinedのcheckedAtのみnullとして正しく成立する', () => {
+  assert.equal(MiyoshiProjectConfig.makeEvidence('primary', null, 'desc', true).checkedAt, null);
+  assert.equal(MiyoshiProjectConfig.makeEvidence('primary', undefined, 'desc', true).checkedAt, null);
+  assert.equal(MiyoshiProjectConfig.makeEvidence('primary', '2026-09-17', 'desc', true).checkedAt, '2026-09-17');
+});
+
+test('AC-05: makeEvidence() は不正なlevelを例外で拒否する（factory入口でのhardening）', () => {
+  assert.throws(() => MiyoshiProjectConfig.makeEvidence('bogus', null, 'desc', true));
+  assert.throws(() => MiyoshiProjectConfig.makeEvidence('', null, 'desc', true));
+  assert.throws(() => MiyoshiProjectConfig.makeEvidence(undefined, null, 'desc', true));
+  assert.doesNotThrow(() => MiyoshiProjectConfig.makeEvidence('primary', null, 'desc', true));
+  assert.doesNotThrow(() => MiyoshiProjectConfig.makeEvidence('indirect', null, 'desc', true));
+  assert.doesNotThrow(() => MiyoshiProjectConfig.makeEvidence('none', null, 'desc', true));
+});
+
+/* ============================================================
+   Phase 2C AC-06: Verified project case validator
+   verifiedCasesは空配列のまま維持するが、将来ケースを安全に追加できる
+   よう、正式なvalidatorが必須フィールド・hard conditionを検証すること。
+============================================================ */
+
+function makeValidVerifiedCaseFixture(overrides) {
+  const primaryEvidence = () => MiyoshiProjectConfig.makeEvidence('primary', '2026-09-17', '社内資料で確認済み', true);
+  return Object.assign({
+    caseId: 'fixture-case-1',
+    floor: '2',
+    zone: 'general',
+    widthMm: 1250,
+    heightMm: 2050,
+    glassType: 'fl_single',
+    designPressure: 1525,
+    evidence: {
+      widthEvidence: primaryEvidence(),
+      heightEvidence: primaryEvidence(),
+      pressureEvidence: primaryEvidence()
+    },
+    publicEvidenceDescription: '社内資料により確認済み（固有名詞・URLなし）'
+  }, overrides || {});
+}
+
+test('AC-06: validateVerifiedCase() は必須フィールドをすべて満たす妥当なケースを受理する', () => {
+  assert.doesNotThrow(() => MiyoshiProjectConfig.validateVerifiedCase(makeValidVerifiedCaseFixture()));
+});
+
+test('AC-06: validateVerifiedCase() は必須フィールド欠落を例外で拒否する', () => {
+  const requiredFields = ['caseId', 'floor', 'zone', 'widthMm', 'heightMm', 'glassType', 'designPressure', 'evidence', 'publicEvidenceDescription'];
+  for (const field of requiredFields) {
+    const broken = makeValidVerifiedCaseFixture();
+    delete broken[field];
+    assert.throws(
+      () => MiyoshiProjectConfig.validateVerifiedCase(broken),
+      `フィールド${field}欠落は例外を投げるはず`
+    );
+  }
+});
+
+test('AC-06: validateVerifiedCase() はfloor/zoneの不正値を例外で拒否する', () => {
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(makeValidVerifiedCaseFixture({ floor: '5' })));
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(makeValidVerifiedCaseFixture({ floor: 'ground' })));
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(makeValidVerifiedCaseFixture({ zone: 'corner-ish' })));
+});
+
+test('AC-06: validateVerifiedCase() はwidthMm/heightMm/designPressureの非数値・非正値を例外で拒否する', () => {
+  for (const bad of [0, -1, NaN, 'x', null, undefined]) {
+    assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(makeValidVerifiedCaseFixture({ widthMm: bad })));
+    assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(makeValidVerifiedCaseFixture({ heightMm: bad })));
+    assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(makeValidVerifiedCaseFixture({ designPressure: bad })));
+  }
+});
+
+test('AC-06: validateVerifiedCase() はpane W / pane H / pressure evidenceのいずれかがprimaryでない場合は例外を投げる（hard condition）', () => {
+  const indirect = MiyoshiProjectConfig.makeEvidence('indirect', '2026-09-17', 'x', true);
+  const fixture = makeValidVerifiedCaseFixture();
+
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
+    Object.assign({}, fixture, { evidence: Object.assign({}, fixture.evidence, { widthEvidence: indirect }) })
+  ));
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
+    Object.assign({}, fixture, { evidence: Object.assign({}, fixture.evidence, { heightEvidence: indirect }) })
+  ));
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
+    Object.assign({}, fixture, { evidence: Object.assign({}, fixture.evidence, { pressureEvidence: indirect }) })
+  ));
+});
+
+test('AC-06: validateVerifiedCase() はchecked日付が欠落したevidenceを例外で拒否する', () => {
+  const noCheckedAt = { level: 'primary', checkedAt: null, publicDescription: 'x', privateReferenceAvailable: true };
+  const fixture = makeValidVerifiedCaseFixture();
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
+    Object.assign({}, fixture, { evidence: Object.assign({}, fixture.evidence, { pressureEvidence: noCheckedAt }) })
+  ));
+});
+
+test('AC-06: validateVerifiedCase() はpublicEvidenceDescriptionへの内部限定識別子混入を例外で拒否する（private URL/ID rejection）', () => {
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
+    makeValidVerifiedCaseFixture({ publicEvidenceDescription: '参照: https://drive.google.com/file/d/xyz' })
+  ));
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
+    makeValidVerifiedCaseFixture({ publicEvidenceDescription: 'see https://www.notion.so/internal-doc' })
+  ));
+});
+
 test('Evidence: 公開config全体にprivate URL/IDが混入しない', () => {
   // 関数プロパティを除いたconfig全体をシリアライズして検査する。
   const serialized = JSON.stringify(MiyoshiProjectConfig, (key, val) =>

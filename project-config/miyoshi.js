@@ -86,6 +86,20 @@
  *   - `verifiedCases`（下記）は、将来ガラス実寸・風圧根拠の両方が確認できた
  *     案件ケースを追加するための配列。現時点では実寸が未確認のため、
  *     架空のverified caseを作らず空配列のまま維持する。
+ *
+ * Phase 2C（2026-09-17）Evidence contract hardening:
+ *   - `makeEvidence()` はfactoryの入口で level・checkedAt を検証するように
+ *     変更した。従来の `checkedAt: checkedAt || null` は ''・false・0 等の
+ *     不正な入力を無言でnullへ丸め込んでいたため、null/undefined以外の
+ *     不正なcheckedAtは例外を投げるようにした（silent coercionの排除）。
+ *   - `validateVerifiedCase()` を新設。`verifiedCases` へ将来ケースを追加
+ *     する際、必須フィールド（caseId/floor/zone/widthMm/heightMm/
+ *     glassType/designPressure/evidence/publicEvidenceDescription）と、
+ *     pane W・pane H・pressureそれぞれのevidenceが 'verified'
+ *     （level==='primary' かつ妥当なcheckedAt）であることを
+ *     assertEvidenceConsistency() 経由で強制する。公開説明文への内部限定
+ *     識別子混入も拒否する。このvalidatorはテスト・将来の追加作業向けで
+ *     あり、本Campaignでは `verifiedCases` へ実ケースを追加していない。
  */
 (function (global, factory) {
   var mod = factory();
@@ -151,12 +165,29 @@
   // publicDescription / privateReferenceAvailable のみを保持し、
   // 実際のURL・ファイルID・ファイル名は一切保持しない設計とする
   // （呼び出し側がそれらを渡すこと自体を想定していない）。
-  // level・checkedAtの厳密な契約検証は assertEvidenceConsistency() 側で
-  // 一元的に行う（verifiedValue()・identity構築のいずれも必ずこれを通る）。
+  //
+  // Phase 2C AC-05（Evidence factory hardening）: 従来は
+  // `checkedAt: checkedAt || null` という実装で、''・false・0・undefined等の
+  // 不正な入力を静かに（例外を投げずに）null へ丸め込んでいた。これは
+  // 「呼び出し側の実装ミスでchecked日付を渡し忘れた」ケースと「意図的に
+  // 未確認を表すnull/undefinedを渡した」ケースを区別できず、契約違反を
+  // 検知できないまま通過させてしまう危険があった。
+  // ここでは level・checkedAt の両方を factory の入口で検証し、
+  // null/undefined 以外の不正な checkedAt は即座に例外を投げる
+  // （assertEvidenceConsistency() へ委ねる事後検証だけに依存しない）。
   function makeEvidence(level, checkedAt, publicDescription, privateReferenceAvailable) {
+    if (EVIDENCE_LEVELS.indexOf(level) === -1) {
+      throw new Error('makeEvidence(): invalid evidence level: ' + JSON.stringify(level) + ' (must be one of ' + EVIDENCE_LEVELS.join(', ') + ')');
+    }
+    var normalizedCheckedAt = (checkedAt === undefined || checkedAt === null) ? null : checkedAt;
+    if (!isValidCheckedAt(normalizedCheckedAt)) {
+      throw new Error(
+        'makeEvidence(): checkedAt must be null/undefined or a valid "YYYY-MM-DD" date string, got: ' + JSON.stringify(checkedAt)
+      );
+    }
     return {
       level: level,
-      checkedAt: checkedAt || null,
+      checkedAt: normalizedCheckedAt,
       publicDescription: publicDescription,
       privateReferenceAvailable: !!privateReferenceAvailable
     };
@@ -457,6 +488,84 @@
 
     return violations;
   };
+
+  // ============================================================
+  // Verified project case validator（Phase 2C, AC-06）
+  //
+  // `verifiedCases` は現時点で空配列のまま維持する（架空のケースを追加
+  // しない）。このvalidatorは、将来ガラス1枚の実見付W/Hと設計風圧の根拠
+  // （元計算書・評価高さZ）の両方が確認できたケースを安全に追加できる
+  // よう、必須フィールドと厳格な条件をhard checkするためのものであり、
+  // 今回のCampaignで実際のケースをverifiedCasesへ追加するものではない。
+  // ============================================================
+
+  var VERIFIED_CASE_REQUIRED_FIELDS = [
+    'caseId', 'floor', 'zone', 'widthMm', 'heightMm',
+    'glassType', 'designPressure', 'evidence', 'publicEvidenceDescription'
+  ];
+  var VERIFIED_CASE_VALID_FLOORS = ['1', '2', '3', 'R'];
+  var VERIFIED_CASE_VALID_ZONES = ['general', 'corner'];
+  var PRIVATE_IDENTIFIER_PATTERN = /drive\.google|docs\.google|notion\.(so|com)|sharepoint|dropbox\.com/i;
+
+  // verified caseの妥当性を検証する。違反があれば例外を投げる（true以外は
+  // 返さない）。呼び出し側は try/catch するか、事前に妥当性が既知の
+  // ケースにのみ使うこと。
+  function validateVerifiedCase(caseObj) {
+    if (!caseObj || typeof caseObj !== 'object') {
+      throw new Error('verified case must be an object');
+    }
+    for (var i = 0; i < VERIFIED_CASE_REQUIRED_FIELDS.length; i++) {
+      var field = VERIFIED_CASE_REQUIRED_FIELDS[i];
+      if (!(field in caseObj)) {
+        throw new Error('verified case is missing required field: ' + field);
+      }
+    }
+    if (typeof caseObj.caseId !== 'string' || !caseObj.caseId) {
+      throw new Error('verified case caseId must be a non-empty string');
+    }
+    if (VERIFIED_CASE_VALID_FLOORS.indexOf(caseObj.floor) === -1) {
+      throw new Error('verified case floor must be one of ' + VERIFIED_CASE_VALID_FLOORS.join(', '));
+    }
+    if (VERIFIED_CASE_VALID_ZONES.indexOf(caseObj.zone) === -1) {
+      throw new Error('verified case zone must be one of ' + VERIFIED_CASE_VALID_ZONES.join(', '));
+    }
+    if (typeof caseObj.widthMm !== 'number' || !isFinite(caseObj.widthMm) || caseObj.widthMm <= 0) {
+      throw new Error('verified case widthMm must be a positive finite number');
+    }
+    if (typeof caseObj.heightMm !== 'number' || !isFinite(caseObj.heightMm) || caseObj.heightMm <= 0) {
+      throw new Error('verified case heightMm must be a positive finite number');
+    }
+    if (typeof caseObj.glassType !== 'string' || !caseObj.glassType) {
+      throw new Error('verified case glassType must be a non-empty string');
+    }
+    if (typeof caseObj.designPressure !== 'number' || !isFinite(caseObj.designPressure) || caseObj.designPressure <= 0) {
+      throw new Error('verified case designPressure must be a positive finite number');
+    }
+    if (typeof caseObj.publicEvidenceDescription !== 'string' || !caseObj.publicEvidenceDescription) {
+      throw new Error('verified case publicEvidenceDescription must be a non-empty string');
+    }
+    if (PRIVATE_IDENTIFIER_PATTERN.test(caseObj.publicEvidenceDescription)) {
+      throw new Error('verified case publicEvidenceDescription must not contain private URLs/identifiers (Drive/Notion/SharePoint/Dropbox)');
+    }
+
+    var evidence = caseObj.evidence;
+    if (!evidence || typeof evidence !== 'object') {
+      throw new Error('verified case evidence must be an object with widthEvidence/heightEvidence/pressureEvidence');
+    }
+    // pane W / pane H / pressure のそれぞれについて、
+    // 「primary evidence かつ妥当なcheckedAt」というhard conditionを、
+    // 既存のassertEvidenceConsistency('verified', ...) を再利用して強制する
+    // （検証ロジックを重複させない）。
+    ['widthEvidence', 'heightEvidence', 'pressureEvidence'].forEach(function (key) {
+      assertEvidenceConsistency('verified', evidence[key], 'verifiedCase.' + caseObj.caseId + '.' + key);
+    });
+
+    return true;
+  }
+
+  config.makeEvidence = makeEvidence;
+  config.isValidCheckedAt = isValidCheckedAt;
+  config.validateVerifiedCase = validateVerifiedCase;
 
   return config;
 });
