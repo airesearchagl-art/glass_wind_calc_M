@@ -403,6 +403,13 @@
     <div class="card">
       <div class="card-title">入力条件</div>
 
+      <div class="form-group" style="margin-bottom:16px;">
+        <div class="meta-chip" style="display:inline-block;">
+          案件プリセット: <span id="preset-name-label">—</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;" id="preset-identity-note"></div>
+      </div>
+
       <div class="form-group">
         <label>ガラス幅 W（ガラス見付寸法）</label>
         <div class="input-unit">
@@ -489,10 +496,13 @@
 </div>
 
 <script src="calc.js"></script>
+<script src="project-config/miyoshi.js"></script>
 <script>
 /* ============================================================
-   計算ロジックは calc.js（GlassCalc）に分離済み。
-   ここでは UI（入力取得・DOM描画）のみを扱う。
+   計算ロジックは calc.js（GlassCalc、案件非依存の汎用計算コア）に、
+   案件固有プリセットは project-config/miyoshi.js
+   （MiyoshiProjectConfig）に、それぞれ分離済み（Phase 2A）。
+   ここでは UI（入力取得・DOM描画・両モジュールの橋渡し）のみを扱う。
 ============================================================ */
 
 /* ============================================================
@@ -506,7 +516,7 @@ function fmt(n, d = 0) {
 function renderResults(result) {
   const {
     W, H, area, floorKey, zoneKey,
-    posP, negP, designP,
+    posP, negP, designP, windStatus,
     extraFactor, typeKey, typeLabel,
     best, okCandidates, ngCandidates, outOfScopeCandidates,
     isUnverifiedDefault
@@ -556,6 +566,14 @@ function renderResults(result) {
     ? `正圧 ${fmt(posP, 0)} ≧ |負圧| ${fmt(negP, 0)}`
     : `|負圧| ${fmt(negP, 0)} ＞ 正圧 ${fmt(posP, 0)}`;
 
+  // 設計風圧プリセットの検証状況警告（Task 4）。
+  // V0=34m/s・地表面粗度区分IIIとの数値整合は確認済みだが、元の構造計算書・
+  // 各階評価高さZとの厳密な対応付けは未確認（wind.status !== 'verified'）。
+  // 既存の「告示から自動算定した値ではない」という警告を弱めるものではなく、
+  // 追加の注記として表示する。
+  const windStatusWarningHtml = windStatus !== 'verified' ? `
+      <div class="calc-line" style="margin-top:4px;color:var(--warn);">⚠ 設計風圧プリセット — 原典照合未完了（V0=34m/s・地表面粗度区分IIIとの数値整合は確認済みだが、元の構造計算書・各階評価高さZとの厳密な対応付けは未確認。verificationStatus: ${windStatus}）</div>` : '';
+
   const windHtml = `
     <div class="card">
       <div class="sec-title">入力条件・設計風圧</div>
@@ -577,6 +595,7 @@ function renderResults(result) {
           <div class="calc-line">${maxSide}</div>
           <div class="calc-line">→ 設計風圧 = <span class="val hl">${fmt(designP, 0)} N/m²</span></div>
           <div class="calc-line" style="margin-top:6px;color:var(--text3);">※ 正圧・負圧は告示から自動算定した値ではなく、みよし案件プリセット値です。</div>
+          ${windStatusWarningHtml}
         </div>
       </div>
     </div>`;
@@ -725,16 +744,19 @@ function runCalc() {
   // 面積計算（m²）：W・Hはガラス見付寸法
   const area = (W * H) / 1_000_000;
 
-  // 入力寸法が未検証の既定値（UNVERIFIED PROJECT DEFAULT）のままかどうか
-  const dflt = GlassCalc.UNVERIFIED_DEFAULT_DIMENSIONS_MM;
-  const isUnverifiedDefault = (W === dflt.W && H === dflt.H);
+  // 案件プリセット（project-config/miyoshi.js）から寸法既定値・検証状況を取得。
+  // calc.js側の同名定数は非推奨の後方互換複製であり、UIはここでは参照しない。
+  const dflt = MiyoshiProjectConfig.getDefaultDimensionsMM();
+  const isUnverifiedDefault =
+    (W === dflt.W && H === dflt.H) && MiyoshiProjectConfig.dimensions.status !== 'verified';
 
-  // 設計風圧の決定（みよし案件プリセット値。告示から自動算定した値ではない）
-  const posP    = GlassCalc.POSITIVE_PRESSURE_MIYOSHI_PRESET[floorKey];
-  const negP    = GlassCalc.NEGATIVE_PRESSURE_MIYOSHI_PRESET[zoneKey];
-  const designP = Math.max(posP, negP);
+  // 設計風圧の決定（案件プリセット。告示から自動算定した値ではない）
+  const posP       = MiyoshiProjectConfig.getPositivePressure(floorKey);
+  const negP       = MiyoshiProjectConfig.getNegativePressure(zoneKey);
+  const designP    = Math.max(posP, negP);
+  const windStatus = MiyoshiProjectConfig.wind.status; // 'verified' | 'partially_verified' | 'unverified'
 
-  // 候補生成・OK / NG / 適用範囲外 に分離
+  // 候補生成・OK / NG / 適用範囲外 に分離（汎用計算コア：calc.js）
   const allCandidates = GlassCalc.generateCandidates(typeKey, area, designP, extraFactor);
   const { okCandidates, ngCandidates, outOfScopeCandidates } = GlassCalc.splitCandidates(allCandidates);
 
@@ -745,7 +767,7 @@ function runCalc() {
   renderResults({
     W, H, area,
     floorKey, zoneKey,
-    posP, negP, designP,
+    posP, negP, designP, windStatus,
     extraFactor,
     typeKey,
     typeLabel: GlassCalc.GLASS_TYPES[typeKey].label,
@@ -764,10 +786,29 @@ document.getElementById('inp-coeff').addEventListener('input', function() {
 });
 
 /* ============================================================
-   初期表示時に自動計算
+   初期表示時：案件プリセット表示・既定寸法の反映・自動計算
 ============================================================ */
 
 window.addEventListener('DOMContentLoaded', function() {
+  var cfg = MiyoshiProjectConfig;
+
+  // 案件プリセット名の表示（Task 4）。施主・建物名等の具体的な識別情報は
+  // 未確認のため、cfg.identity.note の警告もあわせて表示する。
+  var nameLabel = document.getElementById('preset-name-label');
+  if (nameLabel) {
+    nameLabel.textContent = cfg.projectName + '（projectId: ' + cfg.projectId + '）';
+  }
+  var identityNote = document.getElementById('preset-identity-note');
+  if (identityNote && cfg.identity.status !== 'verified') {
+    identityNote.textContent = '⚠ ' + cfg.identity.note;
+  }
+
+  // 入力欄の既定値は project-config を正として反映する
+  // （HTML属性のvalueは、JS無効時のフォールバック表示用に残している）。
+  var dflt = cfg.getDefaultDimensionsMM();
+  document.getElementById('inp-W').value = dflt.W;
+  document.getElementById('inp-H').value = dflt.H;
+
   runCalc();
 });
 

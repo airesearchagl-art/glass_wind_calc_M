@@ -7,6 +7,14 @@
  *
  * ブラウザ（<script src="calc.js">、window.GlassCalc）と
  * Node.js（require('./calc.js')、テスト用）の両方から利用できる。
+ *
+ * Phase 2A（案件固有入力と汎用計算コアの分離）:
+ * このファイルは原則、k1・k2・許容耐風圧計算式・candidate generation/
+ * sorting/split等の「案件非依存の汎用計算コア」のみを担当する設計へ
+ * 徐々に移行している。「みよし案件」固有のプリセット値（設計風圧・
+ * 初期寸法）は project-config/miyoshi.js へ移設済み。このファイルに
+ * 残る同名の定数は後方互換のための非推奨（deprecated）の複製であり、
+ * 各定義の直上コメントを参照のこと。
  */
 (function (global, factory) {
   var mod = factory();
@@ -20,7 +28,17 @@
   'use strict';
 
   // ============================================================
-  // 設計風圧プリセット（みよし案件プリセット値）
+  // [DEPRECATED / Phase 2A] 設計風圧プリセット（みよし案件プリセット値）
+  //
+  // Phase 2A（案件固有入力と汎用計算コアの分離）により、この値の正
+  // （authoritative source）は project-config/miyoshi.js
+  // （MiyoshiProjectConfig.wind.positivePressureByFloor /
+  //   MiyoshiProjectConfig.wind.negativePressureByZone）へ移設した。
+  // ここに残る複製は、既存のProduction挙動・既存テストを壊さないための
+  // 後方互換用であり、非推奨（deprecated）。将来のフェーズで全消費者が
+  // project-config/ 側へ移行した後、calc.js側からは削除予定。
+  // 値を変更する場合は project-config/miyoshi.js と完全に一致させること
+  // （このファイル単体では変更しないこと）。
   //
   // 告示から自動算定した値ではなく、みよし案件の設計風圧をそのまま
   // 定数化したもの。削除・変更禁止。他案件へ流用する場合は、
@@ -40,7 +58,8 @@
   //     計算書・各階の評価高さZへの対応付けは未確認（UNVERIFIED）。
   //     したがって現段階では本プリセットを告示からの自動算定式へ置換せず、
   //     固定値のまま維持する。「告示から自動算定した値ではない」という
-  //     UI上の注記も残す。
+  //     UI上の注記も残す。詳細な検証状況（verificationStatus）は
+  //     project-config/miyoshi.js を参照。
   // ============================================================
   var POSITIVE_PRESSURE_MIYOSHI_PRESET = {
     '1': 1297,
@@ -55,7 +74,14 @@
   };
 
   // ============================================================
-  // 初期入力寸法（UNVERIFIED PROJECT DEFAULT）
+  // [DEPRECATED / Phase 2A] 初期入力寸法（UNVERIFIED PROJECT DEFAULT）
+  //
+  // Phase 2Aにより、この値の正（authoritative source）は
+  // project-config/miyoshi.js（MiyoshiProjectConfig.dimensions）へ
+  // 移設した。ここに残る複製は既存のProduction挙動・既存テストを
+  // 壊さないための後方互換用であり、非推奨（deprecated）。将来の
+  // フェーズで全消費者が project-config/ 側へ移行した後、calc.js側
+  // からは削除予定。
   //
   // W=1250mm / H=2050mm は、リポジトリ初回リリースコミット
   // （"feat: 初版リリース - ガラス耐風圧簡易検討ツール"）で index.html の
