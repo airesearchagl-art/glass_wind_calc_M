@@ -17,7 +17,9 @@ const {
   calcP_IGU,
   getK1_FL,
   K1_TP,
-  IGU_APPLICABLE_RATIO_MAX
+  IGU_APPLICABLE_RATIO_MAX,
+  POSITIVE_PRESSURE_MIYOSHI_PRESET,
+  UNVERIFIED_DEFAULT_DIMENSIONS_MM
 } = require('../calc.js');
 
 const AREA = 1.0;
@@ -98,4 +100,51 @@ test('回帰確認：旧式(t²)ではなく告示式(t + t²/4)であること'
   assert.equal(correct, 4500);
   assert.notEqual(correct, oldFormulaResult);
   assert.ok(correct < oldFormulaResult, '是正前は許容耐力を過大評価していた（安全側ではない）');
+});
+
+/* ============================================================
+   案件代表寸法による感度テスト（H=2050mm固定、FL6）
+   W=1250 / 1400 / 1500 / 1550mm で面積増加に伴い許容耐風圧が
+   単調に低下することを確認する。1250×2050mm自体は
+   UNVERIFIED PROJECT DEFAULT（リポジトリ履歴上、算定根拠の記載なし）
+   であり、案件確定寸法ではない点に注意。
+============================================================ */
+
+test('UNVERIFIED PROJECT DEFAULT: 既定寸法は1250×2050mmのまま（変更検知用の回帰）', () => {
+  assert.deepEqual(UNVERIFIED_DEFAULT_DIMENSIONS_MM, { W: 1250, H: 2050 });
+});
+
+test('寸法感度: FL6 W=1250/H=2050 ≈ 1756 N/m²', () => {
+  const area = (1250 * 2050) / 1_000_000;
+  const P = calcP_notification(6, getK1_FL(6), 1.0, area);
+  assert.ok(Math.abs(P - 1756.09756097561) < 1e-6, `P=${P}`);
+});
+
+test('寸法感度: FL6 W=1500/H=2050 ≈ 1463 N/m²', () => {
+  const area = (1500 * 2050) / 1_000_000;
+  const P = calcP_notification(6, getK1_FL(6), 1.0, area);
+  assert.ok(Math.abs(P - 1463.4146341463415) < 1e-6, `P=${P}`);
+});
+
+test('寸法感度: FL6はH=2050mm固定でW増加に伴い単調に低下する（W=1250/1400/1500/1550）', () => {
+  const widths = [1250, 1400, 1500, 1550];
+  const H = 2050;
+  const values = widths.map(W => {
+    const area = (W * H) / 1_000_000;
+    return calcP_notification(6, getK1_FL(6), 1.0, area);
+  });
+  for (let i = 1; i < values.length; i++) {
+    assert.ok(values[i] < values[i - 1], `W=${widths[i]}の値(${values[i]})はW=${widths[i - 1]}の値(${values[i - 1]})より小さいはず`);
+  }
+});
+
+test('寸法感度・境界回帰: 2階プリセット設計風圧に対しW=1250はOK、W=1500はNGに反転する', () => {
+  const H = 2050;
+  const designP = POSITIVE_PRESSURE_MIYOSHI_PRESET['2']; // 1525 N/m²
+  const area1250 = (1250 * H) / 1_000_000;
+  const area1500 = (1500 * H) / 1_000_000;
+  const P1250 = calcP_notification(6, getK1_FL(6), 1.0, area1250);
+  const P1500 = calcP_notification(6, getK1_FL(6), 1.0, area1500);
+  assert.ok(P1250 >= designP, `W=1250: P=${P1250} は設計風圧${designP}以上のはず（OK）`);
+  assert.ok(P1500 < designP, `W=1500: P=${P1500} は設計風圧${designP}未満のはず（NG）`);
 });

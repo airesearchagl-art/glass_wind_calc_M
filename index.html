@@ -418,7 +418,8 @@
           <span class="unit-label">mm</span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          W・Hはサッシ内法ではなく、<strong>ガラス本体の見付寸法</strong>（面積算定に用いる寸法）を入力してください。
+          W・Hは<strong>ガラス1枚の見付寸法</strong>です。サッシ枠を含む建具全体寸法ではありません。<br>
+          初期値 1250×2050mm は本ツールの<strong>未検証な既定値（サンプル値）</strong>であり、特定案件の確定寸法ではありません。必ず案件図・メーカー資料で実寸を確認して入力してください。
         </div>
       </div>
 
@@ -507,7 +508,8 @@ function renderResults(result) {
     W, H, area, floorKey, zoneKey,
     posP, negP, designP,
     extraFactor, typeKey, typeLabel,
-    best, okCandidates, ngCandidates, outOfScopeCandidates
+    best, okCandidates, ngCandidates, outOfScopeCandidates,
+    isUnverifiedDefault
   } = result;
 
   const floorLabel = floorKey === 'R' ? 'R階' : `${floorKey}階`;
@@ -521,10 +523,21 @@ function renderResults(result) {
   const bestLabel = best ? best.label : '（告示適用範囲内で成立する構成なし）';
   const bestP     = best ? fmt(best.P, 0) : '—';
 
+  // 未検証既定値（UNVERIFIED PROJECT DEFAULT）警告
+  // 1250×2050mm は本ツールの初期値として導入されただけで、案件確定寸法として
+  // 検証された記録がない。この値のまま計算した結果を「案件適合OK」と
+  // 誤解させないよう、明示的な状態表示を行う。
+  const unverifiedHtml = isUnverifiedDefault ? `
+      <div class="notice" style="margin-bottom:14px;border-color:rgba(245,158,11,0.4);">
+        <strong style="color:var(--warn);">⚠ 参考計算 — 案件実寸未確認</strong><br>
+        入力寸法 ${W}×${H}mm は本ツールの<strong>未検証な既定値（UNVERIFIED PROJECT DEFAULT）</strong>です。特定案件のガラス確定寸法として検証されたものではありません。この判定結果を「案件適合OK」の根拠として扱わず、案件図・メーカー資料の実寸を確認のうえ再計算してください。
+      </div>` : '';
+
   // 結論カード
   const conclusionHtml = `
     <div class="conclusion-card">
       <div class="sec-title">検討結果</div>
+      ${unverifiedHtml}
       <div class="conclusion-inner">
         ${judgeHtml}
         <div class="conclusion-detail">
@@ -712,6 +725,10 @@ function runCalc() {
   // 面積計算（m²）：W・Hはガラス見付寸法
   const area = (W * H) / 1_000_000;
 
+  // 入力寸法が未検証の既定値（UNVERIFIED PROJECT DEFAULT）のままかどうか
+  const dflt = GlassCalc.UNVERIFIED_DEFAULT_DIMENSIONS_MM;
+  const isUnverifiedDefault = (W === dflt.W && H === dflt.H);
+
   // 設計風圧の決定（みよし案件プリセット値。告示から自動算定した値ではない）
   const posP    = GlassCalc.POSITIVE_PRESSURE_MIYOSHI_PRESET[floorKey];
   const negP    = GlassCalc.NEGATIVE_PRESSURE_MIYOSHI_PRESET[zoneKey];
@@ -733,7 +750,8 @@ function runCalc() {
     typeKey,
     typeLabel: GlassCalc.GLASS_TYPES[typeKey].label,
     best,
-    okCandidates, ngCandidates, outOfScopeCandidates
+    okCandidates, ngCandidates, outOfScopeCandidates,
+    isUnverifiedDefault
   });
 }
 
