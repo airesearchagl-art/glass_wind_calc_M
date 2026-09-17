@@ -237,25 +237,31 @@ Phase 2B（案件入力値とその根拠を安全にbindingできる構造の�
 
 | フィールド | 説明 |
 |---|---|
-| `level` | `primary`（一次資料で直接確認）／ `indirect`（間接的な数値整合等の状況証拠のみ）／ `none`（根拠未発見） |
-| `checkedAt` | 確認・レビューを行った日付（ISO文字列）。未実施の場合は `null` |
+| `level` | `primary`（一次資料で直接確認）／ `indirect`（間接的な数値整合等の状況証拠のみ）／ `none`（根拠未発見）。これ以外の値は `assertEvidenceConsistency()` が reject する |
+| `checkedAt` | 確認・レビューを行った日付。`null`、または実在するカレンダー日付を表す `"YYYY-MM-DD"` 形式の文字列のみ許容（単なるtruthy判定ではなく、形式・実在する日付かどうかまで検証される。例: `"2026-13-40"` や `"2026/09/17"` は reject） |
 | `publicDescription` | 公開リポジトリに書いてよい、根拠の説明文（固有名詞・内部識別子を含めない） |
 | `privateReferenceAvailable` | 社内に（未開示の）参照資料が存在するかどうかの真偽値のみ |
 
+`verificationStatus` は `project-config/miyoshi.js` の `VERIFICATION_STATUSES = ['verified', 'partially_verified', 'unverified']` のいずれかでなければならず、`'verifed'`（タイプミス）や `'Verified'`（大文字小文字違い）のような値は即座に reject されます。
+
 ### Evidence promotion guard
 
-`verificationStatus` が `"verified"` の値は、**必ず** `evidence.level === "primary"` かつ `evidence.checkedAt` が設定されていなければなりません。これは `project-config/miyoshi.js` の `assertEvidenceConsistency()` によって、値の構築時点（モジュール読み込み時）に強制されます。条件を満たさない値を `"verified"` にしようとすると、モジュール読み込み自体が例外で失敗します。`config.validateAllEvidence()` を呼ぶと、config全体を走査してこの整合性を再確認できます（`tests/project-config.test.js` で回帰テスト済み）。
+`verificationStatus` が `"verified"` の値は、**必ず** `evidence.level === "primary"` かつ `evidence.checkedAt` が妥当な日付として設定されていなければなりません。これは `project-config/miyoshi.js` の `assertEvidenceConsistency()` によって強制されます。
+
+- **`identity` を含む、すべての `"verified"` な値が対象です。** `verifiedValue()` を経由する値（`wind.V0` / `wind.roughnessCategory` / `dimensions.defaultW` / `defaultH` / 階別・部位別風圧プリセット）は `verifiedValue()` の内部で、`identity` は構築直後に明示的に `assertEvidenceConsistency('verified', identityEvidence, 'identity')` を呼び出すことで、それぞれモジュール読み込み時点（`require()` / `<script>` 実行時点）のチェックに含まれます。
+- 条件を満たさない値を `"verified"` にしようとすると、**モジュールの読み込み自体が例外で失敗します**（後から `validateAllEvidence()` を呼んで検出する方式ではありません）。
+- `config.validateAllEvidence()` を呼ぶと、config全体を走査してこの整合性を回帰確認できます（`tests/project-config.test.js` でテスト済み）。
 
 ### 現時点のEvidence状況
 
-| 項目 | verificationStatus | evidence.level | 説明 |
-|---|---|---|---|
-| `identity`（案件識別情報） | `verified` | `primary` | 社内基本設計資料で直接確認済み。ただし`disclosureStatus: "redacted"`のため固有名詞は非開示 |
-| `wind.V0`（基準風速） | `verified` | `primary` | 社内基本設計資料の外構風荷重条件で直接確認済み |
-| `wind.roughnessCategory`（地表面粗度区分） | `verified` | `primary` | 同上 |
-| `wind.positivePressureByFloor` / `negativePressureByZone`（階別・部位別風圧プリセット） | `partially_verified` | `indirect` | V0・粗度区分との数値整合は確認済みだが、元の外装材/ガラス構造計算書・各階評価高さZとの直接対応は未確認 |
-| `dimensions.defaultW`（幅の既定値） | `unverified` | `none` | ガラス1枚の見付幅Wと直接対応する根拠は見つかっていない |
-| `dimensions.defaultH`（高さの既定値） | `unverified` | `indirect` | ACW全体高さとして類似値の記録候補はあるが、ガラス1枚の見付高さとの対応は未確認 |
+| 項目 | verificationStatus | evidence.level | evidence.checkedAt | 説明 |
+|---|---|---|---|---|
+| `identity`（案件識別情報） | `verified` | `primary` | `2026-09-17` | 社内基本設計資料で直接確認済み。ただし`disclosureStatus: "redacted"`のため固有名詞は非開示 |
+| `wind.V0`（基準風速） | `verified` | `primary` | `2026-09-17` | 社内基本設計資料の外構風荷重条件で直接確認済み |
+| `wind.roughnessCategory`（地表面粗度区分） | `verified` | `primary` | `2026-09-17` | 同上 |
+| `wind.positivePressureByFloor` / `negativePressureByZone`（階別・部位別風圧プリセット） | `partially_verified` | `indirect` | `2026-09-17` | V0・粗度区分との数値整合は確認済みだが、元の外装材/ガラス構造計算書・各階評価高さZとの直接対応は未確認 |
+| `dimensions.defaultW`（幅の既定値） | `unverified` | `none` | `null` | ガラス1枚の見付幅Wと直接対応する根拠は見つかっていない |
+| `dimensions.defaultH`（高さの既定値） | `unverified` | `indirect` | `2026-09-17` | ACW全体高さとして類似値の記録候補（2026-09-17確認）はあるが、ガラス1枚の見付高さとの対応は未確認。`checkedAt`が設定されていても`verificationStatus`は`unverified`のまま（`verified`への昇格を意味しない） |
 
 ### Verified project case（将来の拡張）
 
@@ -319,6 +325,11 @@ Phase 2Aで `project-config/miyoshi.js` を分離したことに伴うテスト�
   - `dimensions.mode === "sample_default"`（sample defaultとverified project caseの区別）であること
   - `verifiedCases` が空配列のまま（架空のverified caseが存在しない）であること
   - config全体（関数を除く）をシリアライズしても内部限定識別子（Drive/Notion等のURL・ファイルID）が混入しないこと
+- **Evidence Guard Required Fixのテスト**（2026-09-17時点の追加分）
+  - `VERIFICATION_STATUSES` に定義された3値以外（`'verifed'`・`'Verified'`・`null`・`undefined`・`''`等）を渡すと `assertEvidenceConsistency()` が例外を投げること
+  - `evidence.checkedAt` に不正な形式・実在しない日付（`'abc'`・`'2026/09/17'`・`'2026-9-17'`・`'2026-13-40'`・`'2026-02-30'`・`true`・`123`等）を渡すと例外を投げること。`null` および妥当な `'YYYY-MM-DD'` は許容されること
+  - **`identity` がモジュール読み込み時点のfail-fast contractに含まれること**：`project-config/miyoshi.js` のソースを一時的に書き換えて `identity.evidence.level` を `'primary'` から `'indirect'` に、または `checkedAt` を欠落させた壊れたコピーを作り、それを `require()` すること自体が（`validateAllEvidence()` を後から呼ぶのではなく）例外で失敗することを確認する
+  - `dimensions.defaultH.evidence.checkedAt === '2026-09-17'` でありながら `verificationStatus` は引き続き `'unverified'` のままであること
 - 代表ケース回帰：`project-config` の値を `calc.js` の汎用計算コアへ渡した結果が、config分離前（Phase 1）と完全に同じ値になること
   - FL6, W=1250mm, H=2050mm, 2F, 一般部, extraFactor=1.00 → **P ≈ 1756.09756 N/m²**、designP=1525 N/m² → **OK**
   - FL6, W=1500mm, H=2050mm, 2F, 一般部, extraFactor=1.00 → **P ≈ 1463.41463 N/m²**、designP=1525 N/m² → **NG**
@@ -347,6 +358,7 @@ Phase 2Aで `project-config/miyoshi.js` を分離したことに伴うテスト�
 
 | バージョン | 日付 | 内容 |
 |-----------|------|------|
+| v1.3.1-phase2b | 2026-09-17 | **Evidence Guard Required Fix。**Evidence promotion guardのhard contractを強化。RF-01: `identity`（`verifiedValue()`を経由しないため唯一module-load時点のguardを素通りしていた）の構築直後に`assertEvidenceConsistency('verified', identityEvidence, 'identity')`を明示的に呼び出すよう変更し、`identity`の`evidence`が契約違反の場合、`require()`/`<script>`実行そのものが例外で失敗するようにした（`validateAllEvidence()`頼みの事後検出ではない）。RF-02: `VERIFICATION_STATUSES = ['verified','partially_verified','unverified']`を定数化し、`assertEvidenceConsistency()`冒頭でこれ以外の値（タイプミス・大文字小文字違い・null・undefined・空文字列等）を即rejectするようにした。RF-03: `evidence.checkedAt`を単なるtruthy判定ではなく、`null`または実在するカレンダー日付を表す`"YYYY-MM-DD"`形式の文字列であることを検証するhard validationに変更（`isValidCheckedAt()`。不正な形式・存在しない日付は例外）。RF-04: `dimensions.defaultH.evidence.checkedAt`を、ACW全体高さの記録候補を確認した実際の日付である`'2026-09-17'`に修正（`null`のままだったのは実態と不整合。`verificationStatus`は引き続き`"unverified"`、`evidence.level`は引き続き`"indirect"`を維持し、H=2050をverifiedへ昇格したわけではない）。告示1458号式・k1・k2・IGU ratio・TP rules・Low-E model・extraFactor・風圧数値・V0=34・roughness III・W=1250/H=2050・candidate generation/sorting・publicLabel boundary・`verifiedCases`への実ケース追加はいずれも変更なし。`calc.js`は今回変更なし。既存44テストを維持し、RF-01〜RF-04を直接検証する新規テスト4件（`identity`のmodule-load時fail-fastは、ソースを一時的に書き換えたコピーを実際に`require()`して確認）を追加、計48テスト全pass。 |
 | v1.3.0-phase2b | 2026-09-17 | **Phase 2B：Evidenceモデルの導入。**案件入力値とその根拠（evidence）を安全にbindingできるdata contractを整備。`project-config/miyoshi.js` の各値に `evidence: { level, checkedAt, publicDescription, privateReferenceAvailable }`（`level`は`primary`/`indirect`/`none`）を追加し、`verificationStatus`（値の検証状況）と`evidence`（根拠の状況）を分離。`assertEvidenceConsistency()`によるEvidence promotion guardを導入し、`verificationStatus: "verified"`の値は`evidence.level === "primary"`かつ`evidence.checkedAt`必須という制約をモジュール読み込み時に強制（違反時は例外）。`config.validateAllEvidence()`でconfig全体の整合性を検証可能に。`identity`/`wind.V0`/`wind.roughnessCategory`は`evidence.level: "primary"`を維持（値・verificationStatusは変更なし）、階別正圧・部位別負圧プリセットは`evidence.level: "indirect"`（`partially_verified`のまま）、`dimensions.defaultW`/`defaultH`は`evidence.level: "none"/"indirect"`（`unverified`のまま）。`dimensions.mode = "sample_default"`を追加し、現在のW/H既定値がサンプル値であり検証済み案件確定寸法ではないことをコード上で明示。`verifiedCases: []`（将来、実寸・風圧根拠の両方が確認できた案件ケースを追加するための空配列。架空ケースは追加せず）を新設。README「Evidence Status」セクションを追加。告示1458号式・k1・k2・IGU ratio・TP候補ルール・Low-E strength model・extraFactor・既存風圧数値・V0=34・roughness III・W=1250/H=2050・candidate generation/sorting・publicLabel境界はいずれも変更なし。既存37テストを土台に、identity/V0/roughnessのフィールド参照を新schemaへ追随させたうえでEvidence関連7件を追加し、計44テスト全pass。`calc.js`は今回変更なし。 |
 | v1.2.1-phase2a | 2026-09-17 | **Provenance metadata Required Fix。**`project-config/miyoshi.js` の `identity` を `{ status, note }` から `{ publicLabel, verificationStatus, disclosureStatus, sourceDescription, checkedAt }` へ変更し、案件識別情報が社内基本設計資料で確認済みであること（`verificationStatus: "verified"`）を反映。ただし公開リポジトリのため固有名詞・社内資料参照は開示せず（`disclosureStatus: "redacted"`）、UIには引き続き `publicLabel`（「みよし案件」）のみ表示。`wind.V0` / `wind.roughnessCategory` を社内基本設計資料（外構の風荷重条件）で直接確認済みとして `verificationStatus: "verified"`、`checkedAt: "2026-09-17"` に更新（値34/IIIは変更せず、32m/sへの変更も行っていない）。一方、階別正圧・部位別負圧プリセット値（`positivePressureByFloor` / `negativePressureByZone`）および `wind.status` は、元の外装材/ガラス構造計算書・各階評価高さZとの対応付けが依然未確認のため `partially_verified` を維持（V0/roughness自体の確認と、各階ガラス風圧プリセットの確認を明確に分離）。`dimensions`（W=1250/H=2050、`status`）は `unverified` を維持しつつ、社内の見積資料にACW全体高さとしてH=2050mmに類する記録がある一方、これがガラス1枚の見付高さと同一かは未確認である旨を `sourceDescription`/`note` に追記。社内資料のURL・ファイルID・ファイル名等の内部限定識別子は一切追加していない（リポジトリ全体を再検索し不在を確認）。`calc.js` は計算コード無変更、監査メモのコメント文言のみ同期。既存34テストを土台に、identity関連1件を実態に合わせて更新し、V0/roughnessの新規検証テストなど追加して計36テスト全pass。 |
 | v1.2.0-phase2a | 2026-09 | **Phase 2A：案件固有入力と汎用計算コアの分離。**「みよし案件」固有のプリセット値（階別正圧・部位別負圧・初期寸法）を新設の `project-config/miyoshi.js` へ移設し、値ごとに `verificationStatus`（`verified`/`partially_verified`/`unverified`）等の検証メタデータを付与。`index.html` はこのモジュールを案件プリセットの正として参照するよう変更。`calc.js` に残る同名定数（`POSITIVE_PRESSURE_MIYOSHI_PRESET`等）は非推奨の後方互換複製として維持し、値・計算式・テストは一切変更せず既存23テストは無変更のまま全pass。案件プリセット名をUIに表示するとともに、`wind.status !== verified` の場合に「⚠ 設計風圧プリセット — 原典照合未完了」という追加警告を表示（既存の「参考計算 — 案件実寸未確認」警告は維持・弱めていない）。1250×2050mm・風圧プリセットは引き続き`unverified`/`partially_verified`のままで、`verified`へは昇格させていない。V0=34m/sから32m/sへの変更も行っていない。`tests/project-config.test.js` を新設し、config分離前後で代表ケース（FL6, W=1250/1500mm, H=2050mm, 2F, 一般部）の計算値が不変であることを回帰確認（34テスト全pass）。将来の複数案件対応に向け `window.PROJECT_CONFIGS` レジストリへの登録のみ準備（UI上の案件切替機能は未実装）。 |

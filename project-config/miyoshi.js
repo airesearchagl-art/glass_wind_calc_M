@@ -42,21 +42,36 @@
  *     記載しない。社内資料との厳密な対応関係は、社内の非公開ドキュメント
  *     （GitHubではない場所）で管理する。
  *
- * Evidence model（2026-09-17 Phase 2B）:
+ * Evidence model（2026-09-17 Phase 2B。同日のEvidence Guard Required Fixで
+ * hard contract化）:
  *   - 各入力値は必ず `evidence` を持つ：
  *       { level, checkedAt, publicDescription, privateReferenceAvailable }
  *     - level: 'primary'（一次資料で直接確認）/ 'indirect'（間接的な
  *       数値整合等の状況証拠のみ）/ 'none'（根拠未発見）。
- *     - checkedAt: 確認・レビューを行った日付（ISO文字列）。未実施なら null。
+ *       EVIDENCE_LEVELS 以外の値は assertEvidenceConsistency() が reject する。
+ *     - checkedAt: 確認・レビューを行った日付。null、または実在する
+ *       "YYYY-MM-DD" 形式の文字列のみ許容（単なるtruthy判定ではなく、
+ *       isValidCheckedAt() が形式・実在するカレンダー日付かを検証する）。
  *     - publicDescription: 公開リポジトリに書いてよい、根拠の説明文。
  *     - privateReferenceAvailable: 社内に（未開示の）参照資料が存在するか
  *       どうかの真偽値のみ。実際のURL・ファイルID・ファイル名は含めない。
+ *   - `verificationStatus` は VERIFICATION_STATUSES
+ *     （'verified' / 'partially_verified' / 'unverified'）のいずれかで
+ *     なければ assertEvidenceConsistency() が即rejectする（タイプミストや
+ *     大文字小文字違いでpromotion guardを迂回できないようにするため）。
  *   - `verificationStatus`（「値がどれだけ検証されているか」）と
  *     `evidence`（「根拠がどの程度あるか」）は別軸として扱う。
  *     ただし verificationStatus が 'verified' の場合は、
  *     evidence.level === 'primary' かつ evidence.checkedAt が
- *     設定されていることを必須とする（assertEvidenceConsistency による
- *     promotion guard。詳細は下記）。
+ *     妥当な日付として設定されていることを必須とする
+ *     （assertEvidenceConsistency による promotion guard）。
+ *   - この guard は `verifiedValue()` 経由の値だけでなく `identity` の
+ *     構築時にも明示的に呼び出しており（下記 identityEvidence の直後を
+ *     参照）、'verified' な値はすべてモジュール読み込み
+ *     （require() / <script>実行）の時点でこの契約を満たしていない限り、
+ *     モジュール自体の評価が例外で失敗する fail-fast設計になっている。
+ *     `config.validateAllEvidence()` はあくまで回帰確認用の事後検証補助
+ *     であり、検出そのものをこれに依存してはいない。
  *   - このリポジトリは public であるため、evidence.publicDescription /
  *     privateReferenceAvailable のいずれにも、Google Drive URL・
  *     Drive file ID・Notion等の非公開URL・SharePoint URL・社内ネットワーク
@@ -90,19 +105,55 @@
   'use strict';
 
   // ============================================================
-  // Evidence model（Phase 2B, Task 1/2/7）
+  // Evidence model（Phase 2B, Task 1/2/7。2026-09-17 Evidence Guard
+  // Required Fixでhard validationを強化）
   // ============================================================
 
   var EVIDENCE_LEVELS = ['primary', 'indirect', 'none'];
+
+  // 許容されるverificationStatusの全体（RF-02）。
+  // assertEvidenceConsistency() の冒頭でこれ以外を即rejectすることで、
+  // タイプミス（'verifed'）や大文字小文字違い（'Verified'）でpromotion
+  // guardを迂回できないことを保証する。テストからも参照できるよう
+  // config.VERIFICATION_STATUSES として公開する。
+  var VERIFICATION_STATUSES = ['verified', 'partially_verified', 'unverified'];
+
+  // checkedAt契約（RF-03）: "YYYY-MM-DD" 形式の文字列、または null のみ許容。
+  // 単なるtruthy判定ではなく、実在するカレンダー日付であることまで検証する
+  // （例: '2026-13-40' や '2026-02-30' のような形式は合っていても実在しない
+  // 日付は reject する）。
+  var CHECKED_AT_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+  function isValidCheckedAt(checkedAt) {
+    if (checkedAt === null) {
+      return true;
+    }
+    if (typeof checkedAt !== 'string' || !CHECKED_AT_PATTERN.test(checkedAt)) {
+      return false;
+    }
+    var parts = checkedAt.split('-');
+    var year = Number(parts[0]);
+    var month = Number(parts[1]);
+    var day = Number(parts[2]);
+    if (month < 1 || month > 12) {
+      return false;
+    }
+    // UTC基準でその年月の末日を求め、dayがその範囲内であることを確認する
+    // （うるう年の2月29日等も正しく扱える）。
+    var daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    if (day < 1 || day > daysInMonth) {
+      return false;
+    }
+    return true;
+  }
 
   // Evidence記述オブジェクトを組み立てるヘルパー。
   // publicDescription / privateReferenceAvailable のみを保持し、
   // 実際のURL・ファイルID・ファイル名は一切保持しない設計とする
   // （呼び出し側がそれらを渡すこと自体を想定していない）。
+  // level・checkedAtの厳密な契約検証は assertEvidenceConsistency() 側で
+  // 一元的に行う（verifiedValue()・identity構築のいずれも必ずこれを通る）。
   function makeEvidence(level, checkedAt, publicDescription, privateReferenceAvailable) {
-    if (EVIDENCE_LEVELS.indexOf(level) === -1) {
-      throw new Error('Invalid evidence level: ' + level + ' (must be one of ' + EVIDENCE_LEVELS.join(', ') + ')');
-    }
     return {
       level: level,
       checkedAt: checkedAt || null,
@@ -111,18 +162,42 @@
     };
   }
 
-  // Evidence promotion guard（Task 7）。
-  // verificationStatusが'verified'の値は、必ずevidence.level==='primary'
-  // かつevidence.checkedAtが設定されていなければならない。
-  // すべての値はevidenceそのものを必須とする（'unverified'/'partially_verified'
-  // であっても、evidenceオブジェクト自体は必要。中身がlevel:'none'で
-  // checkedAt:nullであってもよい）。
+  // Evidence promotion guard（Task 7。RF-01〜RF-03でhard contract化）。
+  //
+  // - verificationStatus は VERIFICATION_STATUSES のいずれかでなければ
+  //   即reject（RF-02）。
+  // - evidence は必須。evidence.level は EVIDENCE_LEVELS のいずれかで
+  //   なければreject。
+  // - evidence.checkedAt は null または妥当な "YYYY-MM-DD" 文字列で
+  //   なければreject（単なるtruthy判定ではない。RF-03）。
+  // - verificationStatus が 'verified' の場合は、さらに
+  //   evidence.level === 'primary' かつ evidence.checkedAt が
+  //   設定されていることを必須とする。
+  //
+  // この関数は verifiedValue() 経由の値だけでなく、identity の構築時にも
+  // 直接呼び出す（RF-01）。これにより 'verified' な値はすべて、
+  // モジュール読み込み（require / <script>実行）の時点でこの契約を
+  // 満たしていない限り、モジュール自体の評価が例外で失敗する
+  // fail-fast設計になる。config.validateAllEvidence() による事後検証は
+  // あくまで回帰確認用の補助であり、これに依存した検出ではない。
   function assertEvidenceConsistency(verificationStatus, evidence, label) {
+    if (VERIFICATION_STATUSES.indexOf(verificationStatus) === -1) {
+      throw new Error(
+        'Invalid verificationStatus: ' + JSON.stringify(verificationStatus) +
+        ' (must be one of ' + VERIFICATION_STATUSES.join(', ') + ')' + (label ? ' (' + label + ')' : '')
+      );
+    }
     if (!evidence || typeof evidence !== 'object') {
       throw new Error('evidence metadata is required' + (label ? ' for ' + label : ''));
     }
     if (EVIDENCE_LEVELS.indexOf(evidence.level) === -1) {
       throw new Error('evidence.level must be one of ' + EVIDENCE_LEVELS.join(', ') + (label ? ' (' + label + ')' : ''));
+    }
+    if (!isValidCheckedAt(evidence.checkedAt)) {
+      throw new Error(
+        'evidence.checkedAt must be null or a valid "YYYY-MM-DD" date string, got: ' +
+        JSON.stringify(evidence.checkedAt) + (label ? ' (' + label + ')' : '')
+      );
     }
     if (verificationStatus === 'verified') {
       if (evidence.level !== 'primary') {
@@ -151,26 +226,37 @@
     };
   }
 
+  // 案件識別情報そのものは社内基本設計資料で確認済み（verificationStatus:
+  // 'verified'）。ただし本リポジトリは public であるため、施主名・建物名称・
+  // 設計番号等の具体的な固有名詞や、社内資料のURL・ファイルID・ファイル名は
+  // このリポジトリには記載しない（disclosureStatus: 'redacted'）。
+  // UI・ドキュメント上は引き続き publicLabel の「みよし案件」を表示する。
+  // 社内での厳密な対応関係は、社内の非公開ドキュメントで管理する。
+  //
+  // RF-01（Evidence Guard Required Fix）: identity は verifiedValue() を
+  // 経由しないため、他の 'verified' な値と異なり construction-time guard
+  // を素通りしてしまっていた。ここで明示的に assertEvidenceConsistency() を
+  // 呼び、identity もモジュール読み込み時点のfail-fast契約に含める。
+  // 契約に違反する evidence（例: level !== 'primary' や checkedAt 欠落）を
+  // 渡すと、この行で例外が投げられ、require() / <script> 実行自体が
+  // 失敗する。
+  var identityEvidence = makeEvidence(
+    'primary' /* identity-evidence-level */,
+    '2026-09-17',
+    '社内基本設計資料により案件識別情報を確認済み。本リポジトリは公開のため、固有名詞・社内資料参照は開示しない。',
+    true
+  );
+  assertEvidenceConsistency('verified', identityEvidence, 'identity');
+
   var config = {
     projectId: 'miyoshi',
     projectName: 'みよし案件',
 
-    // 案件識別情報そのものは社内基本設計資料で確認済み（verificationStatus:
-    // 'verified'）。ただし本リポジトリは public であるため、施主名・建物名称・
-    // 設計番号等の具体的な固有名詞や、社内資料のURL・ファイルID・ファイル名は
-    // このリポジトリには記載しない（disclosureStatus: 'redacted'）。
-    // UI・ドキュメント上は引き続き publicLabel の「みよし案件」を表示する。
-    // 社内での厳密な対応関係は、社内の非公開ドキュメントで管理する。
     identity: {
       publicLabel: 'みよし案件',
       verificationStatus: 'verified',
       disclosureStatus: 'redacted',
-      evidence: makeEvidence(
-        'primary',
-        '2026-09-17',
-        '社内基本設計資料により案件識別情報を確認済み。本リポジトリは公開のため、固有名詞・社内資料参照は開示しない。',
-        true
-      )
+      evidence: identityEvidence
     },
 
     // 現在のW/H既定値は「本ツールのサンプル既定値」であり、検証済みの案件
@@ -197,11 +283,15 @@
       // ACW全体寸法であり、ガラス1枚の見付高さと同一であることは未確認。
       // pane（ガラス1枚）の実見付寸法が確認できるまでは案件確定寸法として
       // 使用不可。
+      // RF-04: このindirect evidence（ACW全体高さの記録候補）は2026-09-17に
+      // 確認したものであるため、checkedAtをnullから'2026-09-17'へ修正した。
+      // これはH=2050をverifiedへ昇格することを意味しない
+      // （verificationStatus="unverified"・evidence.level="indirect"は維持）。
       defaultH: verifiedValue(
         2050, 'mm', 'unverified',
         makeEvidence(
           'indirect',
-          null,
+          '2026-09-17',
           'リポジトリ初回リリースコミット（feat: 初版リリース）でindex.htmlの初期値として導入された値。社内の見積資料にはACW（アルミカーテンウォール）全体高さとしてH=2050mmに類する記録候補が存在するが、これはACW全体寸法でありガラス1枚の見付高さと同一であることは確認できていない。',
           true
         ),
@@ -328,10 +418,11 @@
   };
 
   // Evidence promotion guardをテスト・外部から直接検証できるように公開する
-  // （Task 7・Task 8）。この関数はverifiedValue()内部でも使用されており、
-  // config構築時点で既に自己検証済みだが、テストからの直接呼び出しにも
-  // 対応する。
+  // （Task 7・Task 8）。この関数はverifiedValue()内部・identity構築時にも
+  // 使用されており、config構築時点（モジュール読み込み時点）で既に
+  // 自己検証済みだが、テストからの直接呼び出しにも対応する。
   config.EVIDENCE_LEVELS = EVIDENCE_LEVELS;
+  config.VERIFICATION_STATUSES = VERIFICATION_STATUSES;
   config.assertEvidenceConsistency = assertEvidenceConsistency;
 
   // config全体を走査し、すべての verifiedValue()相当のエントリ・identityが
