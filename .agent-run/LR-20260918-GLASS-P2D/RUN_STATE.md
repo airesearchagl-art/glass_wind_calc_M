@@ -78,15 +78,16 @@ project-config/miyoshi.js     : コメント内の言及のみ
 Fresh Gate                     : PASS（base SHA一致、working tree clean）
 baseline npm test              : PASS（91 pass / 0 fail）
 canonical read                 : PASS（Vault read-onlyで5文書取得）
-full npm test (current)        : PASS（128 pass / 0 fail）
+full npm test (current)        : PASS（133 pass / 0 fail。repair waveで+5）
 AC-10 coverage audit           : PASS（要求20カテゴリすべてCOVERED、MISSINGなし）
 repository-wide privacy sweep  : PASS（新規の実識別子なし）
 full diff review (self)        : PASS（1件の不具合を自己検出し修正済み: control-char literal）
 browser smoke (Miyoshi)        : PASS（1756 OK / 1463 NG）
 browser smoke (Manual)         : PASS（designP=1400）
 browser smoke (Imported)       : PASS（roundtrip / 偽装payload downgrade / XSS reject / __proto__ reject）
-independent verification       : 実行中（別contextのverifier。結果待ち）
-Vercel Preview exact-head      : PASS（PR #5 head da13ca90 で success）
+independent verification       : 実施（別context）。VERDICT FAIL 1件 + 非blocking 4件を受領し、repair wave W7で対応
+mutation check (repair対象)     : PASS（M16 k2 cap / M17 ratio除外 / 境界>=・定数・status経路の5 mutantすべてkill）
+Vercel Preview exact-head      : repair wave後のheadで再確認（下記 Wave 7 参照）
 ```
 
 ## Hard Checks（Quality Debt化禁止）
@@ -104,7 +105,12 @@ Verified-state spoofing  : PASS（payloadのverified主張がdowngradeされる�
 ```
 
 いずれもwaiver・accepted_by_human・Quality Debt・NOT RUN・INCONCLUSIVEを使用していない。
-ただしIndependent Verificationの結果が未着のため、最終判定は verifier 結果の反映後に行う。
+
+Independent Verifierは Privacy を FAIL と判定した（AC-13）。repair wave W7で、本Campaignが
+Run Artifactへ新規記載していたVercel deployment識別子を3箇所から除去した。
+残る1箇所は immutable な `TASK_PACKET_SNAPSHOT.md`（Task Packet本文のverbatim）内にあり、
+digest binding（`6d38bb4f...`）を壊さずには除去できないため、**Humanの判断事項として保留**する
+（詳細は DECISIONS.md D-600）。自己判断でdigestを変更していない。
 
 ## Quality Debt
 
@@ -151,25 +157,28 @@ tests/ui-mode-separation.test.js       （Phase 2D UI契約 5件追加）
 ## Remaining tasks
 
 ```text
-1. Independent Verifierの結果を反映（findingがあればscope内でrepair→再verify）
-2. Run Artifact最終収束 + Completion Report
+1. （完了）Independent Verifierの結果を反映。Wave 7 repairを実施
+2. Human判断待ち: TASK_PACKET_SNAPSHOT.md内に残るVercel deployment識別子の扱い
+   （immutable digest bindingと privacy boundary が競合。詳細 DECISIONS.md D-600）
+3. Human Gate: Ready for Review / merge / Production の可否
 ```
 
 Draft PR #5 は作成済み（OPEN / Draft / merged=false）。Vercel Preview は exact head で READY 確認済み。PR本文も同期済み。
 
 ## Next action
 
-Independent Verifierの結果を受領し、findingがscope内であれば同Campaign内でrepairして再検証する。その後Draft PRを作成し、Vercel Preview exact-headを確認してCompletion Reportを出す。Ready化・merge・Productionは行わない。
+なし（agent側で自律的に進める作業は残っていない）。Human判断を待つ。
+Ready化・merge・Productionは行わない。
 
 ## Stop conditions status
 
 ```text
 Fresh Gate                 : PASS
-Hard Gate failure          : なし
+Hard Gate failure          : Privacy FAIL（verifier指摘）→ Wave 7で是正。残1件はHuman判断へ回付
 BLOCKED transition         : 発生していない
 no_progress_waves          : 0 / 2（LONG_RUN上限）
 same_hypothesis_retry      : 0 / 2
-repair_strategies          : 0 / 3
+repair_strategies          : 1 / 3（Wave 7 repair）
 ```
 
 ## Resume instructions
@@ -186,3 +195,18 @@ repair_strategies          : 0 / 3
 6. npm test でtargeted smoke check
 7. 上記 Next action から再開する
 ```
+
+
+## Wave 7 — Independent Verification repair（追補）
+
+Independent Verifier（別context）の指摘に対する対応。
+
+| # | 指摘 | 重大度 | 対応 |
+|---|---|---|---|
+| 1 | Vercel deployment識別子がpublic repoへ新規混入（AC-13） | BLOCKING | 本Campaignが記載した3箇所を除去。snapshot内1箇所はHuman判断へ回付（D-600） |
+| 2 | 複層 厚板/薄板 > 2.5 の除外がcandidate levelで未固定（mutant M17 survive） | MEDIUM | テスト3件追加。M17含む5 mutantをkill |
+| 3 | `K2_RATIO_CAP = 2.0` が未固定（mutant M16 survive） | LOW-MEDIUM | 同上。cap値と「cap超は寄与しない」性質を固定 |
+| 4 | `fromPreset()` が `hasFixedPreset` 自称objectを受理（defense-in-depth） | LOW | registryとの**同一性**検証を追加。`registered_preset` の sourceId もregistry登録済みに限定（D-601） |
+| 5 | `calc.js` に小文字 `miyoshi` がpath pointerとして残存 | INFO | purity testを厳格化（コメント内のpath pointerのみ許容）し、意図を明示 |
+
+いずれも既存のprotected invariant・計算値・preset値を変更していない（AC-09値は再実測で不変）。

@@ -205,7 +205,7 @@ pull_request: "#4"
 pull_request_state: merged
 merge_commit_main: 97bc18e53c7d3a86b3f180f408e265fec3cf5117
 production: READY
-production_deployment: dpl_7it4hsHhMz8gCLF9QWj7TkBySWBt
+production_deployment: READY（Vercel Production。deployment識別子はRun Artifactに記載しない。Vercel dashboard / PR #4のdeployment statusを参照）
 independent_focused_review: PASS
 required_fix_count: 0
 human_merge_authorization: received

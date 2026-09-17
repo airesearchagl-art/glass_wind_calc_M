@@ -102,6 +102,6 @@ Phase 2C（LR-20260917-GLASS-P2C）ではVaultへのアクセスが拒否され�
 | 4 | UI integration（Miyoshi / Manual / Imported） | `0b82f1434791201940abf63aca4214cf6c706b72` |
 | 6（先行） | README同期（Phase 2D architecture / migration） | `fbcdfc9feb96a9bb3fed48478618afe4a5503e3f` |
 | 5（self review repair） | control-char literalの修正 | `190b3c432387e447dea27765fbba68b5f322e0b5` |
-| 5 / 6（収束） | Run Artifact更新・Draft PR・Preview確認 | 本Run Artifact更新commit自身を含むため固定値を書かない（`git rev-parse HEAD` / PR現在head） |
+| 7 | Independent Verification repair（privacy是正 / test gap / registry同一性） | 本Run Artifact更新commit自身を含むため固定値を書かない（`git rev-parse HEAD` / PR現在head） |
 
 Run Artifact自身を含むcommitのSHAは、そのcommit確定前に本文へ固定値で書けない（自己参照）。確定済みの過去Waveのcheckpoint SHAは上表のとおり。

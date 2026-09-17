@@ -410,3 +410,69 @@ test('AC-07: deserializeはeval / Functionを使わない（ソースレベル�
   assert.doesNotMatch(src, /\bFunction\s*\(/);
   assert.match(src, /JSON\.parse/);
 });
+
+
+/* ============================================================
+   Phase 2D repair wave: registered_presetを名乗れる対象の限定
+   （independent verifierのdefense-in-depth指摘への対応。
+    外部データからは到達しないが、trust boundaryを
+    「慣習」ではなく「構造」で成立させる。）
+============================================================ */
+
+test('AC-05: fromPreset()はhasFixedPresetを自称する偽装objectを拒否する', () => {
+  const real = PresetRegistry.getPreset('miyoshi');
+
+  // registryに存在するprojectIdを騙った別object（値もラベルも攻撃者制御）
+  const spoof = {
+    projectId: 'miyoshi',
+    hasFixedPreset: true,
+    getPositivePressure: () => 99999,
+    getNegativePressure: () => -99999,
+    getPublicLabel: () => '偽装された案件ラベル',
+    wind: { status: 'verified' }
+  };
+  assert.throws(() => ProjectInput.fromPreset(spoof, {
+    floorKey: '2', zoneKey: 'general',
+    widthMm: 1250, heightMm: 2050, glassType: 'fl_single', extraFactor: 1.0
+  }), /built-in registered preset/);
+
+  // registryに無いprojectIdを名乗る場合も拒否
+  const unknown = Object.assign({}, spoof, { projectId: 'not-registered' });
+  assert.throws(() => ProjectInput.fromPreset(unknown, {
+    floorKey: '2', zoneKey: 'general',
+    widthMm: 1250, heightMm: 2050, glassType: 'fl_single', extraFactor: 1.0
+  }), /built-in registered preset/);
+
+  // 本物（registryが保持しているobjectそのもの）は従来どおり通る
+  const ok = ProjectInput.fromPreset(real, {
+    floorKey: '2', zoneKey: 'general',
+    widthMm: 1250, heightMm: 2050, glassType: 'fl_single', extraFactor: 1.0
+  });
+  assert.equal(ok.sourceKind, 'registered_preset');
+  assert.equal(ok.sourceId, 'miyoshi');
+});
+
+test('AC-05: registry未登録のsourceIdでregistered_presetを名乗れない', () => {
+  const pkg = {
+    schemaVersion: 1,
+    sourceKind: 'registered_preset',
+    sourceId: 'fabricated-project',
+    widthMm: 1250, heightMm: 2050,
+    positivePressure: 1525, negativePressure: -1122, designPressure: 1525,
+    glassType: 'fl_single', extraFactor: 1.0,
+    provenance: {
+      publicLabel: '実在しない案件',
+      verificationStatus: 'verified',
+      note: ''
+    }
+  };
+  assert.throws(() => ProjectInput.createProjectInput(pkg), /registered in the built-in preset registry/);
+  assert.throws(() => ProjectInput.validateProjectInput(pkg), /registered in the built-in preset registry/);
+
+  // importは従来どおりdowngradeで無害化される（例外ではない）
+  const imported = ProjectInput.deserialize(JSON.stringify(pkg));
+  assert.equal(imported.sourceKind, 'imported_unverified');
+  assert.equal(imported.sourceId, null);
+  assert.equal(imported.provenance.verificationStatus, 'unverified');
+  assert.notEqual(imported.provenance.publicLabel, '実在しない案件');
+});

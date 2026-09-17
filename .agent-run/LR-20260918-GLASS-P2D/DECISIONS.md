@@ -65,3 +65,43 @@ full diff reviewで `project-config/project-input.js` がgit上binary扱いに�
 正規表現としては機能していたためテストでは検出できなかったが、(1) ソース差分がレビュー不能になる、(2) JSソース中のNULバイトは配信・編集環境で不安定、という実害があるため修正した。挙動は同一であることを、5種の制御文字が従来どおり拒否されることで確認している。
 
 この事例は「テストが通っている＝ソースが健全」ではないことの記録として残す。
+
+## D-600 — Vercel deployment識別子のRun Artifactからの除去と、snapshot内残存の回付
+
+- **状況**: Independent VerifierがAC-13違反として、Vercel deployment識別子
+  （`dpl_` で始まる opaque token）がpublic repositoryへ新規に持ち込まれていると指摘した。
+  4箇所のうち3箇所は本Campaignが書いたPhase 2C Run Artifact、1箇所は
+  `TASK_PACKET_SNAPSHOT.md`（Task Packet本文のverbatim）である。
+- **独立確認**: base `97bc18e5...` には存在せず、本branchが新規に追加したものであることを確認した。
+  また本repository自身の `assertPublicSafeEvidenceText()` がこの文字列を
+  `opaque-long-token` として**拒否**する。すなわち自repoの公開安全基準に反する。
+- **重大度の評価（過大評価しない）**: これはsecretやcredentialではない。Vercelの
+  GitHub Appは同種の識別子（projectId / teamId / deployment inspector ID）を
+  本repositoryのPRコメントへ自動的に公開投稿しており、同クラスの識別子は既にpublicである。
+  したがって実害は「秘密の漏洩」ではなく、**AC-13および自repoの公開安全基準との不整合**である。
+- **決定**:
+  1. 本Campaignが記載した3箇所（Phase 2C の RUN_STATE / RUN_MANIFEST / TASK_QUEUE）からは
+     識別子を除去し、事実（Production READY）のみを残す。可逆で、失うものがない。
+  2. `TASK_PACKET_SNAPSHOT.md` 内の1箇所は**変更しない**。当該fileはimmutableなTask Packet本文であり、
+     Humanから「本文（exact verbatim portion）を変更しないこと」「digestが変わった場合はSTOP」と
+     明示指示されている。digest `6d38bb4f...` を維持する。
+- **理由**: privacy boundary（AC-13）とimmutable digest binding（§Task Packet）が
+  同一のTask Packet内で競合しており、どちらを優先するかはagentが自己判断でよい種類の
+  trade-offではない。Hard Gate（Privacy）のFAILを自己waiveもしない。
+  よって除去可能な範囲は直ちに除去し、残りはHumanの決定事項として明示的に回付する。
+- **Humanの選択肢**: (a) 現状維持（実質public情報であり許容）、
+  (b) Task Packet revision 2 を発行し、識別子を除いた本文で snapshot と digest を再発行する。
+  (b) を選ぶ場合は新digestをHumanが承認する必要がある。agent側では実施しない。
+
+## D-601 — `registered_preset` を名乗れる対象をregistry同一性で限定する
+
+- **状況**: `fromPreset()` は `hasFixedPreset === true` という自称マーカーのみを検査しており、
+  偽装objectから `registered_preset` packageを生成できた（Verifier指摘、LOW）。
+  外部データからは到達しない（JS実行権限が前提）が、trust boundaryが
+  「構造」ではなく「慣習」で成立している状態だった。
+- **決定**: `fromPreset()` で、渡されたconfigがregistryの保持する
+  built-in preset object **そのもの**であること（`===` 同一性）を検証する。
+  あわせて `registered_preset` の `sourceId` はregistry登録済みprojectIdに限定する。
+- **理由**: AC-04/AC-05が主張する「registered presetはrepository内built-inのみ」を、
+  実装上の事実にする。importパスは従来どおりdowngradeで処理され、挙動は変わらない
+  （browser実機・全testで確認済み）。

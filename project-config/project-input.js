@@ -112,6 +112,23 @@
     return Object.keys(resolveGlassCalc().GLASS_TYPES);
   }
 
+  // 依存解決（project-config/registry.jsのpreset registry）
+  // registryはrepository内built-in presetのみを保持する信頼境界であり、
+  // `registered_preset` を名乗れる対象をregistry登録済みのものに限定するために使う。
+  function resolveRegistry() {
+    if (global && global.PresetRegistry) {
+      return global.PresetRegistry;
+    }
+    if (typeof require === 'function') {
+      try {
+        return require('./registry.js');
+      } catch (e) {
+        /* fallthrough */
+      }
+    }
+    throw new Error('ProjectInput: PresetRegistry (project-config/registry.js) is required but not available');
+  }
+
   // ------------------------------------------------------------
   // 原始的なvalidator
   // ------------------------------------------------------------
@@ -208,6 +225,13 @@
         throw new Error('registered_preset requires a non-empty string sourceId');
       }
       assertPublicSafeString(raw.sourceId, 'sourceId');
+      // registryに登録されていないprojectIdは `registered_preset` を名乗れない。
+      if (!resolveRegistry().hasPreset(raw.sourceId)) {
+        throw new Error(
+          'registered_preset requires a sourceId registered in the built-in preset registry: ' +
+            JSON.stringify(raw.sourceId)
+        );
+      }
       sourceId = raw.sourceId;
     }
 
@@ -316,6 +340,17 @@
    */
   function fromPreset(presetConfig, input) {
     if (!presetConfig || typeof presetConfig !== 'object' || presetConfig.hasFixedPreset !== true) {
+      throw new Error('fromPreset(): a built-in registered preset config is required');
+    }
+    // hasFixedPresetマーカーの自称だけでは足りない。registryが保持している
+    // built-in preset object *そのもの* であることを同一性で確認する
+    // （`registered_preset` を名乗る偽装objectを構造的に排除する）。
+    var registry = resolveRegistry();
+    if (
+      typeof presetConfig.projectId !== 'string' ||
+      !registry.hasPreset(presetConfig.projectId) ||
+      registry.getPreset(presetConfig.projectId) !== presetConfig
+    ) {
       throw new Error('fromPreset(): a built-in registered preset config is required');
     }
     if (!input || typeof input !== 'object') {

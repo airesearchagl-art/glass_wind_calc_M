@@ -29,14 +29,30 @@ Wave単位・AC単位のタスク状態。Wave完了ごとに更新する。
 | AC-09 | Regression | PASS |
 | AC-10 | Phase 2D new tests（20カテゴリ） | PASS |
 | AC-11 | Browser verification | PASS |
-| AC-12 | Vercel Preview exact-head | pending（Draft PR作成後） |
-| AC-13 | Privacy / Disclosure | PASS |
-| AC-14 | Documentation | README同期済 / PR本文が残 |
+| AC-12 | Vercel Preview exact-head | PASS（Wave 7後のexact headで再確認） |
+| AC-13 | Privacy / Disclosure | PARTIAL — Wave 7で3箇所を是正。残1件（immutable snapshot内）はHuman判断へ回付（D-600） |
+| AC-14 | Documentation | PASS（README同期済 / PR本文同期済） |
 
 ## Next Action
 
 ```text
-Independent Verifierの結果反映 → Draft PR → Vercel Preview exact-head → Completion Report
+なし（agent側で自律的に進める作業は残っていない）。
+
+Human判断待ち:
+  1. TASK_PACKET_SNAPSHOT.md内に残るVercel deployment識別子の扱い（D-600）
+  2. Ready for Review / merge / Production の可否
+  3. Explicit unverified items（実見付W/H・風圧の元計算根拠）の扱い
+```
+
+## Wave 7 — Independent Verification repair（完了）
+
+```text
+W7-1 privacy: deployment識別子の除去（3箇所）           DONE
+W7-2 test gap: 厚板/薄板>2.5 除外のcandidate level固定  DONE（mutant M17 kill）
+W7-3 test gap: K2_RATIO_CAP=2.0 の固定                  DONE（mutant M16 kill）
+W7-4 hardening: registry同一性によるpreset限定           DONE
+W7-5 purity test厳格化（小文字miyoshiのpath pointer限定） DONE
+W7-6 全test / browser / privacy sweep 再実行             DONE（133 pass / 0 fail）
 ```
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管）。

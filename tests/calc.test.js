@@ -21,7 +21,9 @@ const {
   K1_TP_SUPPORTED_THICKNESSES_MM,
   IGU_APPLICABLE_RATIO_MAX,
   STRENGTH_TYPES,
-  generateCandidates
+  K2_RATIO_CAP,
+  generateCandidates,
+  splitCandidates
 } = require('../calc.js');
 
 const GlassCalc = require('../calc.js');
@@ -159,6 +161,19 @@ test('AC-01: calc.jsのソースにMiyoshi固有の識別子・案件固有値�
   for (const token of ['verificationStatus', 'evidence', 'UNVERIFIED PROJECT DEFAULT']) {
     assert.equal(src.includes(token), false, `calc.jsに案件provenance語彙 ${token} が残っている`);
   }
+  // 小文字 'miyoshi' は「正がどこにあるか」を示すfile path pointerとしてのみ許容する。
+  // 案件固有の値・ラベル・provenanceとして現れてはならない。
+  const lowercaseHits = src.split('\n').filter((line) => line.includes('miyoshi'));
+  for (const line of lowercaseHits) {
+    assert.match(
+      line, /project-config\/miyoshi\.js/,
+      `calc.js内の 'miyoshi' はproject-config/miyoshi.jsへのpath pointerのみ許容: ${line.trim()}`
+    );
+    assert.equal(
+      line.trim().startsWith('*') || line.trim().startsWith('//'), true,
+      `calc.js内の 'miyoshi' はコメント内のpointerのみ許容（実行コード不可）: ${line.trim()}`
+    );
+  }
 });
 
 /* ============================================================
@@ -251,4 +266,90 @@ test('FL19は従来どおり候補として残る（TP修正がFL候補へ波及
   const candidates = generateCandidates('fl_single', 1.0, 1, 1.0);
   const labels = candidates.map(c => c.label);
   assert.ok(labels.indexOf('FL19') !== -1, 'FL19は従来どおり候補に存在するはず');
+});
+
+
+/* ============================================================
+   Phase 2D repair wave: protected invariantのcandidate-level固定
+   （independent verifierが指摘したtest gapを埋める。
+    不変条件そのものは変更していない。）
+============================================================ */
+
+test('不変条件: k2式の厚さ比capは2.0で、比がそれを超えてもk2は増えない', () => {
+  // K2_RATIO_CAP自体を固定する（値が変わればこのテストが落ちる）。
+  assert.equal(K2_RATIO_CAP, 2.0);
+
+  // 比 5:10 = 2.0（ちょうどcap）と 5:12 = 2.4（capが効く）で
+  // 薄板側のk2が同一になること。= 比2.0超はk2に寄与しない。
+  const K2_AT_CAP = 0.75 * (1 + Math.pow(2.0, 3)); // 6.75
+  assert.equal(calcK2_IGU(5, 10), K2_AT_CAP);
+  assert.equal(calcK2_IGU(5, 12), K2_AT_CAP);
+  assert.equal(calcK2_IGU(8, 19), K2_AT_CAP); // 比2.375もcap
+  assert.equal(K2_AT_CAP, 6.75);
+
+  // capに達しない比では素の比が使われる（capが常時適用されていないこと）。
+  assert.equal(calcK2_IGU(5, 6), 0.75 * (1 + Math.pow(6 / 5, 3)));
+  assert.ok(calcK2_IGU(5, 6) < K2_AT_CAP);
+
+  // 厚板側（比 < 1）はcapの影響を受けない。
+  assert.equal(calcK2_IGU(12, 5), 0.75 * (1 + Math.pow(5 / 12, 3)));
+});
+
+test('不変条件: 厚板/薄板 > 2.5 の複層候補はOK候補に混入せず自動推奨されない', () => {
+  // 適用範囲外でも「計算上は耐える」候補が生じる大きめのdesignPを使う。
+  const candidates = generateCandidates('fl_fl', AREA, 1500, 1.0);
+  const split = splitCandidates(candidates);
+
+  const overRatio = candidates.filter((c) => c.rawRatio > IGU_APPLICABLE_RATIO_MAX);
+  assert.ok(overRatio.length > 0, '比2.5超の候補が生成されていること（テストが空振りしていない）');
+
+  for (const c of overRatio) {
+    assert.equal(c.status, 'out_of_scope', `比${c.rawRatio}の候補は out_of_scope であるべき: ${c.label}`);
+    assert.equal(c.outOfScope, true);
+  }
+
+  // split結果のどのバケツに入るか = 推奨対象になりうるかの境界。
+  const labelsOf = (list) => list.map((c) => c.label);
+  for (const c of overRatio) {
+    assert.equal(labelsOf(split.okCandidates).includes(c.label), false,
+      `適用範囲外候補がOK候補に混入している: ${c.label}`);
+    assert.equal(labelsOf(split.ngCandidates).includes(c.label), false,
+      `適用範囲外候補がNG候補に混入している: ${c.label}`);
+    assert.equal(labelsOf(split.outOfScopeCandidates).includes(c.label), true,
+      `適用範囲外候補がoutOfScopeバケツに入っていない: ${c.label}`);
+  }
+
+  // 「計算上は耐えるが適用範囲外」の候補が実在し、かつ推奨されないこと。
+  const wouldPassButOutOfScope = overRatio.filter((c) => c.wouldPass === true);
+  assert.ok(wouldPassButOutOfScope.length > 0,
+    'wouldPass=trueかつ適用範囲外の候補が存在すること（自動推奨除外の実効性）');
+  for (const c of wouldPassButOutOfScope) {
+    assert.equal(labelsOf(split.okCandidates).includes(c.label), false);
+  }
+
+  // 推奨候補（OK先頭）は必ず適用範囲内。
+  if (split.okCandidates.length > 0) {
+    assert.equal(split.okCandidates[0].outOfScope, false);
+    assert.ok(split.okCandidates[0].rawRatio === undefined ||
+      split.okCandidates[0].rawRatio <= IGU_APPLICABLE_RATIO_MAX);
+  }
+});
+
+test('不変条件: 比がちょうど2.5の複層候補は適用範囲内（境界は > で判定）', () => {
+  // FL6 + FL15 = 2.5ちょうど。境界が >= に変わればこのテストが落ちる。
+  const r = calcP_IGU(6, 15, getK1_FL(6), getK1_FL(15), AREA, 1.0);
+  assert.equal(r.rawRatio, 2.5);
+  assert.equal(r.outOfScope, false, '比2.5ちょうどは適用範囲内');
+
+  const candidates = generateCandidates('fl_fl', AREA, 1500, 1.0);
+  const at25 = candidates.filter((c) => c.rawRatio === 2.5);
+  assert.ok(at25.length > 0);
+  for (const c of at25) {
+    assert.notEqual(c.status, 'out_of_scope', `比2.5ちょうどを除外してはならない: ${c.label}`);
+  }
+
+  // 一方で 5:15 = 3.0 は適用範囲外。
+  const r3 = calcP_IGU(5, 15, getK1_FL(5), getK1_FL(15), AREA, 1.0);
+  assert.equal(r3.rawRatio, 3);
+  assert.equal(r3.outOfScope, true);
 });

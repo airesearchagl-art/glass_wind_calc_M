@@ -43,7 +43,7 @@ Wave単位・Finding単位のタスク状態一覧。
 none — Phase 2C closed
 ```
 
-Phase 2C final feature head `5f3db2adf3adaea98d9311c83aa2a1cfead03655` でPR #4がmergeされ、main `97bc18e53c7d3a86b3f180f408e265fec3cf5117` / Production READY（deployment `dpl_7it4hsHhMz8gCLF9QWj7TkBySWBt`）に到達した。Campaign final stateは `COMPLETE_VERIFIED`。後続作業はPhase 2D（LR-20260918-GLASS-P2D）で扱う。
+Phase 2C final feature head `5f3db2adf3adaea98d9311c83aa2a1cfead03655` でPR #4がmergeされ、main `97bc18e53c7d3a86b3f180f408e265fec3cf5117` / Production READY（deployment識別子はRun Artifactに記載しない）に到達した。Campaign final stateは `COMPLETE_VERIFIED`。後続作業はPhase 2D（LR-20260918-GLASS-P2D）で扱う。
 
 ## 個別Findingの由来
 
