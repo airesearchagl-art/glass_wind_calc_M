@@ -27,8 +27,43 @@ test('project-config: projectId/projectName が定義されている', () => {
   assert.ok(MiyoshiProjectConfig.projectName.length > 0);
 });
 
-test('project-config: 案件識別情報(identity)はverifiedへ昇格していない', () => {
-  assert.notEqual(MiyoshiProjectConfig.identity.status, 'verified');
+/* ============================================================
+   Provenance / disclosure（2026-09-17 Provenance Required Fix）
+   verificationStatus（社内で確認できているか）と disclosureStatus
+   （公開リポジトリで何を開示するか）を分離して扱う。
+============================================================ */
+
+test('project-config: identity — 社内確認済み状態を表現でき、publicLabelは"みよし案件"、private固有名詞を要求しない構造', () => {
+  const identity = MiyoshiProjectConfig.identity;
+  assert.equal(identity.publicLabel, 'みよし案件');
+  assert.equal(identity.verificationStatus, 'verified');
+  assert.equal(identity.disclosureStatus, 'redacted');
+  assert.equal(identity.checkedAt, '2026-09-17');
+  assert.equal(typeof identity.sourceDescription, 'string');
+  // identityの構造自体が、施主名・建物名称等のprivateな固有名詞フィールドを
+  // 要求しないこと（publicLabel等の既知キーのみで完結する）。
+  const allowedKeys = ['publicLabel', 'verificationStatus', 'disclosureStatus', 'sourceDescription', 'sourceReference', 'checkedAt'];
+  for (const key of Object.keys(identity)) {
+    assert.ok(allowedKeys.indexOf(key) !== -1, `identityに想定外のキー ${key} が存在する`);
+  }
+  // sourceDescription等に内部限定識別子（Drive URL/ファイルID等）を含まないこと
+  const serialized = JSON.stringify(identity);
+  assert.doesNotMatch(serialized, /drive\.google|docs\.google|notion\.(so|com)|sharepoint|dropbox\.com/i);
+});
+
+test('project-config: wind.V0 — 社内基本設計資料で直接確認済み（verified）、checkedAt=2026-09-17', () => {
+  const V0 = MiyoshiProjectConfig.wind.V0;
+  assert.equal(V0.value, 34);
+  assert.notEqual(V0.value, 32);
+  assert.equal(V0.verificationStatus, 'verified');
+  assert.equal(V0.checkedAt, '2026-09-17');
+});
+
+test('project-config: wind.roughnessCategory — 社内基本設計資料で直接確認済み（verified）、checkedAt=2026-09-17', () => {
+  const roughness = MiyoshiProjectConfig.wind.roughnessCategory;
+  assert.equal(roughness.value, 'III');
+  assert.equal(roughness.verificationStatus, 'verified');
+  assert.equal(roughness.checkedAt, '2026-09-17');
 });
 
 test('project-config: miyoshi configから現在と同じ正圧値を取得できる（calc.js旧定数との整合）', () => {

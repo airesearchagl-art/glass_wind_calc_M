@@ -30,6 +30,16 @@
  * 重要: 1250×2050mm・各階風圧プリセットの元となった構造計算書・評価高さZは
  * まだ完全には確認できていない。未検証の値を verificationStatus: "verified"
  * へ昇格させてはならない。
+ *
+ * Provenance / disclosure モデル（2026-09-17 Provenance Required Fix）:
+ *   - verificationStatus（'verified' / 'partially_verified' / 'unverified'）は、
+ *     「その値が社内の一次資料で確認できているか」を表す。
+ *   - disclosureStatus（identityにのみ導入）は、「この公開リポジトリで
+ *     何を開示するか」を表す、verificationStatusとは独立した軸。
+ *   - 社内で確認済みであっても、公開リポジトリには内部資料のURL・
+ *     ファイルID・非公開のファイル名・その他内部限定の識別子は
+ *     記載しない。社内資料との厳密な対応関係は、社内の非公開ドキュメント
+ *     （GitHubではない場所）で管理する。
  */
 (function (global, factory) {
   var mod = factory();
@@ -65,29 +75,41 @@
     projectId: 'miyoshi',
     projectName: 'みよし案件',
 
-    // 施主名・建物名称などの具体的な案件識別情報は、リポジトリ履歴・
-    // 設計資料のいずれからも確認できていない。特定の企業名・施設名を
-    // 断定的に記載することは事実誤認のリスクがあるため採用していない。
-    // 確認が取れ次第、案件担当者がこのフィールドを更新すること。
+    // 案件識別情報そのものは社内基本設計資料で確認済み（verificationStatus:
+    // 'verified'）。ただし本リポジトリは public であるため、施主名・建物名称・
+    // 設計番号等の具体的な固有名詞や、社内資料のURL・ファイルID・ファイル名は
+    // このリポジトリには記載しない（disclosureStatus: 'redacted'）。
+    // UI・ドキュメント上は引き続き publicLabel の「みよし案件」を表示する。
+    // 社内での厳密な対応関係は、社内の非公開ドキュメントで管理する。
     identity: {
-      status: 'unverified',
-      note: '施主名・建物名称等の具体的な案件識別情報は未確認。「みよし案件」はリポジトリ内の既存の呼称をそのまま使ったプレースホルダーであり、確定した固有名詞ではない。'
+      publicLabel: 'みよし案件',
+      verificationStatus: 'verified',
+      disclosureStatus: 'redacted',
+      sourceDescription: '社内基本設計資料により案件識別情報を確認済み。本リポジトリは公開のため、固有名詞・社内資料参照は開示しない。',
+      checkedAt: '2026-09-17'
     },
 
     dimensions: {
+      // W=1250mmは旧アプリの初期値のままで、社内資料上もガラス1枚の見付幅W
+      // と直接対応する記録は確認できていない。
       defaultW: verifiedValue(
         1250, 'mm', 'unverified',
-        'リポジトリ初回リリースコミット（feat: 初版リリース）でindex.htmlの初期値として導入されたのみで、算定根拠の記載なし',
+        'リポジトリ初回リリースコミット（feat: 初版リリース）でindex.htmlの初期値として導入されたのみで、算定根拠の記載なし。社内資料上もガラス1枚の見付幅Wと直接対応する記録は確認できていない。',
         null, null
       ),
+      // H=2050mmは旧アプリの初期値。社内の見積資料にはACW（アルミカーテン
+      // ウォール）全体高さとしてH=2050mmに類する記録が存在するが、これは
+      // ACW全体寸法であり、ガラス1枚の見付高さと同一であることは未確認。
+      // pane（ガラス1枚）の実見付寸法が確認できるまでは案件確定寸法として
+      // 使用不可。
       defaultH: verifiedValue(
         2050, 'mm', 'unverified',
-        'リポジトリ初回リリースコミット（feat: 初版リリース）でindex.htmlの初期値として導入されたのみで、算定根拠の記載なし',
+        'リポジトリ初回リリースコミット（feat: 初版リリース）でindex.htmlの初期値として導入された値。社内の見積資料にはACW（アルミカーテンウォール）全体高さとしてH=2050mmに類する記録が存在するが、これはACW全体寸法でありガラス1枚の見付高さと同一であることは確認できていない。',
         null, null
       ),
       status: 'unverified',
-      source: 'リポジトリ初回リリースコミットのindex.html初期値（UNVERIFIED PROJECT DEFAULT）',
-      note: '特定案件のガラス確定寸法として検証された値ではない。UI上は常に「参考計算 — 案件実寸未確認」として扱い、verifiedへ昇格させないこと。'
+      source: 'リポジトリ初回リリースコミットのindex.html初期値（UNVERIFIED PROJECT DEFAULT）。Wは対応する社内資料の記録なし。HはACW全体寸法として類似値の記録候補があるのみ。',
+      note: '特定案件のガラス1枚の確定見付寸法として検証された値ではない。ACW全体寸法とガラス1枚の見付寸法は別物であり、両者の対応関係は未確認。pane実寸が案件図・メーカー資料で確認できるまで、UI上は常に「参考計算 — 案件実寸未確認」として扱い、verifiedへ昇格させないこと。'
     },
 
     wind: {
@@ -101,11 +123,25 @@
         general: verifiedValue(918, 'N/m²', 'partially_verified', '告示1458号Cpe(-1.8)で逆算するとqbar≈510N/m²相当。V0=34m/s・地表面粗度区分IIIとの数値整合は確認済み', null, null),
         corner: verifiedValue(1122, 'N/m²', 'partially_verified', '告示1458号Cpe(-2.2)で逆算するとqbar≈510N/m²相当。V0=34m/s・地表面粗度区分IIIとの数値整合は確認済み', null, null)
       },
-      V0: verifiedValue(34, 'm/s', 'partially_verified', '案件基本設計資料に記載の基準風速。みよし市の法定値V0=32m/sとは異なる値であり、32m/sへの変更は行わないこと', null, null),
-      roughnessCategory: verifiedValue('III', null, 'partially_verified', '案件基本設計資料に記載の地表面粗度区分', null, null),
+      // V0・roughnessCategoryは社内基本設計資料（外構の風荷重条件）で直接
+      // 確認済み（verificationStatus: 'verified'）。これは「V0/roughness
+      // そのものの確認」であり、「各階ガラス風圧プリセット値の確認」とは
+      // 別軸（下記 positivePressureByFloor / negativePressureByZone / status
+      // を参照）。公開リポジトリのため、社内資料のURL・ファイルID・
+      // ファイル名は記載しない。
+      V0: verifiedValue(
+        34, 'm/s', 'verified',
+        '社内基本設計資料の外構風荷重条件で直接確認済み（みよし市の法定値V0=32m/sより高い値を案件側設計条件として採用）。32m/sへの変更は行わないこと。公開リポジトリのため社内資料の識別子は開示しない。',
+        null, '2026-09-17'
+      ),
+      roughnessCategory: verifiedValue(
+        'III', null, 'verified',
+        '社内基本設計資料の外構風荷重条件で直接確認済み。公開リポジトリのため社内資料の識別子は開示しない。',
+        null, '2026-09-17'
+      ),
       status: 'partially_verified',
       source: 'みよし案件の設計風圧プリセット値（calc.js旧 POSITIVE_PRESSURE_MIYOSHI_PRESET / NEGATIVE_PRESSURE_MIYOSHI_PRESET より移設）',
-      note: 'V0=34m/s・地表面粗度区分IIIとの数値整合（qbar≈510N/m²）は確認済みだが、元の外装材/ガラス構造計算書および各階評価高さZとの厳密な対応付けは未確認。告示から自動算定した値でもない。したがってverifiedへ昇格させないこと。'
+      note: 'V0=34m/s・地表面粗度区分IIIは社内基本設計資料で直接確認済み（verified）。ただしこの資料は外構・地表面の風荷重条件を確認したものであり、階別正圧・部位別負圧プリセット値（下記）の元となった外装材/ガラス構造計算書、および各階評価高さZとの厳密な対応付けを直接確認したものではない。したがって階別プリセット値自体はpartially_verifiedのまま維持し、verifiedへは昇格させない。'
     }
   };
 

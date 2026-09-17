@@ -792,15 +792,19 @@ document.getElementById('inp-coeff').addEventListener('input', function() {
 window.addEventListener('DOMContentLoaded', function() {
   var cfg = MiyoshiProjectConfig;
 
-  // 案件プリセット名の表示（Task 4）。施主・建物名等の具体的な識別情報は
-  // 未確認のため、cfg.identity.note の警告もあわせて表示する。
+  // 案件プリセット名の表示（Task 4）。
+  // 案件識別情報は社内資料で確認済み（cfg.identity.verificationStatus）だが、
+  // 本リポジトリは公開のため cfg.identity.publicLabel のみを表示し、
+  // 固有名詞・社内資料参照は表示しない（disclosureStatus: 'redacted'）。
+  // 識別情報自体が未確認（verificationStatus !== 'verified'）の場合のみ、
+  // その旨の注記を表示する。
   var nameLabel = document.getElementById('preset-name-label');
   if (nameLabel) {
     nameLabel.textContent = cfg.projectName + '（projectId: ' + cfg.projectId + '）';
   }
   var identityNote = document.getElementById('preset-identity-note');
-  if (identityNote && cfg.identity.status !== 'verified') {
-    identityNote.textContent = '⚠ ' + cfg.identity.note;
+  if (identityNote && cfg.identity.verificationStatus !== 'verified') {
+    identityNote.textContent = '⚠ ' + (cfg.identity.sourceDescription || cfg.identity.note || '案件識別情報は未確認です。');
   }
 
   // 入力欄の既定値は project-config を正として反映する
