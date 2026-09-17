@@ -1,0 +1,202 @@
+'use strict';
+
+/**
+ * Phase 2A: project-config/miyoshi.js のテスト。
+ *
+ * - calc.js に残る非推奨(deprecated)の後方互換定数と、
+ *   project-config/miyoshi.js の値が完全に一致することを確認する
+ *   （config分離が値のズレを生んでいないことの保証）。
+ * - 各値のverificationStatusが実態どおりであることを確認する
+ *   （2026-09-17 Provenance Required Fix時点）：
+ *     - identity: "verified"（社内資料で確認済み。ただし公開repoでは
+ *       disclosureStatus="redacted"とし、identity.publicLabelのみ開示）
+ *     - wind.V0 / wind.roughnessCategory: "verified"
+ *       （社内基本設計資料の外構風荷重条件で直接確認済み）
+ *     - wind.status（positivePressureByFloor / negativePressureByZoneの
+ *       各値を含む）: "partially_verified"のまま
+ *       （V0/roughness自体の確認と、階別ガラス風圧プリセット値の元となる
+ *       外装材/ガラス構造計算書・各階評価高さZとの対応付けの確認は別軸）
+ *     - dimensions（defaultW / defaultH）: "unverified"のまま
+ *   いずれも誤って想定より高いverificationStatusへ昇格・降格していないこと、
+ *   および内部限定識別子（Drive/Notion等のURL）を含まないことを確認する。
+ * - 代表ケース（FL6, W=1250/1500, H=2050, 2F, general, extraFactor=1.00）で、
+ *   project-configの値をcalc.jsの汎用計算コアに渡した結果が、
+ *   Phase 1時点の既知の値と完全に一致すること（config分離前後で
+ *   計算値が不変であること）を回帰確認する。
+ *
+ * 実行: node --test tests/  （または npm test）
+ */
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const GlassCalc = require('../calc.js');
+const MiyoshiProjectConfig = require('../project-config/miyoshi.js');
+
+test('project-config: projectId/projectName が定義されている', () => {
+  assert.equal(MiyoshiProjectConfig.projectId, 'miyoshi');
+  assert.equal(typeof MiyoshiProjectConfig.projectName, 'string');
+  assert.ok(MiyoshiProjectConfig.projectName.length > 0);
+});
+
+/* ============================================================
+   Provenance / disclosure（2026-09-17 Provenance Required Fix）
+   verificationStatus（社内で確認できているか）と disclosureStatus
+   （公開リポジトリで何を開示するか）を分離して扱う。
+============================================================ */
+
+test('project-config: identity — 社内確認済み状態を表現でき、publicLabelは"みよし案件"、private固有名詞を要求しない構造', () => {
+  const identity = MiyoshiProjectConfig.identity;
+  assert.equal(identity.publicLabel, 'みよし案件');
+  assert.equal(identity.verificationStatus, 'verified');
+  assert.equal(identity.disclosureStatus, 'redacted');
+  assert.equal(identity.checkedAt, '2026-09-17');
+  assert.equal(typeof identity.sourceDescription, 'string');
+  // identityの構造自体が、施主名・建物名称等のprivateな固有名詞フィールドを
+  // 要求しないこと（publicLabel等の既知キーのみで完結する）。
+  const allowedKeys = ['publicLabel', 'verificationStatus', 'disclosureStatus', 'sourceDescription', 'sourceReference', 'checkedAt'];
+  for (const key of Object.keys(identity)) {
+    assert.ok(allowedKeys.indexOf(key) !== -1, `identityに想定外のキー ${key} が存在する`);
+  }
+  // sourceDescription等に内部限定識別子（Drive URL/ファイルID等）を含まないこと
+  const serialized = JSON.stringify(identity);
+  assert.doesNotMatch(serialized, /drive\.google|docs\.google|notion\.(so|com)|sharepoint|dropbox\.com/i);
+});
+
+test('project-config: getPublicLabel() — disclosure-safeなidentity.publicLabelのみを返す（fail-closed）', () => {
+  assert.equal(MiyoshiProjectConfig.getPublicLabel(), 'みよし案件');
+  assert.equal(MiyoshiProjectConfig.getPublicLabel(), MiyoshiProjectConfig.identity.publicLabel);
+
+  // publicLabelが欠落している場合、projectName等へフォールバックせず
+  // 例外を投げること（公開UIの表示元をfail-closedにする境界の確認）。
+  const saved = MiyoshiProjectConfig.identity.publicLabel;
+  delete MiyoshiProjectConfig.identity.publicLabel;
+  try {
+    assert.throws(() => MiyoshiProjectConfig.getPublicLabel());
+  } finally {
+    MiyoshiProjectConfig.identity.publicLabel = saved;
+  }
+});
+
+test('project-config: wind.V0 — 社内基本設計資料で直接確認済み（verified）、checkedAt=2026-09-17', () => {
+  const V0 = MiyoshiProjectConfig.wind.V0;
+  assert.equal(V0.value, 34);
+  assert.notEqual(V0.value, 32);
+  assert.equal(V0.verificationStatus, 'verified');
+  assert.equal(V0.checkedAt, '2026-09-17');
+});
+
+test('project-config: wind.roughnessCategory — 社内基本設計資料で直接確認済み（verified）、checkedAt=2026-09-17', () => {
+  const roughness = MiyoshiProjectConfig.wind.roughnessCategory;
+  assert.equal(roughness.value, 'III');
+  assert.equal(roughness.verificationStatus, 'verified');
+  assert.equal(roughness.checkedAt, '2026-09-17');
+});
+
+test('project-config: miyoshi configから現在と同じ正圧値を取得できる（calc.js旧定数との整合）', () => {
+  const floors = ['1', '2', '3', 'R'];
+  for (const f of floors) {
+    assert.equal(
+      MiyoshiProjectConfig.getPositivePressure(f),
+      GlassCalc.POSITIVE_PRESSURE_MIYOSHI_PRESET[f],
+      `floor=${f} の正圧値がcalc.jsの非推奨定数と一致しない`
+    );
+  }
+  // 既知の値そのものも固定値で確認する
+  assert.equal(MiyoshiProjectConfig.getPositivePressure('1'), 1297);
+  assert.equal(MiyoshiProjectConfig.getPositivePressure('2'), 1525);
+  assert.equal(MiyoshiProjectConfig.getPositivePressure('3'), 1695);
+  assert.equal(MiyoshiProjectConfig.getPositivePressure('R'), 1729);
+});
+
+test('project-config: 同じ負圧値を取得できる（calc.js旧定数との整合）', () => {
+  const zones = ['general', 'corner'];
+  for (const z of zones) {
+    assert.equal(
+      MiyoshiProjectConfig.getNegativePressure(z),
+      GlassCalc.NEGATIVE_PRESSURE_MIYOSHI_PRESET[z],
+      `zone=${z} の負圧値がcalc.jsの非推奨定数と一致しない`
+    );
+  }
+  assert.equal(MiyoshiProjectConfig.getNegativePressure('general'), 918);
+  assert.equal(MiyoshiProjectConfig.getNegativePressure('corner'), 1122);
+});
+
+test('project-config: default W/H = 1250/2050（calc.js旧定数との整合）', () => {
+  const dflt = MiyoshiProjectConfig.getDefaultDimensionsMM();
+  assert.deepEqual(dflt, { W: 1250, H: 2050 });
+  assert.deepEqual(dflt, GlassCalc.UNVERIFIED_DEFAULT_DIMENSIONS_MM);
+});
+
+test('project-config: dimensions.status = unverified（verifiedへ昇格していないこと）', () => {
+  assert.equal(MiyoshiProjectConfig.dimensions.status, 'unverified');
+  assert.equal(MiyoshiProjectConfig.dimensions.defaultW.verificationStatus, 'unverified');
+  assert.equal(MiyoshiProjectConfig.dimensions.defaultH.verificationStatus, 'unverified');
+});
+
+test('project-config: wind.status は verified ではない（元計算書・評価高さZは未確認）', () => {
+  assert.notEqual(MiyoshiProjectConfig.wind.status, 'verified');
+  assert.equal(MiyoshiProjectConfig.wind.status, 'partially_verified');
+  for (const f of ['1', '2', '3', 'R']) {
+    assert.notEqual(MiyoshiProjectConfig.wind.positivePressureByFloor[f].verificationStatus, 'verified');
+  }
+  for (const z of ['general', 'corner']) {
+    assert.notEqual(MiyoshiProjectConfig.wind.negativePressureByZone[z].verificationStatus, 'verified');
+  }
+});
+
+test('project-config: V0=34m/s（32m/sへの変更は行われていない）・roughnessCategory=III', () => {
+  assert.equal(MiyoshiProjectConfig.wind.V0.value, 34);
+  assert.notEqual(MiyoshiProjectConfig.wind.V0.value, 32);
+  assert.equal(MiyoshiProjectConfig.wind.roughnessCategory.value, 'III');
+});
+
+test('project-config: isFullyVerified() は現時点でfalse', () => {
+  assert.equal(MiyoshiProjectConfig.isFullyVerified(), false);
+});
+
+/* ============================================================
+   代表ケース回帰テスト：config分離前後で計算値が不変であることの確認
+   （project-configの値をcalc.jsの汎用計算コアへ渡した結果が、
+    Phase 1時点の既知の値と一致すること）
+============================================================ */
+
+test('代表ケース: FL6 W=1250/H=2050/2F/general/extraFactor=1.00 → ≈1756.09756 N/m²・designP=1525・OK', () => {
+  const W = 1250, H = 2050;
+  const area = (W * H) / 1_000_000;
+  const posP = MiyoshiProjectConfig.getPositivePressure('2');
+  const negP = MiyoshiProjectConfig.getNegativePressure('general');
+  const designP = Math.max(posP, negP);
+  assert.equal(designP, 1525);
+
+  const k1 = GlassCalc.getK1_FL(6);
+  const P = GlassCalc.calcP_single(6, k1, 1.0, area, 1.0);
+  assert.ok(Math.abs(P - 1756.09756097561) < 1e-6, `P=${P}`);
+  assert.ok(P >= designP, 'OKと判定されるはず');
+
+  // generateCandidates経由でも同じ値・同じ判定になることを確認
+  const candidates = GlassCalc.generateCandidates('fl_single', area, designP, 1.0);
+  const fl6 = candidates.find(c => c.label === 'FL6');
+  assert.ok(fl6, 'FL6候補が存在するはず');
+  assert.ok(Math.abs(fl6.P - 1756.09756097561) < 1e-6);
+  assert.equal(fl6.status, 'ok');
+});
+
+test('代表ケース: FL6 W=1500/H=2050/2F/general/extraFactor=1.00 → ≈1463.41463 N/m²・designP=1525・NG', () => {
+  const W = 1500, H = 2050;
+  const area = (W * H) / 1_000_000;
+  const posP = MiyoshiProjectConfig.getPositivePressure('2');
+  const negP = MiyoshiProjectConfig.getNegativePressure('general');
+  const designP = Math.max(posP, negP);
+  assert.equal(designP, 1525);
+
+  const k1 = GlassCalc.getK1_FL(6);
+  const P = GlassCalc.calcP_single(6, k1, 1.0, area, 1.0);
+  assert.ok(Math.abs(P - 1463.4146341463415) < 1e-6, `P=${P}`);
+  assert.ok(P < designP, 'NGと判定されるはず');
+
+  const candidates = GlassCalc.generateCandidates('fl_single', area, designP, 1.0);
+  const fl6 = candidates.find(c => c.label === 'FL6');
+  assert.ok(fl6, 'FL6候補が存在するはず');
+  assert.ok(Math.abs(fl6.P - 1463.4146341463415) < 1e-6);
+  assert.equal(fl6.status, 'ng');
+});
