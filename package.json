@@ -1,0 +1,9 @@
+{
+  "name": "glass-wind-calc-m",
+  "version": "1.1.0",
+  "private": true,
+  "description": "ガラス耐風圧 簡易検討ツール（平成12年建設省告示第1458号 4辺支持板ガラス許容耐力式 準拠）",
+  "scripts": {
+    "test": "node --test"
+  }
+}

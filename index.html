@@ -361,6 +361,7 @@
   .rank-n { background: var(--surface2); color: var(--text3); border: 1px solid var(--border); }
   .badge-ok { color: var(--ok); font-weight: 700; }
   .badge-ng { color: var(--ng); font-weight: 700; }
+  .badge-warn { color: var(--warn); font-weight: 700; }
   .glass-name { font-family: var(--font-mono); color: var(--text); font-size: 12px; }
   .pval { font-family: var(--font-mono); }
 
@@ -403,7 +404,7 @@
       <div class="card-title">入力条件</div>
 
       <div class="form-group">
-        <label>ガラス幅 W</label>
+        <label>ガラス幅 W（ガラス見付寸法）</label>
         <div class="input-unit">
           <input type="number" id="inp-W" value="1250" min="100" max="10000" step="1">
           <span class="unit-label">mm</span>
@@ -411,10 +412,14 @@
       </div>
 
       <div class="form-group">
-        <label>ガラス高さ H</label>
+        <label>ガラス高さ H（ガラス見付寸法）</label>
         <div class="input-unit">
           <input type="number" id="inp-H" value="2050" min="100" max="10000" step="1">
           <span class="unit-label">mm</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          W・Hは<strong>ガラス1枚の見付寸法</strong>です。サッシ枠を含む建具全体寸法ではありません。<br>
+          初期値 1250×2050mm は本ツールの<strong>未検証な既定値（サンプル値）</strong>であり、特定案件の確定寸法ではありません。必ず案件図・メーカー資料で実寸を確認して入力してください。
         </div>
       </div>
 
@@ -434,6 +439,9 @@
           <option value="general" selected>一般部</option>
           <option value="corner">隅角部</option>
         </select>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          正圧・負圧は<strong>「みよし案件プリセット」</strong>の設計風圧値です。告示から自動算定した値ではありません。他案件に流用する場合は妥当性を個別に確認してください。
+        </div>
       </div>
 
       <div class="form-group">
@@ -447,13 +455,13 @@
       </div>
 
       <div class="form-group">
-        <label>補正係数</label>
+        <label>告示外の追加低減係数</label>
         <div class="coeff-row">
-          <input type="range" id="inp-coeff" min="0.70" max="1.00" step="0.01" value="0.90">
-          <span class="coeff-val" id="coeff-display">0.90</span>
+          <input type="range" id="inp-coeff" min="0.70" max="1.00" step="0.01" value="1.00">
+          <span class="coeff-val" id="coeff-display">1.00</span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          1.00 = 理論式のまま　／　0.90 = 既存検討書傾向に合わせた係数
+          1.00 = 告示準拠計算のまま（標準）　／　0.90 = 既存検討書の傾向に合わせた追加の低減係数（告示には規定なし）
         </div>
       </div>
 
@@ -463,7 +471,9 @@
     <!-- 注意書き -->
     <div class="notice" style="margin-top:16px;">
       <strong>⚠ ご注意</strong><br>
-      本ツールは4辺支持ガラスの風圧検討を簡易的に行うためのものです。<br>
+      本ツールは平成12年建設省告示第1458号（4辺支持ガラスの構造計算）に基づく風圧検討を簡易的に行うためのものです。<br>
+      複層ガラスは板硝子協会「4辺支持板ガラスの耐風圧強度計算法」の適用範囲（厚板/薄板 ≦ 2.5）を超える組合せを自動推奨から除外し、警告表示します。<br>
+      階別正圧・部位別負圧は「みよし案件プリセット」であり、告示から自動算定した値ではありません。<br>
       自重・衝撃・熱割れ・製作可否・サッシ納まり・支持条件の違い・法的適合性の最終判断は別途確認が必要です。<br>
       <strong>最終的な設計判断にはメーカー検討書または専門技術者による確認を優先してください。</strong>
     </div>
@@ -478,157 +488,12 @@
 
 </div>
 
+<script src="calc.js"></script>
 <script>
 /* ============================================================
-   定数定義（後から変更しやすいようにまとめる）
+   計算ロジックは calc.js（GlassCalc）に分離済み。
+   ここでは UI（入力取得・DOM描画）のみを扱う。
 ============================================================ */
-
-// 設計風圧（正圧）：階数ごと [N/m²]
-const POSITIVE_PRESSURE = {
-  '1': 1297,
-  '2': 1525,
-  '3': 1695,
-  'R': 1729
-};
-
-// 設計風圧（負圧）：部位ごと [N/m²]（絶対値で使用）
-const NEGATIVE_PRESSURE = {
-  'general': 918,   // 一般部 -918 の絶対値
-  'corner':  1122   // 隅角部 -1122 の絶対値
-};
-
-// FL / Low-E 系 k1：ガラス種別係数（厚さ別）
-// Low-E は FL 相当として扱う
-function getK1_FL(t) {
-  if (t <= 8)  return 1.0;
-  if (t <= 12) return 0.9;
-  if (t <= 20) return 0.8;
-  return 0.75;
-}
-
-// TP 強化ガラス k1
-const K1_TP = 3.5;
-
-// 候補板厚リスト（FL / Low-E / TP 共通）
-const THICKNESS_LIST = [5, 6, 8, 10, 12, 15, 19];
-
-// ガラス構成の定義
-const GLASS_TYPES = {
-  'lowe_fl':   { label: 'Low-E + A + FL', igu: true,  outer: 'lowe', inner: 'fl' },
-  'fl_fl':     { label: 'FL + A + FL',    igu: true,  outer: 'fl',   inner: 'fl' },
-  'fl_single': { label: 'FL（単板）',      igu: false, pane: 'fl' },
-  'tp_single': { label: 'TP（単板）',      igu: false, pane: 'tp' },
-};
-
-/* ============================================================
-   補助関数
-============================================================ */
-
-// k2（複層ガラス構成係数）の計算
-// self: 評価するガラス, other: 相手側ガラス
-function calcK2_IGU(t_self, t_other) {
-  // 厚さ比（2.0を上限とする）
-  const ratio = Math.min(2.0, t_other / t_self);
-  return 0.75 * (1 + Math.pow(ratio, 3));
-}
-
-// 許容風圧計算（単板）
-// P = (300 × k1 × k2 / A) × t² × 補正係数
-function calcP_single(t, k1, k2, area, coeff) {
-  return (300 * k1 * k2 / area) * (t * t) * coeff;
-}
-
-// 複層ガラスの許容風圧計算
-// 外側・内側それぞれ計算し、小さい方を採用
-function calcP_IGU(t_outer, t_inner, k1_outer, k1_inner, area, coeff) {
-  const k2_outer = calcK2_IGU(t_outer, t_inner); // 外側を評価
-  const k2_inner = calcK2_IGU(t_inner, t_outer); // 内側を評価
-
-  const P_outer = calcP_single(t_outer, k1_outer, k2_outer, area, coeff);
-  const P_inner = calcP_single(t_inner, k1_inner, k2_inner, area, coeff);
-
-  return { P_outer, P_inner, k2_outer, k2_inner };
-}
-
-// ガラス表示名
-function glassLabel(type, t) {
-  if (type === 'lowe') return `Low-E${t}`;
-  if (type === 'fl')   return `FL${t}`;
-  if (type === 'tp')   return `TP${t}`;
-  return `${type}${t}`;
-}
-
-/* ============================================================
-   候補生成・選定ロジック
-============================================================ */
-
-function generateCandidates(typeKey, area, designP, coeff) {
-  const gt = GLASS_TYPES[typeKey];
-  const candidates = [];
-
-  if (!gt.igu) {
-    // ===== 単板ガラス =====
-    for (const t of THICKNESS_LIST) {
-      const k1 = (gt.pane === 'tp') ? K1_TP : getK1_FL(t);
-      const k2 = 1.0; // 単板
-      const P  = calcP_single(t, k1, k2, area, coeff);
-      const ok = P >= designP;
-      candidates.push({
-        label:    glassLabel(gt.pane, t),
-        t_max:    t,
-        t_total:  t,
-        P:        P,
-        ok:       ok,
-        detail: {
-          igu:    false,
-          t, k1, k2, area, coeff, P
-        }
-      });
-    }
-  } else {
-    // ===== 複層ガラス =====
-    for (const t_o of THICKNESS_LIST) {
-      for (const t_i of THICKNESS_LIST) {
-        const k1_outer = getK1_FL(t_o); // Low-E も FL 相当
-        const k1_inner = getK1_FL(t_i);
-
-        const { P_outer, P_inner, k2_outer, k2_inner } = calcP_IGU(t_o, t_i, k1_outer, k1_inner, area, coeff);
-        const P_IGU = Math.min(P_outer, P_inner);
-        const ok = P_IGU >= designP;
-
-        const outerLabel = glassLabel(gt.outer, t_o);
-        const innerLabel = glassLabel(gt.inner, t_i);
-
-        candidates.push({
-          label:   `${outerLabel} + A + ${innerLabel}`,
-          t_max:   Math.max(t_o, t_i),
-          t_total: t_o + t_i,
-          P:       P_IGU,
-          ok:      ok,
-          detail: {
-            igu:     true,
-            t_o, t_i, k1_outer, k1_inner,
-            k2_outer, k2_inner,
-            P_outer, P_inner, P_IGU,
-            outer_label: outerLabel,
-            inner_label: innerLabel,
-            area, coeff,
-            adopted_side: P_outer <= P_inner ? 'outer' : 'inner'
-          }
-        });
-      }
-    }
-  }
-
-  // ソート：最大板厚昇順 → 合計板厚昇順 → 名前順
-  candidates.sort((a, b) => {
-    if (a.t_max !== b.t_max) return a.t_max - b.t_max;
-    if (a.t_total !== b.t_total) return a.t_total - b.t_total;
-    return a.label.localeCompare(b.label);
-  });
-
-  return candidates;
-}
 
 /* ============================================================
    HTML レンダリング
@@ -642,8 +507,9 @@ function renderResults(result) {
   const {
     W, H, area, floorKey, zoneKey,
     posP, negP, designP,
-    coeff, typeKey, typeLabel,
-    best, allCandidates
+    extraFactor, typeKey, typeLabel,
+    best, okCandidates, ngCandidates, outOfScopeCandidates,
+    isUnverifiedDefault
   } = result;
 
   const floorLabel = floorKey === 'R' ? 'R階' : `${floorKey}階`;
@@ -651,16 +517,27 @@ function renderResults(result) {
 
   // 判定バッジ
   const judgeHtml = best
-    ? `<div class="judge-badge ${best.ok ? 'judge-ok' : 'judge-ng'}">${best.ok ? 'OK' : 'NG'}</div>`
+    ? `<div class="judge-badge judge-ok">OK</div>`
     : `<div class="judge-badge judge-ng">NG</div>`;
 
-  const bestLabel = best ? best.label : '（成立する構成なし）';
+  const bestLabel = best ? best.label : '（告示適用範囲内で成立する構成なし）';
   const bestP     = best ? fmt(best.P, 0) : '—';
+
+  // 未検証既定値（UNVERIFIED PROJECT DEFAULT）警告
+  // 1250×2050mm は本ツールの初期値として導入されただけで、案件確定寸法として
+  // 検証された記録がない。この値のまま計算した結果を「案件適合OK」と
+  // 誤解させないよう、明示的な状態表示を行う。
+  const unverifiedHtml = isUnverifiedDefault ? `
+      <div class="notice" style="margin-bottom:14px;border-color:rgba(245,158,11,0.4);">
+        <strong style="color:var(--warn);">⚠ 参考計算 — 案件実寸未確認</strong><br>
+        入力寸法 ${W}×${H}mm は本ツールの<strong>未検証な既定値（UNVERIFIED PROJECT DEFAULT）</strong>です。特定案件のガラス確定寸法として検証されたものではありません。この判定結果を「案件適合OK」の根拠として扱わず、案件図・メーカー資料の実寸を確認のうえ再計算してください。
+      </div>` : '';
 
   // 結論カード
   const conclusionHtml = `
     <div class="conclusion-card">
       <div class="sec-title">検討結果</div>
+      ${unverifiedHtml}
       <div class="conclusion-inner">
         ${judgeHtml}
         <div class="conclusion-detail">
@@ -668,7 +545,7 @@ function renderResults(result) {
           <div class="conclusion-meta">
             <div class="meta-chip">許容風圧 <span>${bestP} N/m²</span></div>
             <div class="meta-chip">設計風圧 <span>${fmt(designP, 0)} N/m²</span></div>
-            <div class="meta-chip">補正係数 <span>${fmt(coeff, 2)}</span></div>
+            <div class="meta-chip">告示外の追加低減係数 <span>${fmt(extraFactor, 2)}</span></div>
           </div>
         </div>
       </div>
@@ -685,20 +562,21 @@ function renderResults(result) {
       <div class="calc-grid">
         <div class="calc-block">
           <div class="calc-block-title">入力値</div>
-          <div class="calc-line">幅 W = <span class="val">${W} mm</span></div>
-          <div class="calc-line">高さ H = <span class="val">${H} mm</span></div>
+          <div class="calc-line">幅 W（見付寸法） = <span class="val">${W} mm</span></div>
+          <div class="calc-line">高さ H（見付寸法） = <span class="val">${H} mm</span></div>
           <div class="calc-line">面積 A = <span class="val">${fmt(area, 6)} m²</span></div>
           <div class="calc-line">階数 = <span class="val">${floorLabel}</span></div>
           <div class="calc-line">部位 = <span class="val">${zoneLabel}</span></div>
           <div class="calc-line">構成 = <span class="val">${typeLabel}</span></div>
         </div>
         <div class="calc-block">
-          <div class="calc-block-title">設計風圧の選定</div>
+          <div class="calc-block-title">設計風圧の選定（みよし案件プリセット）</div>
           <div class="calc-line">正圧 = <span class="val">${fmt(posP, 0)} N/m²</span></div>
           <div class="calc-line">負圧（絶対値）= <span class="val">${fmt(negP, 0)} N/m²</span></div>
           <hr class="sep-line">
           <div class="calc-line">${maxSide}</div>
           <div class="calc-line">→ 設計風圧 = <span class="val hl">${fmt(designP, 0)} N/m²</span></div>
+          <div class="calc-line" style="margin-top:6px;color:var(--text3);">※ 正圧・負圧は告示から自動算定した値ではなく、みよし案件プリセット値です。</div>
         </div>
       </div>
     </div>`;
@@ -713,15 +591,15 @@ function renderResults(result) {
         <div class="card">
           <div class="sec-title">ガラス許容風圧の計算根拠（採用構成）</div>
           <div class="calc-block">
-            <div class="formula">P = (300 × k1 × k2 / A) × t² × 補正係数</div>
+            <div class="formula">告示第1458号：P₀ = (300 × k1 × k2 / A) × (t + t²/4)<br>表示値：P = P₀ × 告示外の追加低減係数</div>
             <div class="calc-line">ガラス種別 k1 = <span class="val">${fmt(d.k1, 2)}</span>（t=${d.t}mm）</div>
             <div class="calc-line">構成係数 k2 = <span class="val">1.0</span>（単板）</div>
             <div class="calc-line">面積 A = <span class="val">${fmt(d.area, 6)} m²</span></div>
             <div class="calc-line">板厚 t = <span class="val">${d.t} mm</span></div>
-            <div class="calc-line">補正係数 = <span class="val">${fmt(d.coeff, 2)}</span></div>
+            <div class="calc-line">告示外の追加低減係数 = <span class="val">${fmt(d.extraFactor, 2)}</span></div>
             <hr class="sep-line">
-            <div class="calc-line">P = (300 × ${fmt(d.k1,2)} × 1.0 / ${fmt(d.area,6)}) × ${d.t}² × ${fmt(d.coeff,2)}</div>
-            <div class="calc-line">　= <span class="val hl">${fmt(d.P, 1)} N/m²</span></div>
+            <div class="calc-line">P₀ = (300 × ${fmt(d.k1,2)} × 1.0 / ${fmt(d.area,6)}) × (${d.t} + ${d.t}²/4)</div>
+            <div class="calc-line">P = P₀ × ${fmt(d.extraFactor,2)} = <span class="val hl">${fmt(d.P, 1)} N/m²</span></div>
           </div>
         </div>`;
     } else {
@@ -733,65 +611,96 @@ function renderResults(result) {
       calcDetailHtml = `
         <div class="card">
           <div class="sec-title">ガラス許容風圧の計算根拠（採用構成）</div>
-          <div class="formula">P = (300 × k1 × k2 / A) × t² × 補正係数<br>k2_outer = 0.75 × { 1 + (t_inner/t_outer)³ }<br>k2_inner = 0.75 × { 1 + (t_outer/t_inner)³ }</div>
+          <div class="formula">告示第1458号：P₀ = (300 × k1 × k2 / A) × (t + t²/4)<br>表示値：P = P₀ × 告示外の追加低減係数<br>k2_outer = 0.75 × { 1 + (t_inner/t_outer)³ }　／　k2_inner = 0.75 × { 1 + (t_outer/t_inner)³ }<br>板硝子協会計算法の適用範囲：厚板/薄板 ≦ 2.5（実比率 ${fmt(d.rawRatio,3)}）</div>
           <div class="calc-grid">
             <div class="calc-block">
               <div class="calc-block-title">外側ガラス（${d.outer_label}）の評価</div>
               <div class="calc-line">k1 = <span class="val">${fmt(d.k1_outer,2)}</span>（t_outer=${d.t_o}mm）</div>
-              <div class="calc-line">比率 = min(2.0, ${d.t_i}/${d.t_o}) = <span class="val">${fmt(Math.min(2.0,d.t_i/d.t_o),3)}</span></div>
+              <div class="calc-line">k2式内の比率 = min(2.0, ${d.t_i}/${d.t_o}) = <span class="val">${fmt(Math.min(2.0,d.t_i/d.t_o),3)}</span></div>
               <div class="calc-line">k2_outer = <span class="val">${fmt(d.k2_outer,4)}</span></div>
               <div class="calc-line">P_outer = <span class="val">${fmt(d.P_outer,1)} N/m²</span></div>
             </div>
             <div class="calc-block">
               <div class="calc-block-title">内側ガラス（${d.inner_label}）の評価</div>
               <div class="calc-line">k1 = <span class="val">${fmt(d.k1_inner,2)}</span>（t_inner=${d.t_i}mm）</div>
-              <div class="calc-line">比率 = min(2.0, ${d.t_o}/${d.t_i}) = <span class="val">${fmt(Math.min(2.0,d.t_o/d.t_i),3)}</span></div>
+              <div class="calc-line">k2式内の比率 = min(2.0, ${d.t_o}/${d.t_i}) = <span class="val">${fmt(Math.min(2.0,d.t_o/d.t_i),3)}</span></div>
               <div class="calc-line">k2_inner = <span class="val">${fmt(d.k2_inner,4)}</span></div>
               <div class="calc-line">P_inner = <span class="val">${fmt(d.P_inner,1)} N/m²</span></div>
             </div>
           </div>
           <div style="margin-top:10px;" class="calc-block">
             <div class="calc-line">${adoptedLabel}</div>
-            <div class="calc-line">→ P_IGU = min(P_outer, P_inner) = <span class="val hl">${fmt(d.P_IGU,1)} N/m²</span></div>
+            <div class="calc-line">→ P_IGU（告示外の追加低減係数 ${fmt(d.extraFactor,2)} 適用後）= <span class="val hl">${fmt(d.P_IGU,1)} N/m²</span></div>
           </div>
         </div>`;
     }
   }
 
-  // 候補一覧（上位10件）
-  const top10 = allCandidates.slice(0, 10);
-  const rows = top10.map((c, i) => {
+  // 候補一覧の行を作る共通関数
+  function candidateRow(c, i, statusHtml) {
     const rankClass = i === 0 ? 'rank-1' : i === 1 ? 'rank-2' : i === 2 ? 'rank-3' : 'rank-n';
     return `<tr>
       <td><span class="rank-badge ${rankClass}">${i+1}</span></td>
       <td class="glass-name">${c.label}</td>
       <td style="font-family:var(--font-mono)">${c.t_max}mm</td>
       <td class="pval">${fmt(c.P, 0)}</td>
-      <td class="${c.ok ? 'badge-ok' : 'badge-ng'}">${c.ok ? '✓ OK' : '✗ NG'}</td>
+      <td>${statusHtml}</td>
     </tr>`;
-  }).join('');
+  }
 
-  const tableHtml = `
+  // 推奨候補（OK・告示/協会適用範囲内、上位10件）
+  const okTop = okCandidates.slice(0, 10);
+  const okRows = okTop.map((c, i) => candidateRow(c, i, '<span class="badge-ok">✓ OK</span>')).join('');
+  const okTableHtml = `
     <div class="card">
-      <div class="sec-title">候補一覧（上位${top10.length}件）</div>
+      <div class="sec-title">推奨候補（OK・上位${okTop.length}件）</div>
       <div class="table-wrap">
         <table>
           <thead>
-            <tr>
-              <th>順位</th>
-              <th>ガラス構成</th>
-              <th>最大板厚</th>
-              <th>許容風圧 N/m²</th>
-              <th>判定</th>
-            </tr>
+            <tr><th>順位</th><th>ガラス構成</th><th>最大板厚</th><th>許容風圧 N/m²</th><th>判定</th></tr>
           </thead>
-          <tbody>${rows}</tbody>
+          <tbody>${okRows || `<tr><td colspan="5" style="text-align:center;color:var(--text3);">成立するOK候補がありません</td></tr>`}</tbody>
         </table>
       </div>
     </div>`;
 
+  // NG候補（不足・参考表示、上位5件）
+  const ngTop = ngCandidates.slice(0, 5);
+  const ngRows = ngTop.map((c, i) => candidateRow(c, i, '<span class="badge-ng">✗ NG</span>')).join('');
+  const ngTableHtml = ngTop.length ? `
+    <div class="card">
+      <div class="sec-title">NG候補（参考・上位${ngTop.length}件）</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>順位</th><th>ガラス構成</th><th>最大板厚</th><th>許容風圧 N/m²</th><th>判定</th></tr>
+          </thead>
+          <tbody>${ngRows}</tbody>
+        </table>
+      </div>
+    </div>` : '';
+
+  // 適用範囲外候補（複層：厚板/薄板 > 2.5、板硝子協会計算法の対象外・自動推奨から除外）
+  const scopeTop = outOfScopeCandidates.slice(0, 5);
+  const scopeRows = scopeTop.map((c, i) => candidateRow(c, i, '<span class="badge-warn">⚠ 対象外</span>')).join('');
+  const scopeTableHtml = scopeTop.length ? `
+    <div class="card">
+      <div class="sec-title">⚠ 板硝子協会計算法の適用範囲外（自動推奨から除外）</div>
+      <div class="notice" style="margin-bottom:12px;">
+        複層ガラスの厚板/薄板の比が2.5を超える組合せは、板硝子協会「4辺支持板ガラスの耐風圧強度計算法」の適用範囲外です。計算値が設計風圧を上回っていても、自動推奨（OK候補）には含めていません。採用する場合はメーカー個別検討が必要です。
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>順位</th><th>ガラス構成</th><th>最大板厚</th><th>参考計算値 N/m²</th><th>判定</th></tr>
+          </thead>
+          <tbody>${scopeRows}</tbody>
+        </table>
+      </div>
+    </div>` : '';
+
   document.getElementById('result-area').innerHTML =
-    conclusionHtml + windHtml + calcDetailHtml + tableHtml;
+    conclusionHtml + windHtml + calcDetailHtml + okTableHtml + ngTableHtml + scopeTableHtml;
 }
 
 /* ============================================================
@@ -800,12 +709,12 @@ function renderResults(result) {
 
 function runCalc() {
   // 入力値取得
-  const W        = parseFloat(document.getElementById('inp-W').value);
-  const H        = parseFloat(document.getElementById('inp-H').value);
-  const floorKey = document.getElementById('inp-floor').value;
-  const zoneKey  = document.getElementById('inp-zone').value;
-  const typeKey  = document.getElementById('inp-type').value;
-  const coeff    = parseFloat(document.getElementById('inp-coeff').value);
+  const W           = parseFloat(document.getElementById('inp-W').value);
+  const H           = parseFloat(document.getElementById('inp-H').value);
+  const floorKey    = document.getElementById('inp-floor').value;
+  const zoneKey     = document.getElementById('inp-zone').value;
+  const typeKey     = document.getElementById('inp-type').value;
+  const extraFactor = parseFloat(document.getElementById('inp-coeff').value);
 
   // バリデーション
   if (!W || !H || W <= 0 || H <= 0) {
@@ -813,36 +722,41 @@ function runCalc() {
     return;
   }
 
-  // 面積計算（m²）
+  // 面積計算（m²）：W・Hはガラス見付寸法
   const area = (W * H) / 1_000_000;
 
-  // 設計風圧の決定
-  const posP    = POSITIVE_PRESSURE[floorKey];
-  const negP    = NEGATIVE_PRESSURE[zoneKey];
+  // 入力寸法が未検証の既定値（UNVERIFIED PROJECT DEFAULT）のままかどうか
+  const dflt = GlassCalc.UNVERIFIED_DEFAULT_DIMENSIONS_MM;
+  const isUnverifiedDefault = (W === dflt.W && H === dflt.H);
+
+  // 設計風圧の決定（みよし案件プリセット値。告示から自動算定した値ではない）
+  const posP    = GlassCalc.POSITIVE_PRESSURE_MIYOSHI_PRESET[floorKey];
+  const negP    = GlassCalc.NEGATIVE_PRESSURE_MIYOSHI_PRESET[zoneKey];
   const designP = Math.max(posP, negP);
 
-  // 候補生成・ソート
-  const allCandidates = generateCandidates(typeKey, area, designP, coeff);
+  // 候補生成・OK / NG / 適用範囲外 に分離
+  const allCandidates = GlassCalc.generateCandidates(typeKey, area, designP, extraFactor);
+  const { okCandidates, ngCandidates, outOfScopeCandidates } = GlassCalc.splitCandidates(allCandidates);
 
-  // OK 候補の先頭（最小構成）
-  const okCandidates = allCandidates.filter(c => c.ok);
-  const best         = okCandidates.length > 0 ? okCandidates[0] : null;
+  // 推奨候補（best）は OK かつ適用範囲内の先頭（最小構成）
+  const best = okCandidates.length > 0 ? okCandidates[0] : null;
 
   // 結果描画
   renderResults({
     W, H, area,
     floorKey, zoneKey,
     posP, negP, designP,
-    coeff,
+    extraFactor,
     typeKey,
-    typeLabel: GLASS_TYPES[typeKey].label,
+    typeLabel: GlassCalc.GLASS_TYPES[typeKey].label,
     best,
-    allCandidates   // OK のみでなく全候補を表示（OKが上位に来るようソート済み）
+    okCandidates, ngCandidates, outOfScopeCandidates,
+    isUnverifiedDefault
   });
 }
 
 /* ============================================================
-   イベント：補正係数スライダーの表示更新
+   イベント：告示外の追加低減係数スライダーの表示更新
 ============================================================ */
 
 document.getElementById('inp-coeff').addEventListener('input', function() {
