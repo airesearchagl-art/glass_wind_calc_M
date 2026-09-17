@@ -39,6 +39,7 @@
 - 複層ガラスの厚板/薄板比が板硝子協会計算法の適用範囲（≦2.5）を超える組合せは、自動推奨から除外し、警告表示
 - 告示外の追加低減係数をスライダーで調整（0.70 〜 1.00、既定値 1.00 = 告示準拠のまま）
 - レスポンシブ対応（PC・タブレット・スマートフォン）
+- **入力モード切替**（Phase 2C）：「案件プリセット（みよし案件）」と「手入力 / Generic」をUI上で切り替え可能。詳細は下記「入力モード」セクション参照
 
 ---
 
@@ -76,6 +77,25 @@ cd glass_wind_calc_M
 > W・H はサッシ枠を含む建具全体寸法ではなく、**ガラス1枚の見付寸法**（面積算定に用いる寸法）です。
 >
 > ⚠️ **初期値 W=1250mm / H=2050mm は UNVERIFIED PROJECT DEFAULT（未検証な既定値）です。** リポジトリ初回リリースコミットで `index.html` の初期値として導入されましたが、コミットメッセージ・README・設計根拠資料のいずれにも算定根拠の記載がなく、特定案件のガラス確定寸法として検証された値ではありません（正は `project-config/miyoshi.js` の `dimensions.defaultW` / `dimensions.defaultH`。`calc.js` の `UNVERIFIED_DEFAULT_DIMENSIONS_MM` は非推奨の後方互換複製）。社内の見積資料にはACW（アルミカーテンウォール）全体高さとしてH=2050mmに類する記録が存在しますが、これはACW全体寸法であり、ガラス1枚の見付高さと同一であることは確認できていません。今回確認できた社内資料の範囲では、ガラス1枚の見付幅W=1250mmと直接対応付けられる根拠は確認できていません（社内資料全体に存在しないことまで確認・証明したものではありません）。この初期値のまま計算した結果は「参考計算」であり、案件適合の根拠として扱わず、必ず案件図・メーカー資料でガラス1枚の実見付寸法を確認のうえ入力し直してください。
+
+---
+
+## 入力モード（Phase 2C）
+
+本ツールは「入力モード」セレクタで、以下の2つのモードを切り替えられます。**両モードは完全に独立したモジュールであり、手入力モードにみよし案件のプリセット値が暗黙的に適用されることはありません**（`project-config/manual.js` は `project-config/miyoshi.js` を一切 `require`/参照しません）。
+
+### 案件プリセット（みよし案件 / Miyoshi）
+
+Phase 1〜2Bで確立した既存動作そのものです。`project-config/miyoshi.js`（`MiyoshiProjectConfig`）の階別正圧・部位別負圧プリセットを、設置階数・部位のセレクトから選択します。値・検証状況（`verificationStatus`）・Evidenceの扱いは本README「設計定数」「Evidence Status」セクションのとおりで、**Phase 2Cによる変更は一切ありません**。
+
+### 手入力 / Generic（Manual）
+
+その場でW・H・正圧・負圧を直接入力するモードです（`project-config/manual.js`、`ManualProjectConfig`）。
+
+- 設計風圧 = `max(|正圧|, |負圧|)`（告示1458号の「正圧・負圧のうち大きい方を設計風圧とする」考え方を踏襲。符号は自動判定するため、負圧を正の数で入力しても結果は変わりません）
+- 結果には常に `source: "user_input"` と `verificationStatus: "unverified"` が付与されます。**本ツールがこれらの値を「verified」と主張することはありません**。UI上も「⚠ ユーザー入力値 — 案件原典との照合は本ツールでは未実施」という注記を常に表示し、案件プリセットモードの「みよし案件プリセット」表記・階別/部位別の警告文言とは明確に区別しています。
+- 固定のdimensions/windプリセットを一切保持しません（`hasFixedPreset: false`）。案件識別情報も保持しません（`identity.disclosureStatus: "public"` — そもそも非公開情報を持たないため）。
+- 不正な入力（数値以外・NaN・0以下の寸法・非有限の圧力値等）は `buildManualDesignInput()` が例外を投げ、UIはアラート表示のうえ計算を中断します。
 
 ---
 
@@ -172,18 +192,20 @@ P_IGU = min(P_outer, P_inner)
 
 ```
 glass_wind_calc_M/
-├── index.html                    # UI（入力フォーム・結果表示）。calc.js / project-config を読み込んで使用
+├── index.html                    # UI（入力フォーム・結果表示・入力モード切替）。calc.js / project-config を読み込んで使用
 ├── calc.js                       # 汎用計算コア（k1・k2・許容耐風圧・candidate generation等。案件非依存）
 ├── project-config/
-│   └── miyoshi.js                # 「みよし案件」固有プリセット（設計風圧・初期寸法）＋検証状況メタデータ
+│   ├── miyoshi.js                # 「みよし案件」固有プリセット（設計風圧・初期寸法）＋検証状況・Evidenceメタデータ
+│   └── manual.js                 # 「手入力 / Generic」モードの入力契約（Phase 2C）。miyoshi.jsに非依存
 ├── tests/
 │   ├── calc.test.js              # 汎用計算コアの known-answer test（node:test）
-│   └── project-config.test.js    # project-config分離の整合性・代表ケース回帰テスト
+│   ├── project-config.test.js    # project-config分離の整合性・Evidence契約・代表ケース回帰テスト
+│   └── manual-config.test.js     # 手入力モードの回帰・不正入力・Miyoshi非依存性のテスト（Phase 2C）
 ├── package.json
 └── README.md                     # このファイル
 ```
 
-`index.html` は UI（入力取得・DOM描画）のみを担当し、`calc.js`（案件非依存の汎用計算コア）と `project-config/miyoshi.js`（案件固有プリセット）の橋渡しを行います。両ファイルとも `<script src="...">` によるブラウザ読み込みと、Node.js の `require(...)` の両方に対応しています。
+`index.html` は UI（入力取得・入力モード切替・DOM描画）のみを担当し、`calc.js`（案件非依存の汎用計算コア）・`project-config/miyoshi.js`（案件プリセット）・`project-config/manual.js`（手入力 / Genericモード）の橋渡しを行います。いずれのファイルも `<script src="...">` によるブラウザ読み込みと、Node.js の `require(...)` の両方に対応しています。
 
 ### Phase 2A：案件固有入力と汎用計算コアの分離
 
@@ -267,6 +289,14 @@ Phase 2B（案件入力値とその根拠を安全にbindingできる構造の�
 
 `project-config/miyoshi.js` の `verifiedCases` 配列は、将来ガラス1枚の実見付W/Hと設計風圧の根拠（元計算書・評価高さZ）の両方が確認できた案件ケースを追加するための領域です。スキーマは同ファイルのコメントに記載しています。**現時点ではガラス1枚の実寸が未確認のため、架空のverified caseは追加せず、空配列のまま維持しています。**
 
+### Evidence factory / verified-case validatorのhardening（Phase 2C）
+
+Phase 2Cで、Evidence関連の入口関数を以下のとおり強化しました（`calc.js`・値・`verificationStatus`・`verifiedCases`（空配列のまま）はいずれも無変更）。
+
+- **`makeEvidence()` の `checkedAt` 黙示的丸め込みを廃止。** 以前は `checkedAt: checkedAt || null` という実装で、`''`・`false`・`0` 等のfalsy値を例外なく黙って `null` に丸め込んでいました。現在は `isValidCheckedAt()` による同じhard validation（`null`、または実在するカレンダー日付を表す `"YYYY-MM-DD"` 文字列のみ許容）を `makeEvidence()` の入口でも強制し、不正な値は `makeEvidence()` 呼び出し時点で例外を投げます。
+- **`makeEvidence()` は `level` もfactory入口で検証します。** `EVIDENCE_LEVELS`（`primary`/`indirect`/`none`）以外の値を渡すと即座に例外です。
+- **`validateVerifiedCase(caseObj)` を新設。** 将来 `verifiedCases` へ実ケースを追加する際の入力契約です。`caseId`/`floor`/`zone`/`widthMm`/`heightMm`/`glassType`/`designPressure`/`evidence`/`publicEvidenceDescription` の必須フィールド、`floor`/`zone` の値域、寸法・圧力の正の有限数であること、`widthEvidence`/`heightEvidence`/`pressureEvidence` がいずれも `verified` 相当（`evidence.level === "primary"` かつ妥当な `checkedAt`）であることを要求する hard condition、および `publicEvidenceDescription` への内部限定識別子（Drive/Notion/SharePoint/Dropbox URL等）混入拒否を検証します。**このvalidatorはまだどのケースにも適用されていません**（`verifiedCases` は引き続き空配列）。
+
 ---
 
 ## テスト
@@ -333,6 +363,20 @@ Phase 2Aで `project-config/miyoshi.js` を分離したことに伴うテスト�
 - 代表ケース回帰：`project-config` の値を `calc.js` の汎用計算コアへ渡した結果が、config分離前（Phase 1）と完全に同じ値になること
   - FL6, W=1250mm, H=2050mm, 2F, 一般部, extraFactor=1.00 → **P ≈ 1756.09756 N/m²**、designP=1525 N/m² → **OK**
   - FL6, W=1500mm, H=2050mm, 2F, 一般部, extraFactor=1.00 → **P ≈ 1463.41463 N/m²**、designP=1525 N/m² → **NG**
+- **Evidence factory / verified-case validatorのテスト**（Phase 2C時点の追加分。上記「Evidence factory / verified-case validatorのhardening」参照）
+  - `makeEvidence()` に不正な `checkedAt`（`''`・`false`・`0`・`'abc'`・`'2026/09/17'`・`'2026-9-17'`・`'2026-13-40'`・`'2026-02-30'`・`true`・`123`・`NaN`）を渡すと、黙って `null` に丸め込まれず例外を投げること。`null`/`undefined` のみが正しく `null` として成立すること
+  - `makeEvidence()` に不正な `level` を渡すと例外を投げること（factory入口でのhardening）
+  - `validateVerifiedCase()` が、必須フィールドをすべて満たす妥当なケースを受理し、必須フィールド欠落・`floor`/`zone`の不正値・`widthMm`/`heightMm`/`designPressure`の非数値/非正値・W/H/pressure evidenceのいずれかが`primary`でない場合・evidenceの`checkedAt`欠落・`publicEvidenceDescription`への内部限定識別子混入（private URL/ID rejection）を、それぞれ個別に例外で拒否すること
+
+### 手入力 / Genericモードのテスト（`tests/manual-config.test.js`、Phase 2C）
+
+- `ManualProjectConfig.projectId === "manual"`、`getPublicLabel() === "手入力 (Manual / Generic)"`
+- `identity.verificationStatus` は常に `"unverified"`（本ツールが手入力値を「verified」と主張しないことの確認）
+- `manual.js` のソースが `miyoshi.js` を `require` せず、`MiyoshiProjectConfig` を参照せず、みよし案件の正圧・負圧プリセット数値をハードコードしていないこと（**Miyoshi leakageの防止**、暗黙適用が発生しないことの確認）
+- **必須回帰**：`buildManualDesignInput({ W: 1250, H: 2050, positivePressure: 1400, negativePressure: -1000 })` → `designP === 1400`
+- 負圧側が絶対値で上回るケース、負圧を正の数で入力したケースでも `designP` が正しく絶対値の大きい方になること
+- `extraFactor` 省略時は既定値1.00、明示指定も可能であること
+- 不正なW/H（0・負値・NaN・非数値・null/undefined・object）、不正な圧力値（NaN・非数値・null/undefined・object・±Infinity）、不正な `extraFactor`（0以下・非数値）、および入力自体がobjectでない場合が、それぞれ例外で拒否されること
 
 ---
 
@@ -348,7 +392,9 @@ Phase 2Aで `project-config/miyoshi.js` を分離したことに伴うテスト�
 > - 法的適合性の最終判断
 > - 板硝子協会計算法の適用範囲外（複層ガラス厚板/薄板比 > 2.5）の組合せの採否判断
 >
-> 階別正圧・部位別負圧は「みよし案件プリセット」の固定値であり、告示から自動算定した値ではありません。
+> 階別正圧・部位別負圧は「みよし案件プリセット」の固定値であり、告示から自動算定した値ではありません（案件プリセットモード）。
+>
+> 手入力 / Genericモードで入力したW/H・正圧・負圧は、本ツールが案件原典（構造計算書・製品資料等）と照合したものではありません。あくまでユーザーが入力した値そのものです。
 >
 > **最終的な設計判断にはメーカー検討書または専門技術者による確認を優先してください。**
 
@@ -358,6 +404,7 @@ Phase 2Aで `project-config/miyoshi.js` を分離したことに伴うテスト�
 
 | バージョン | 日付 | 内容 |
 |-----------|------|------|
+| v1.4.0-phase2c | 2026-09-17 | **Phase 2C：案件プリセットと手入力 / Genericモードの安全な共存。**（1）Evidence契約のhardening：`makeEvidence()` の `checkedAt` 黙示的丸め込み（`checkedAt \|\| null`）を廃止し、不正な `checkedAt`/`level` はfactory入口で例外を投げるように変更。将来 `verifiedCases` へ実ケースを追加する際の入力契約 `validateVerifiedCase()` を新設（必須フィールド・floor/zone値域・寸法/圧力の正数・W/H/pressure evidenceのprimary要求・private URL/ID混入拒否）。**まだどのケースにも適用しておらず、`verifiedCases` は引き続き空配列。**（2）新規 `project-config/manual.js`（`ManualProjectConfig`）を追加：「手入力 / Generic」モードの入力契約。`project-config/miyoshi.js` に一切依存せず、みよし案件の正圧・負圧プリセットを暗黙適用しない。`buildManualDesignInput()` はW/H/正圧/負圧/extraFactorを検証し `designP = max(|正圧|, |負圧|)` を算出、結果には常に `source: "user_input"` と `verificationStatus: "unverified"` を付与（本ツールが手入力値を「verified」と主張することはない）。固定dimensions/windプリセットは一切保持しない。（3）`index.html` に入力モードセレクタ（既定値: 案件プリセット）を追加し、案件プリセットモードの既存挙動を完全維持したまま、手入力モードでは階数/部位セレクトを隠し、正圧/負圧の直接入力欄を表示。結果表示は手入力モードで「みよし案件プリセット」等の文言を一切表示せず、代わりに「⚠ ユーザー入力値 — 案件原典との照合は本ツールでは未実施」を常時表示。汎用計算コア（`calc.js`）はモード非依存のまま両モードで共用。（4）告示1458号式・k1・k2・IGU ratio・TP候補ルール・Low-Eモデル・extraFactor既定値・みよし案件の風圧数値/V0=34/roughness III/W=1250・H=2050・`calc.js`はいずれも無変更。新規テスト（`tests/manual-config.test.js` 14件、`tests/project-config.test.js` へのEvidence hardening関連10件）を追加し、既存72テスト構成（calc 23 + project-config 35 + manual-config 14）全pass。ブラウザ実機（Playwright, headless Chromium）で両モードの表示・計算・警告文言・Miyoshi非漏洩を確認済み。Draft PRを作成し、Human Gateでの Ready/merge判断待ち（本バージョンではマージ・Production反映は行っていない）。 |
 | v1.3.1-phase2b | 2026-09-17 | **Evidence Guard Required Fix。**Evidence promotion guardのhard contractを強化。RF-01: `identity`（`verifiedValue()`を経由しないため唯一module-load時点のguardを素通りしていた）の構築直後に`assertEvidenceConsistency('verified', identityEvidence, 'identity')`を明示的に呼び出すよう変更し、`identity`の`evidence`が契約違反の場合、`require()`/`<script>`実行そのものが例外で失敗するようにした（`validateAllEvidence()`頼みの事後検出ではない）。RF-02: `VERIFICATION_STATUSES = ['verified','partially_verified','unverified']`を定数化し、`assertEvidenceConsistency()`冒頭でこれ以外の値（タイプミス・大文字小文字違い・null・undefined・空文字列等）を即rejectするようにした。RF-03: `evidence.checkedAt`を単なるtruthy判定ではなく、`null`または実在するカレンダー日付を表す`"YYYY-MM-DD"`形式の文字列であることを検証するhard validationに変更（`isValidCheckedAt()`。不正な形式・存在しない日付は例外）。RF-04: `dimensions.defaultH.evidence.checkedAt`を、ACW全体高さの記録候補を確認した実際の日付である`'2026-09-17'`に修正（`null`のままだったのは実態と不整合。`verificationStatus`は引き続き`"unverified"`、`evidence.level`は引き続き`"indirect"`を維持し、H=2050をverifiedへ昇格したわけではない）。告示1458号式・k1・k2・IGU ratio・TP rules・Low-E model・extraFactor・風圧数値・V0=34・roughness III・W=1250/H=2050・candidate generation/sorting・publicLabel boundary・`verifiedCases`への実ケース追加はいずれも変更なし。`calc.js`は今回変更なし。既存44テストを維持し、RF-01〜RF-04を直接検証する新規テスト4件（`identity`のmodule-load時fail-fastは、ソースを一時的に書き換えたコピーを実際に`require()`して確認）を追加、計48テスト全pass。 |
 | v1.3.0-phase2b | 2026-09-17 | **Phase 2B：Evidenceモデルの導入。**案件入力値とその根拠（evidence）を安全にbindingできるdata contractを整備。`project-config/miyoshi.js` の各値に `evidence: { level, checkedAt, publicDescription, privateReferenceAvailable }`（`level`は`primary`/`indirect`/`none`）を追加し、`verificationStatus`（値の検証状況）と`evidence`（根拠の状況）を分離。`assertEvidenceConsistency()`によるEvidence promotion guardを導入し、`verificationStatus: "verified"`の値は`evidence.level === "primary"`かつ`evidence.checkedAt`必須という制約をモジュール読み込み時に強制（違反時は例外）。`config.validateAllEvidence()`でconfig全体の整合性を検証可能に。`identity`/`wind.V0`/`wind.roughnessCategory`は`evidence.level: "primary"`を維持（値・verificationStatusは変更なし）、階別正圧・部位別負圧プリセットは`evidence.level: "indirect"`（`partially_verified`のまま）、`dimensions.defaultW`/`defaultH`は`evidence.level: "none"/"indirect"`（`unverified`のまま）。`dimensions.mode = "sample_default"`を追加し、現在のW/H既定値がサンプル値であり検証済み案件確定寸法ではないことをコード上で明示。`verifiedCases: []`（将来、実寸・風圧根拠の両方が確認できた案件ケースを追加するための空配列。架空ケースは追加せず）を新設。README「Evidence Status」セクションを追加。告示1458号式・k1・k2・IGU ratio・TP候補ルール・Low-E strength model・extraFactor・既存風圧数値・V0=34・roughness III・W=1250/H=2050・candidate generation/sorting・publicLabel境界はいずれも変更なし。既存37テストを土台に、identity/V0/roughnessのフィールド参照を新schemaへ追随させたうえでEvidence関連7件を追加し、計44テスト全pass。`calc.js`は今回変更なし。 |
 | v1.2.1-phase2a | 2026-09-17 | **Provenance metadata Required Fix。**`project-config/miyoshi.js` の `identity` を `{ status, note }` から `{ publicLabel, verificationStatus, disclosureStatus, sourceDescription, checkedAt }` へ変更し、案件識別情報が社内基本設計資料で確認済みであること（`verificationStatus: "verified"`）を反映。ただし公開リポジトリのため固有名詞・社内資料参照は開示せず（`disclosureStatus: "redacted"`）、UIには引き続き `publicLabel`（「みよし案件」）のみ表示。`wind.V0` / `wind.roughnessCategory` を社内基本設計資料（外構の風荷重条件）で直接確認済みとして `verificationStatus: "verified"`、`checkedAt: "2026-09-17"` に更新（値34/IIIは変更せず、32m/sへの変更も行っていない）。一方、階別正圧・部位別負圧プリセット値（`positivePressureByFloor` / `negativePressureByZone`）および `wind.status` は、元の外装材/ガラス構造計算書・各階評価高さZとの対応付けが依然未確認のため `partially_verified` を維持（V0/roughness自体の確認と、各階ガラス風圧プリセットの確認を明確に分離）。`dimensions`（W=1250/H=2050、`status`）は `unverified` を維持しつつ、社内の見積資料にACW全体高さとしてH=2050mmに類する記録がある一方、これがガラス1枚の見付高さと同一かは未確認である旨を `sourceDescription`/`note` に追記。社内資料のURL・ファイルID・ファイル名等の内部限定識別子は一切追加していない（リポジトリ全体を再検索し不在を確認）。`calc.js` は計算コード無変更、監査メモのコメント文言のみ同期。既存34テストを土台に、identity関連1件を実態に合わせて更新し、V0/roughnessの新規検証テストなど追加して計36テスト全pass。 |
