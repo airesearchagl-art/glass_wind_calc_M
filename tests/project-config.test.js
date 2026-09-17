@@ -49,15 +49,17 @@ test('project-config: identity — 社内確認済み状態を表現でき、pub
   assert.equal(identity.publicLabel, 'みよし案件');
   assert.equal(identity.verificationStatus, 'verified');
   assert.equal(identity.disclosureStatus, 'redacted');
-  assert.equal(identity.checkedAt, '2026-09-17');
-  assert.equal(typeof identity.sourceDescription, 'string');
+  assert.equal(identity.evidence.level, 'primary');
+  assert.equal(identity.evidence.checkedAt, '2026-09-17');
+  assert.equal(typeof identity.evidence.publicDescription, 'string');
+  assert.equal(typeof identity.evidence.privateReferenceAvailable, 'boolean');
   // identityの構造自体が、施主名・建物名称等のprivateな固有名詞フィールドを
   // 要求しないこと（publicLabel等の既知キーのみで完結する）。
-  const allowedKeys = ['publicLabel', 'verificationStatus', 'disclosureStatus', 'sourceDescription', 'sourceReference', 'checkedAt'];
+  const allowedKeys = ['publicLabel', 'verificationStatus', 'disclosureStatus', 'evidence'];
   for (const key of Object.keys(identity)) {
     assert.ok(allowedKeys.indexOf(key) !== -1, `identityに想定外のキー ${key} が存在する`);
   }
-  // sourceDescription等に内部限定識別子（Drive URL/ファイルID等）を含まないこと
+  // evidence.publicDescription等に内部限定識別子（Drive URL/ファイルID等）を含まないこと
   const serialized = JSON.stringify(identity);
   assert.doesNotMatch(serialized, /drive\.google|docs\.google|notion\.(so|com)|sharepoint|dropbox\.com/i);
 });
@@ -77,19 +79,21 @@ test('project-config: getPublicLabel() — disclosure-safeなidentity.publicLabe
   }
 });
 
-test('project-config: wind.V0 — 社内基本設計資料で直接確認済み（verified）、checkedAt=2026-09-17', () => {
+test('project-config: wind.V0 — 社内基本設計資料で直接確認済み（verified）、evidence.level=primary、checkedAt=2026-09-17', () => {
   const V0 = MiyoshiProjectConfig.wind.V0;
   assert.equal(V0.value, 34);
   assert.notEqual(V0.value, 32);
   assert.equal(V0.verificationStatus, 'verified');
-  assert.equal(V0.checkedAt, '2026-09-17');
+  assert.equal(V0.evidence.level, 'primary');
+  assert.equal(V0.evidence.checkedAt, '2026-09-17');
 });
 
-test('project-config: wind.roughnessCategory — 社内基本設計資料で直接確認済み（verified）、checkedAt=2026-09-17', () => {
+test('project-config: wind.roughnessCategory — 社内基本設計資料で直接確認済み（verified）、evidence.level=primary、checkedAt=2026-09-17', () => {
   const roughness = MiyoshiProjectConfig.wind.roughnessCategory;
   assert.equal(roughness.value, 'III');
   assert.equal(roughness.verificationStatus, 'verified');
-  assert.equal(roughness.checkedAt, '2026-09-17');
+  assert.equal(roughness.evidence.level, 'primary');
+  assert.equal(roughness.evidence.checkedAt, '2026-09-17');
 });
 
 test('project-config: miyoshi configから現在と同じ正圧値を取得できる（calc.js旧定数との整合）', () => {
@@ -152,6 +156,94 @@ test('project-config: V0=34m/s（32m/sへの変更は行われていない）・
 
 test('project-config: isFullyVerified() は現時点でfalse', () => {
   assert.equal(MiyoshiProjectConfig.isFullyVerified(), false);
+});
+
+/* ============================================================
+   Evidence model（2026-09-17 Phase 2B）
+   verificationStatus（値がどれだけ検証されているか）と
+   evidence（根拠がどの程度あるか: 'primary'/'indirect'/'none'）を
+   分離して扱う。verifiedへの昇格にはevidence.level==='primary'かつ
+   evidence.checkedAtが必須（promotion guard）。
+============================================================ */
+
+test('Evidence: verified valueにはevidence.level==="primary"かつevidence.checkedAtが必須', () => {
+  // 既存のverified値（identity, V0, roughnessCategory）はすべて条件を満たす。
+  assert.equal(MiyoshiProjectConfig.identity.evidence.level, 'primary');
+  assert.ok(MiyoshiProjectConfig.identity.evidence.checkedAt);
+  assert.equal(MiyoshiProjectConfig.wind.V0.evidence.level, 'primary');
+  assert.ok(MiyoshiProjectConfig.wind.V0.evidence.checkedAt);
+  assert.equal(MiyoshiProjectConfig.wind.roughnessCategory.evidence.level, 'primary');
+  assert.ok(MiyoshiProjectConfig.wind.roughnessCategory.evidence.checkedAt);
+
+  // promotion guardが直接呼び出しでも同じ規則を強制すること
+  assert.doesNotThrow(() =>
+    MiyoshiProjectConfig.assertEvidenceConsistency('verified', { level: 'primary', checkedAt: '2026-09-17' })
+  );
+  assert.throws(() =>
+    MiyoshiProjectConfig.assertEvidenceConsistency('verified', { level: 'indirect', checkedAt: '2026-09-17' })
+  );
+  assert.throws(() =>
+    MiyoshiProjectConfig.assertEvidenceConsistency('verified', { level: 'primary', checkedAt: null })
+  );
+  assert.throws(() =>
+    MiyoshiProjectConfig.assertEvidenceConsistency('verified', null)
+  );
+});
+
+test('Evidence: unverifiedなdimensionはprimary evidenceなしでも成立する', () => {
+  const w = MiyoshiProjectConfig.dimensions.defaultW;
+  const h = MiyoshiProjectConfig.dimensions.defaultH;
+  assert.equal(w.verificationStatus, 'unverified');
+  assert.notEqual(w.evidence.level, 'primary');
+  assert.equal(w.evidence.level, 'none');
+  assert.equal(h.verificationStatus, 'unverified');
+  assert.notEqual(h.evidence.level, 'primary');
+  assert.equal(h.evidence.level, 'indirect');
+  // promotion guardはunverified+非primaryを許容する（例外を投げない）
+  assert.doesNotThrow(() =>
+    MiyoshiProjectConfig.assertEvidenceConsistency('unverified', w.evidence)
+  );
+  assert.doesNotThrow(() =>
+    MiyoshiProjectConfig.assertEvidenceConsistency('unverified', h.evidence)
+  );
+});
+
+test('Evidence: partially_verifiedな階別正圧・部位別負圧プリセットもevidenceを保持する', () => {
+  for (const f of ['1', '2', '3', 'R']) {
+    const entry = MiyoshiProjectConfig.wind.positivePressureByFloor[f];
+    assert.equal(entry.verificationStatus, 'partially_verified');
+    assert.notEqual(entry.evidence.level, 'primary');
+    assert.equal(typeof entry.evidence.publicDescription, 'string');
+  }
+  for (const z of ['general', 'corner']) {
+    const entry = MiyoshiProjectConfig.wind.negativePressureByZone[z];
+    assert.equal(entry.verificationStatus, 'partially_verified');
+    assert.notEqual(entry.evidence.level, 'primary');
+    assert.equal(typeof entry.evidence.publicDescription, 'string');
+  }
+});
+
+test('Evidence: validateAllEvidence() は現在のconfig全体でviolationsが0件', () => {
+  const violations = MiyoshiProjectConfig.validateAllEvidence();
+  assert.deepEqual(violations, []);
+});
+
+test('Evidence: dimensions.mode = "sample_default"（sample defaultとverified project caseの区別）', () => {
+  assert.equal(MiyoshiProjectConfig.dimensions.mode, 'sample_default');
+});
+
+test('Evidence: verifiedCasesに架空のケースが存在しない（空配列のまま）', () => {
+  assert.ok(Array.isArray(MiyoshiProjectConfig.verifiedCases));
+  assert.equal(MiyoshiProjectConfig.verifiedCases.length, 0);
+});
+
+test('Evidence: 公開config全体にprivate URL/IDが混入しない', () => {
+  // 関数プロパティを除いたconfig全体をシリアライズして検査する。
+  const serialized = JSON.stringify(MiyoshiProjectConfig, (key, val) =>
+    typeof val === 'function' ? undefined : val
+  );
+  assert.doesNotMatch(serialized, /drive\.google|docs\.google|notion\.(so|com)|sharepoint|dropbox\.com/i);
+  assert.doesNotMatch(serialized, /file_?id|folder_?id/i);
 });
 
 /* ============================================================

@@ -805,7 +805,8 @@ window.addEventListener('DOMContentLoaded', function() {
   }
   var identityNote = document.getElementById('preset-identity-note');
   if (identityNote && cfg.identity.verificationStatus !== 'verified') {
-    identityNote.textContent = '⚠ ' + (cfg.identity.sourceDescription || cfg.identity.note || '案件識別情報は未確認です。');
+    var identityDesc = cfg.identity.evidence && cfg.identity.evidence.publicDescription;
+    identityNote.textContent = '⚠ ' + (identityDesc || '案件識別情報は未確認です。');
   }
 
   // 入力欄の既定値は project-config を正として反映する
