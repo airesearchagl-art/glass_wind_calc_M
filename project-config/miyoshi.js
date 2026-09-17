@@ -352,6 +352,12 @@
     projectId: 'miyoshi',
     projectName: 'みよし案件',
 
+    // Phase 2D（AC-04）: registered presetとして project-config/registry.js へ
+    // 登録可能であることを示すマーカー。固定presetを持つbuilt-in案件configだけが
+    // trueを持つ。手入力（project-config/manual.js）は false であり、
+    // registryはtrusted presetとして受け付けない。
+    hasFixedPreset: true,
+
     identity: {
       publicLabel: 'みよし案件',
       verificationStatus: 'verified',
