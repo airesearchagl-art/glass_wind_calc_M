@@ -158,15 +158,16 @@ tests/ui-mode-separation.test.js（新規、RF-01のsource-level回帰テスト�
 ## Remaining tasks
 
 ```text
-1. Independent Focused Review（Human側）
-2. Human Gate（Ready / merge authorization判断）
+none — Campaign closed
 ```
 
-Implementation側（コード修正・テスト・commit・push・PR本文更新・Vercel確認・Completion Report）はすべて完了済み。
+Implementation側（コード修正・テスト・commit・push・PR本文更新・Vercel確認・Completion Report）に加え、Independent Focused Review（PASS / Required Fix 0）とHuman Gate（merge authorization received）も完了した。
 
 ## Next action
 
-Independent Focused Review → Human Gate。Ready化・mergeを自動実行しない。
+```text
+none — Phase 2C closed. 後続作業はPhase 2D（LR-20260918-GLASS-P2D）で扱う。
+```
 
 ## Stop conditions status
 
@@ -191,7 +192,26 @@ Hard Check BLOCKED: なし
 ## Final state
 
 ```text
-COMPLETE_PENDING_FULL_VERIFY
+COMPLETE_VERIFIED
 ```
 
-自己検証（node --test・grep・Playwright実機確認）は完了しているが、Independent Reviewは未実施のため、`COMPLETE_VERIFIED`は自己宣言しない。
+### Closeout（Phase 2D Wave 0時点で記録）
+
+Phase 2C Campaignは以下により完了した。
+
+```yaml
+phase_2c_final_feature_head: 5f3db2adf3adaea98d9311c83aa2a1cfead03655
+pull_request: "#4"
+pull_request_state: merged
+merge_commit_main: 97bc18e53c7d3a86b3f180f408e265fec3cf5117
+production: READY
+production_deployment: dpl_7it4hsHhMz8gCLF9QWj7TkBySWBt
+independent_focused_review: PASS
+required_fix_count: 0
+human_merge_authorization: received
+final_state: COMPLETE_VERIFIED
+```
+
+Independent Focused ReviewがPASS（Required Fix 0件）し、Humanのmerge authorizationを受けてPR #4がmergeされ、Productionが READY となったため、canonical Route（`Long_Run_Development_Route.md`「COMPLETE_VERIFIED条件」）に照らして `COMPLETE_PENDING_FULL_VERIFY` から `COMPLETE_VERIFIED` へ遷移した。
+
+本closeoutはPhase 2C Run Artifactの最終状態記録のみであり、Phase 2D（LR-20260918-GLASS-P2D）のTask Packet・Acceptance Criteriaとは混在させない。Phase 2Cの `TASK_PACKET_SNAPSHOT.md` 本文およびそのdigest（`74b0855f8c0827fd8edabee4680da6ee276ff158d8771352ecf5349e13aca4b1`）は変更していない。

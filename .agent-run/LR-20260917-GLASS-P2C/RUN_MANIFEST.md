@@ -42,7 +42,25 @@ Vercel: プロジェクト連携済み（PRごとに自動Preview Deployment）
 | Wave 3 | UI mode integration（index.htmlへモード切替追加） | `7f99e6844096d81676f02683e1e44428c1e3b7ec` | 2026-09-17T15:12:07+00:00 |
 | Wave 5 | Documentation / Draft PR convergence（README同期） | `67e974b1f517cd66efac5e5908f7623c6f4be942` | 2026-09-17T15:14:15+00:00 |
 | Consolidated Closure Wave（implementation checkpoint） | RF-01〜RF-03のコード修正 + RF-04のRun Artifact初版。Manual mode provenance漏れ修正・nested evidence public-safe boundary拡張・Manual input safety contract強化・Run Artifact復旧 | `612e66133a5af51e16bbe7911f6416ca8ba232f3` | 2026-09-17T15:44:15+00:00（push確認時刻。commit日時はgit logを正とする） |
-| Run Artifact Final-State Reconciliation | RF-A〜RF-D（本コミット。stale RUN_STATE/TASK_QUEUE解消・Manual Evidence schema記述是正・recovery metadataのpublic-safe化）。source codeは変更していない | 自己参照のため本文へ固定値を書かない。解決方法: `git rev-parse HEAD`（本コミット後）またはPR #4の現在head | 2026-09-17 |
+| Run Artifact Final-State Reconciliation | RF-A〜RF-D（stale RUN_STATE/TASK_QUEUE解消・Manual Evidence schema記述是正・recovery metadataのpublic-safe化）。source codeは変更していない | `5c0aa772f2c121cafd1410e973e939c1b000bfeb` | 2026-09-17 |
+| Run Artifact public-safe cleanup | 環境情報からexecution absolute pathを除去（Run Artifact 1ファイル1行のみ） | `5f3db2adf3adaea98d9311c83aa2a1cfead03655` | 2026-09-17 |
+
+## Campaign closeout（Phase 2D Wave 0時点で記録）
+
+```yaml
+phase_2c_final_feature_head: 5f3db2adf3adaea98d9311c83aa2a1cfead03655
+pull_request: "#4"
+pull_request_state: merged
+merge_commit_main: 97bc18e53c7d3a86b3f180f408e265fec3cf5117
+production: READY
+production_deployment: dpl_7it4hsHhMz8gCLF9QWj7TkBySWBt
+independent_focused_review: PASS
+required_fix_count: 0
+human_merge_authorization: received
+final_state: COMPLETE_VERIFIED
+```
+
+Task Packet snapshot本文およびdigest（`74b0855f8c0827fd8edabee4680da6ee276ff158d8771352ecf5349e13aca4b1`）はcloseoutでも変更していない。
 
 Wave 4（Verification convergence）はWave 1〜5の各コミット内で継続的に実施済み（各Waveでnode --test全件実行・grep・Playwright実機確認を実施し、コミットメッセージに記録）であり、単独のcommitを持たない。Consolidated Closure Wave・Run Artifact Final-State Reconciliationでも同様にVerification convergenceを実施している（詳細はRUN_STATE.md参照）。
 
