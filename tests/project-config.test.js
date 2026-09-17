@@ -100,39 +100,40 @@ test('project-config: wind.roughnessCategory — 社内基本設計資料で直�
   assert.equal(roughness.evidence.checkedAt, '2026-09-17');
 });
 
-test('project-config: miyoshi configから現在と同じ正圧値を取得できる（calc.js旧定数との整合）', () => {
+test('project-config: miyoshi configが階別正圧の正（authoritative source）である', () => {
+  // Phase 2Dでcalc.js側のdeprecated複製を削除したため、値の正は
+  // project-config/miyoshi.js のみが持つ。ここで固定値として直接pinする
+  // （旧テストはcalc.js複製との一致比較だったが、比較対象の削除に伴い
+  //   canonical値そのものの固定へ置き換えた。カバレッジは減っていない）。
   const floors = ['1', '2', '3', 'R'];
   for (const f of floors) {
-    assert.equal(
-      MiyoshiProjectConfig.getPositivePressure(f),
-      GlassCalc.POSITIVE_PRESSURE_MIYOSHI_PRESET[f],
-      `floor=${f} の正圧値がcalc.jsの非推奨定数と一致しない`
-    );
+    const v = MiyoshiProjectConfig.getPositivePressure(f);
+    assert.equal(typeof v, 'number', `floor=${f} の正圧値が数値でない`);
+    assert.ok(isFinite(v) && v > 0, `floor=${f} の正圧値が正の有限数でない`);
   }
-  // 既知の値そのものも固定値で確認する
   assert.equal(MiyoshiProjectConfig.getPositivePressure('1'), 1297);
   assert.equal(MiyoshiProjectConfig.getPositivePressure('2'), 1525);
   assert.equal(MiyoshiProjectConfig.getPositivePressure('3'), 1695);
   assert.equal(MiyoshiProjectConfig.getPositivePressure('R'), 1729);
 });
 
-test('project-config: 同じ負圧値を取得できる（calc.js旧定数との整合）', () => {
+test('project-config: miyoshi configが部位別負圧の正（authoritative source）である', () => {
   const zones = ['general', 'corner'];
   for (const z of zones) {
-    assert.equal(
-      MiyoshiProjectConfig.getNegativePressure(z),
-      GlassCalc.NEGATIVE_PRESSURE_MIYOSHI_PRESET[z],
-      `zone=${z} の負圧値がcalc.jsの非推奨定数と一致しない`
-    );
+    const v = MiyoshiProjectConfig.getNegativePressure(z);
+    assert.equal(typeof v, 'number', `zone=${z} の負圧値が数値でない`);
+    assert.ok(isFinite(v) && v > 0, `zone=${z} の負圧値が正の有限数でない`);
   }
   assert.equal(MiyoshiProjectConfig.getNegativePressure('general'), 918);
   assert.equal(MiyoshiProjectConfig.getNegativePressure('corner'), 1122);
 });
 
-test('project-config: default W/H = 1250/2050（calc.js旧定数との整合）', () => {
+test('project-config: default W/H = 1250/2050（案件既定寸法の正はproject-config側のみ）', () => {
   const dflt = MiyoshiProjectConfig.getDefaultDimensionsMM();
   assert.deepEqual(dflt, { W: 1250, H: 2050 });
-  assert.deepEqual(dflt, GlassCalc.UNVERIFIED_DEFAULT_DIMENSIONS_MM);
+  // Phase 2D: calc.js側の複製（UNVERIFIED_DEFAULT_DIMENSIONS_MM）は削除済み。
+  // 汎用計算コアが案件既定寸法を持ち直していないことを併せて確認する。
+  assert.equal(GlassCalc.UNVERIFIED_DEFAULT_DIMENSIONS_MM, undefined);
 });
 
 test('project-config: dimensions.status = unverified（verifiedへ昇格していないこと）', () => {

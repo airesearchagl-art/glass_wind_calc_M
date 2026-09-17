@@ -1,5 +1,5 @@
 /**
- * ガラス耐風圧 計算ロジック（UIから分離）
+ * ガラス耐風圧 計算ロジック（案件非依存の汎用計算コア）
  *
  * 出典:
  *   - 国土交通省 平成12年建設省告示第1458号（4辺支持ガラスの構造計算）
@@ -8,13 +8,21 @@
  * ブラウザ（<script src="calc.js">、window.GlassCalc）と
  * Node.js（require('./calc.js')、テスト用）の両方から利用できる。
  *
- * Phase 2A（案件固有入力と汎用計算コアの分離）:
- * このファイルは原則、k1・k2・許容耐風圧計算式・candidate generation/
- * sorting/split等の「案件非依存の汎用計算コア」のみを担当する設計へ
- * 徐々に移行している。「みよし案件」固有のプリセット値（設計風圧・
- * 初期寸法）は project-config/miyoshi.js へ移設済み。このファイルに
- * 残る同名の定数は後方互換のための非推奨（deprecated）の複製であり、
- * 各定義の直上コメントを参照のこと。
+ * Phase 2D（calculation coreの完全な案件非依存化）:
+ * このファイルは k1・k2・告示式・複層ガラス計算・candidate generation /
+ * sorting / split 等の「案件非依存の汎用計算コア」のみを担当する。
+ *
+ * 案件固有の値（設計風圧プリセット・案件既定寸法・案件ラベル・
+ * 案件provenance / Evidence）は、このファイルに一切置かない。
+ * それらの正（authoritative source）は以下が持つ:
+ *   - project-config/miyoshi.js   … 個別案件のpreset（検証状況・Evidence付き）
+ *   - project-config/registry.js  … registered presetのlookup境界
+ *   - project-config/project-input.js … 入力条件のversioned package
+ *
+ * Phase 2A〜2Cで後方互換のために残していた案件固有プリセットの複製
+ * （階別正圧 / 部位別負圧 / 案件既定寸法の3定数）は、全consumerの
+ * 移行完了に伴いPhase 2Dで削除した。案件固有値をこのファイルへ
+ * 再び複製しないこと。移行の詳細はREADMEのmigrationセクションを参照。
  */
 (function (global, factory) {
   var mod = factory();
@@ -26,73 +34,6 @@
   }
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
-
-  // ============================================================
-  // [DEPRECATED / Phase 2A] 設計風圧プリセット（みよし案件プリセット値）
-  //
-  // Phase 2A（案件固有入力と汎用計算コアの分離）により、この値の正
-  // （authoritative source）は project-config/miyoshi.js
-  // （MiyoshiProjectConfig.wind.positivePressureByFloor /
-  //   MiyoshiProjectConfig.wind.negativePressureByZone）へ移設した。
-  // ここに残る複製は、既存のProduction挙動・既存テストを壊さないための
-  // 後方互換用であり、非推奨（deprecated）。将来のフェーズで全消費者が
-  // project-config/ 側へ移行した後、calc.js側からは削除予定。
-  // 値を変更する場合は project-config/miyoshi.js と完全に一致させること
-  // （このファイル単体では変更しないこと）。
-  //
-  // 告示から自動算定した値ではなく、みよし案件の設計風圧をそのまま
-  // 定数化したもの。削除・変更禁止。他案件へ流用する場合は、
-  // その案件の設計風圧として妥当かを個別に確認すること。
-  //
-  // 監査メモ（2026-09時点。値そのものは変更していない）：
-  //   - 基準風速 V0 = 34 m/s・地表面粗度区分 III は、社内基本設計資料
-  //     （外構の風荷重条件）で直接確認済み（みよし市の法定値 V0=32m/s
-  //     とは異なる。本案件では34m/sを案件側設計条件として採用しているため、
-  //     32m/sへの変更は行わないこと）。
-  //   - 負圧値を Cpe（告示1458号 H≦45m：一般部 -1.8／隅角部 -2.2）で逆算すると
-  //       918  / 1.8 = 510 N/m²
-  //       1122 / 2.2 = 510 N/m²
-  //     となり、平均速度圧 qbar ≈ 510 N/m² 相当で揃う。
-  //   - 正圧側（1297/1525/1695/1729）も、qbar≈510N/m² に告示1458号のCpe・Gpe
-  //     （閉鎖型建築物の内圧係数を含む）を適用することで概ね再現可能。
-  //   - V0・地表面粗度区分そのものは確認済みだが、これは外構・地表面の
-  //     風荷重条件を確認したものであり、この階別正圧・部位別負圧の元となった
-  //     外装材/ガラス構造計算書・各階の評価高さZへの厳密な対応付けは
-  //     依然として未確認（UNVERIFIED）。したがって現段階では本プリセットを
-  //     告示からの自動算定式へ置換せず、固定値のまま維持する。「告示から
-  //     自動算定した値ではない」というUI上の注記も残す。詳細な検証状況
-  //     （verificationStatus）は project-config/miyoshi.js を参照。
-  // ============================================================
-  var POSITIVE_PRESSURE_MIYOSHI_PRESET = {
-    '1': 1297,
-    '2': 1525,
-    '3': 1695,
-    'R': 1729
-  };
-
-  var NEGATIVE_PRESSURE_MIYOSHI_PRESET = {
-    general: 918,  // 一般部 -918 の絶対値
-    corner: 1122   // 隅角部 -1122 の絶対値
-  };
-
-  // ============================================================
-  // [DEPRECATED / Phase 2A] 初期入力寸法（UNVERIFIED PROJECT DEFAULT）
-  //
-  // Phase 2Aにより、この値の正（authoritative source）は
-  // project-config/miyoshi.js（MiyoshiProjectConfig.dimensions）へ
-  // 移設した。ここに残る複製は既存のProduction挙動・既存テストを
-  // 壊さないための後方互換用であり、非推奨（deprecated）。将来の
-  // フェーズで全消費者が project-config/ 側へ移行した後、calc.js側
-  // からは削除予定。
-  //
-  // W=1250mm / H=2050mm は、リポジトリ初回リリースコミット
-  // （"feat: 初版リリース - ガラス耐風圧簡易検討ツール"）で index.html の
-  // 初期値として導入されたもので、コミットメッセージ・README・設計根拠資料の
-  // いずれにも算定根拠の記載がない。特定案件のガラス見付実寸として検証された
-  // 値ではないため、UNVERIFIED PROJECT DEFAULT として扱う。
-  // UIはこの値を「みよし案件の確定寸法」であるかのように表示してはならない。
-  // ============================================================
-  var UNVERIFIED_DEFAULT_DIMENSIONS_MM = { W: 1250, H: 2050 };
 
   // ============================================================
   // k1：強度種別係数（板硝子協会資料準拠）
@@ -310,9 +251,6 @@
   }
 
   return {
-    POSITIVE_PRESSURE_MIYOSHI_PRESET: POSITIVE_PRESSURE_MIYOSHI_PRESET,
-    NEGATIVE_PRESSURE_MIYOSHI_PRESET: NEGATIVE_PRESSURE_MIYOSHI_PRESET,
-    UNVERIFIED_DEFAULT_DIMENSIONS_MM: UNVERIFIED_DEFAULT_DIMENSIONS_MM,
     getK1_FL: getK1_FL,
     K1_TP: K1_TP,
     K1_TP_SUPPORTED_THICKNESSES_MM: K1_TP_SUPPORTED_THICKNESSES_MM,

@@ -20,13 +20,23 @@ const {
   K1_TP,
   K1_TP_SUPPORTED_THICKNESSES_MM,
   IGU_APPLICABLE_RATIO_MAX,
-  POSITIVE_PRESSURE_MIYOSHI_PRESET,
-  UNVERIFIED_DEFAULT_DIMENSIONS_MM,
   STRENGTH_TYPES,
   generateCandidates
 } = require('../calc.js');
 
+const GlassCalc = require('../calc.js');
+
 const AREA = 1.0;
+
+// 代表的な寸法・設計風圧の検証値。
+// Phase 2Dでcalc.jsから案件固有定数を削除したため、汎用計算コアのテストでは
+// 案件presetを参照せず、検証用の数値としてここに固定する。
+// 案件preset値そのものの正しさ（1250×2050 / 2F=1525 N/m²等）は
+// project-config側の正（project-config/miyoshi.js）に対して
+// tests/project-config.test.js が独立に固定している。
+const SAMPLE_W_MM = 1250;
+const SAMPLE_H_MM = 2050;
+const SAMPLE_DESIGN_PRESSURE = 1525;
 
 test('FL6: 必須ケース（k1=1.0, k2=1.0, A=1.0） P = 4500 N/m2', () => {
   assert.equal(calcP_notification(6, 1.0, 1.0, AREA), 4500);
@@ -107,16 +117,55 @@ test('回帰確認：旧式(t²)ではなく告示式(t + t²/4)であること'
 });
 
 /* ============================================================
-   案件代表寸法による感度テスト（H=2050mm固定、FL6）
-   W=1250 / 1400 / 1500 / 1550mm で面積増加に伴い許容耐風圧が
-   単調に低下することを確認する。1250×2050mm自体は
-   UNVERIFIED PROJECT DEFAULT（リポジトリ履歴上、算定根拠の記載なし）
-   であり、案件確定寸法ではない点に注意。
+   Phase 2D AC-01 / AC-10: calculation core purity
+   calc.jsは案件非依存の汎用計算コアのみを担当し、案件固有値・
+   案件固有ラベル・案件固有provenanceを保持しない。
+   （旧 UNVERIFIED_DEFAULT_DIMENSIONS_MM 等のdeprecated複製は
+    Phase 2Dで削除済み。正は project-config/ 側が持つ。）
 ============================================================ */
 
-test('UNVERIFIED PROJECT DEFAULT: 既定寸法は1250×2050mmのまま（変更検知用の回帰）', () => {
-  assert.deepEqual(UNVERIFIED_DEFAULT_DIMENSIONS_MM, { W: 1250, H: 2050 });
+test('AC-01: calc.jsのexportsからdeprecatedな案件固有定数が削除されている', () => {
+  const removed = [
+    'POSITIVE_PRESSURE_MIYOSHI_PRESET',
+    'NEGATIVE_PRESSURE_MIYOSHI_PRESET',
+    'UNVERIFIED_DEFAULT_DIMENSIONS_MM'
+  ];
+  for (const name of removed) {
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(GlassCalc, name), false,
+      `calc.jsは案件固有定数 ${name} をexportしてはならない`
+    );
+    assert.equal(GlassCalc[name], undefined);
+  }
 });
+
+test('AC-01: calc.jsのソースにMiyoshi固有の識別子・案件固有値が存在しない', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'calc.js'), 'utf8');
+
+  // 案件固有の識別子
+  for (const token of ['MIYOSHI', 'Miyoshi', 'みよし']) {
+    assert.equal(src.includes(token), false, `calc.jsに案件固有識別子 ${token} が残っている`);
+  }
+  // 案件固有の設計風圧プリセット値・案件既定寸法
+  for (const value of ['1297', '1525', '1695', '1729', '918', '1122', '1250', '2050']) {
+    assert.doesNotMatch(
+      src, new RegExp('\\b' + value + '\\b'),
+      `calc.jsに案件固有値 ${value} が残っている（正はproject-config側）`
+    );
+  }
+  // 案件固有のprovenance / Evidence語彙
+  for (const token of ['verificationStatus', 'evidence', 'UNVERIFIED PROJECT DEFAULT']) {
+    assert.equal(src.includes(token), false, `calc.jsに案件provenance語彙 ${token} が残っている`);
+  }
+});
+
+/* ============================================================
+   代表寸法による感度テスト（H=2050mm固定、FL6）
+   W=1250 / 1400 / 1500 / 1550mm で面積増加に伴い許容耐風圧が
+   単調に低下することを確認する（汎用計算コアの性質のテスト）。
+============================================================ */
 
 test('寸法感度: FL6 W=1250/H=2050 ≈ 1756 N/m²', () => {
   const area = (1250 * 2050) / 1_000_000;
@@ -142,9 +191,9 @@ test('寸法感度: FL6はH=2050mm固定でW増加に伴い単調に低下する
   }
 });
 
-test('寸法感度・境界回帰: 2階プリセット設計風圧に対しW=1250はOK、W=1500はNGに反転する', () => {
-  const H = 2050;
-  const designP = POSITIVE_PRESSURE_MIYOSHI_PRESET['2']; // 1525 N/m²
+test('寸法感度・境界回帰: 設計風圧1525 N/m²に対しW=1250はOK、W=1500はNGに反転する', () => {
+  const H = SAMPLE_H_MM;
+  const designP = SAMPLE_DESIGN_PRESSURE; // 1525 N/m²
   const area1250 = (1250 * H) / 1_000_000;
   const area1500 = (1500 * H) / 1_000_000;
   const P1250 = calcP_notification(6, getK1_FL(6), 1.0, area1250);

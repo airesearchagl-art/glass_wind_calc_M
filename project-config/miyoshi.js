@@ -6,20 +6,21 @@
  * モジュール。
  *
  * Phase 2A（案件固有入力と汎用計算コアの分離）の一部として、
- * calc.js に直接埋め込まれていた案件固有定数
- * （POSITIVE_PRESSURE_MIYOSHI_PRESET / NEGATIVE_PRESSURE_MIYOSHI_PRESET /
- * UNVERIFIED_DEFAULT_DIMENSIONS_MM）をこのモジュールへ移設した。
+ * calc.js に直接埋め込まれていた案件固有定数（階別正圧 / 部位別負圧 /
+ * 案件既定寸法）をこのモジュールへ移設した。
  *
- * 位置づけ:
+ * 位置づけ（Phase 2Dで完了）:
  *   - calc.js は k1・k2・許容耐風圧計算式・candidate generation/sorting等の
- *     「案件非依存の汎用計算コア」のみを担当する設計へ徐々に移行する。
+ *     「案件非依存の汎用計算コア」のみを担当する。案件固有値は保持しない。
  *   - 本ファイルは「案件固有プリセット」を担当する。index.html（UI）は
  *     Phase 2A以降、本ファイルを案件プリセットの正（authoritative source）
  *     として参照する。
- *   - calc.js 内に残る POSITIVE_PRESSURE_MIYOSHI_PRESET 等は、既存の
- *     Production挙動・既存テストを壊さないための後方互換用の複製であり、
- *     非推奨（deprecated）。値は本ファイルと完全に一致させること。
- *     将来のフェーズで全消費者が本ファイルへ移行した後、calc.js側は削除予定。
+ *   - Phase 2A〜2Cでcalc.js側へ後方互換用に残していた複製は、全consumerの
+ *     移行完了に伴いPhase 2Dで削除済み。以後、案件固有値の正は本ファイル
+ *     だけが持つ。calc.js側へ値を再複製しないこと。
+ *   - 本ファイルは project-config/registry.js を通じてregistered presetとして
+ *     lookupできる（Phase 2D）。registered presetのverified stateを持てるのは
+ *     repository内のbuilt-in configだけであり、imported dataは昇格できない。
  *
  * 静的HTML/JS構成・ビルド不要という制約を維持するため、JSONではなく
  * UMD形式のプレーンJSとして提供する（<script src>でのブラウザグローバル
@@ -455,7 +456,7 @@
         'wind.roughnessCategory'
       ),
       status: 'partially_verified',
-      source: 'みよし案件の設計風圧プリセット値（calc.js旧 POSITIVE_PRESSURE_MIYOSHI_PRESET / NEGATIVE_PRESSURE_MIYOSHI_PRESET より移設）',
+      source: 'みよし案件の設計風圧プリセット値（Phase 2Aでcalc.jsの案件固有定数から移設。Phase 2Dでcalc.js側の複製は削除済み）',
       note: 'V0=34m/s・地表面粗度区分IIIは社内基本設計資料で直接確認済み（verified、evidence.level: primary）。ただしこの資料は外構・地表面の風荷重条件を確認したものであり、階別正圧・部位別負圧プリセット値（上記）の元となった外装材/ガラス構造計算書、および各階評価高さZとの厳密な対応付けを直接確認したものではない（evidence.level: indirect）。したがって階別プリセット値自体はpartially_verifiedのまま維持し、verifiedへは昇格させない。'
     },
 
