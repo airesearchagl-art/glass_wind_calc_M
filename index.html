@@ -427,7 +427,7 @@
           入力モード: <span id="manual-mode-label">手入力 (Manual / Generic)</span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          ⚠ ユーザーがその場で入力した値です。案件原典（構造計算書・製品資料等）との照合は本ツールでは行っていません。
+          ⚠ このモードでは、現在画面に表示されているW/H/正圧/負圧をユーザー入力値として扱います。初期表示値（サンプル値）も含め、案件原典（構造計算書・製品資料等）で検証済みの値ではありません。
         </div>
       </div>
 
@@ -520,7 +520,8 @@
       <strong>⚠ ご注意</strong><br>
       本ツールは平成12年建設省告示第1458号（4辺支持ガラスの構造計算）に基づく風圧検討を簡易的に行うためのものです。<br>
       複層ガラスは板硝子協会「4辺支持板ガラスの耐風圧強度計算法」の適用範囲（厚板/薄板 ≦ 2.5）を超える組合せを自動推奨から除外し、警告表示します。<br>
-      階別正圧・部位別負圧は「みよし案件プリセット」であり、告示から自動算定した値ではありません。<br>
+      <span class="mode-field mode-field-miyoshi">階別正圧・部位別負圧は「みよし案件プリセット」であり、告示から自動算定した値ではありません。<br></span>
+      <span class="mode-field mode-field-manual">このモードでは、現在画面に表示されているW/H/正圧/負圧をユーザー入力値として扱います。初期表示値も含め、案件原典で検証済みの値ではありません。<br></span>
       自重・衝撃・熱割れ・製作可否・サッシ納まり・支持条件の違い・法的適合性の最終判断は別途確認が必要です。<br>
       <strong>最終的な設計判断にはメーカー検討書または専門技術者による確認を優先してください。</strong>
     </div>
@@ -607,7 +608,7 @@ function renderResults(result) {
   const unverifiedHtml = mode === 'manual' ? `
       <div class="notice" style="margin-bottom:14px;border-color:rgba(245,158,11,0.4);">
         <strong style="color:var(--warn);">⚠ ユーザー入力値 — 案件原典との照合は本ツールでは未実施</strong><br>
-        W/H/正圧/負圧はすべてその場で入力した値（source: user_input）です。本ツールはこれらの値を案件図・構造計算書等の原典と照合していません。「案件適合OK」の根拠として扱わず、必要に応じてメーカー検討書または専門技術者による確認を行ってください。
+        現在の入力値（W=${W}mm/H=${H}mm/正圧=${fmt(posP,0)}/負圧=${fmt(negP,0)}。初期表示のサンプル値のまま変更していない項目を含む）は、すべてユーザー入力値（source: user_input）として扱われます。本ツールはこれらの値を案件図・構造計算書等の原典と照合していません。「案件適合OK」の根拠として扱わず、必要に応じてメーカー検討書または専門技術者による確認を行ってください。
       </div>` : (isUnverifiedDefault ? `
       <div class="notice" style="margin-bottom:14px;border-color:rgba(245,158,11,0.4);">
         <strong style="color:var(--warn);">⚠ 参考計算 — 案件実寸未確認</strong><br>
@@ -654,7 +655,7 @@ function renderResults(result) {
   const windSelectionTitle = mode === 'miyoshi' ? '設計風圧の選定（みよし案件プリセット）' : '設計風圧の選定（手入力値）';
   const windSelectionNote = mode === 'miyoshi'
     ? '※ 正圧・負圧は告示から自動算定した値ではなく、みよし案件プリセット値です。'
-    : '※ 正圧・負圧はユーザーが入力した値です（source: user_input）。案件原典との照合は本ツールでは行っていません。';
+    : '※ 正圧・負圧は現在画面に表示されている値（source: user_input）です。初期表示値も含め、案件原典との照合は本ツールでは行っていません。';
 
   const windHtml = `
     <div class="card">

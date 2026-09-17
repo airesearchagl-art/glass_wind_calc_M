@@ -121,6 +121,51 @@ test('manual-config: 不正なextraFactor（0以下・非数値）を例外で�
   }
 });
 
+/* ============================================================
+   Phase 2C Consolidated Closure Wave RF-03: Manual input safety contract
+   extraFactorは「告示外の追加低減係数」であり、0 < extraFactor <= 1.0を
+   必須とする（1.0超は告示計算値を増幅することになり安全側ではない）。
+   また、正圧・負圧の両方が0であるケースを拒否する（片方のみ0は許容）。
+============================================================ */
+
+test('RF-03: extraFactorが1.0を超える値（増幅方向）を例外で拒否する', () => {
+  const base = { W: 1250, H: 2050, positivePressure: 1400, negativePressure: -1000 };
+  for (const bad of [1.01, 1.2, 2, 10]) {
+    assert.throws(
+      () => ManualProjectConfig.buildManualDesignInput(Object.assign({}, base, { extraFactor: bad })),
+      `extraFactor=${bad} は例外を投げるはず（1.0超は不可）`
+    );
+  }
+});
+
+test('RF-03: extraFactorが0以下・NaN・Infinity・非数値の場合は例外を投げる', () => {
+  const base = { W: 1250, H: 2050, positivePressure: 1400, negativePressure: -1000 };
+  for (const bad of [0, -1, NaN, Infinity, -Infinity, 'abc']) {
+    assert.throws(() => ManualProjectConfig.buildManualDesignInput(Object.assign({}, base, { extraFactor: bad })));
+  }
+});
+
+test('RF-03: extraFactor = 1.0 / 0.9 / 0.7 / 0.5 は許容される（正の1.0以下）', () => {
+  const base = { W: 1250, H: 2050, positivePressure: 1400, negativePressure: -1000 };
+  for (const ok of [1.0, 0.9, 0.7, 0.5]) {
+    const result = ManualProjectConfig.buildManualDesignInput(Object.assign({}, base, { extraFactor: ok }));
+    assert.equal(result.extraFactor, ok);
+  }
+});
+
+test('RF-03: 正圧=0・負圧=-500は許容され、designP=500になる（片方のみ0は設計入力として成立する）', () => {
+  const result = ManualProjectConfig.buildManualDesignInput({
+    W: 1250, H: 2050, positivePressure: 0, negativePressure: -500
+  });
+  assert.equal(result.designP, 500);
+});
+
+test('RF-03: 正圧=0・負圧=0は例外で拒否する（designP=0は実設計入力として意味を持たない）', () => {
+  assert.throws(() => ManualProjectConfig.buildManualDesignInput({
+    W: 1250, H: 2050, positivePressure: 0, negativePressure: 0
+  }));
+});
+
 test('manual-config: inputがobjectでない場合は例外を投げる', () => {
   for (const bad of [null, undefined, 'string', 123, []]) {
     assert.throws(() => ManualProjectConfig.buildManualDesignInput(bad));

@@ -24,6 +24,19 @@
  * UMD形式のプレーンJSとして提供する（project-config/miyoshi.js と同様、
  * <script src> でのブラウザグローバル読み込みと、Node.js での
  * require() 読み込みの両方に対応する）。
+ *
+ * Phase 2C Consolidated Closure Wave（2026-09-17）RF-03:
+ * Manual input safety contractを以下のとおり強化した。
+ *   - `extraFactor`（告示外の追加低減係数）は `0 < extraFactor <= 1.0` を
+ *     必須とする。0・負値・1.0超（1.01/1.2/2等）・NaN・Infinity・非数値は
+ *     すべて拒否する。0.70未満を禁止する理由はない（安全側の低減係数の
+ *     ため、正の1.0以下であれば許容する）。UI側のスライダー範囲
+ *     （0.70〜1.00）自体は変更しない。
+ *   - 正圧・負圧の片方が0であることは許容する（例: positive=0,
+ *     negative=-500 → designP=500）。ただし正圧・負圧の両方が0の場合、
+ *     実設計入力として意味を持たないため、算出後の
+ *     `designP = max(|positivePressure|, |negativePressure|)` が
+ *     `designP > 0` であることをhard validationし、両方0のケースを拒否する。
  */
 (function (global, factory) {
   var mod = factory();
@@ -86,6 +99,16 @@
     return value;
   }
 
+  // RF-03: extraFactor（告示外の追加低減係数）は 0 < value <= 1.0 のみ許容。
+  // 1.0を超える値は「告示計算値を増幅する」ことになり安全側ではないため
+  // 拒否する。0.70未満（例: 0.5）は禁止しない（安全側の低減であるため）。
+  function requireExtraFactorInRange(value, label) {
+    if (!isFiniteNumber(value) || value <= 0 || value > 1.0) {
+      throw new Error(label + ' must be a finite number with 0 < value <= 1.0, got: ' + JSON.stringify(value));
+    }
+    return value;
+  }
+
   // Manual入力（raw: { W, H, positivePressure, negativePressure, extraFactor }）
   // を汎用計算コアへ渡せる形に検証・変換する。
   //
@@ -113,9 +136,15 @@
 
     var extraFactorInput = raw.extraFactor;
     var extraFactor = (extraFactorInput === undefined || extraFactorInput === null) ? 1.0 : extraFactorInput;
-    requirePositiveFiniteNumber(extraFactor, 'extraFactor');
+    requireExtraFactorInRange(extraFactor, 'extraFactor');
 
     var designP = Math.max(Math.abs(positivePressure), Math.abs(negativePressure));
+    // RF-03: 正圧・負圧の片方が0であることは許容するが（例: positive=0,
+    // negative=-500 → designP=500）、両方0の場合は実設計入力として意味を
+    // 持たないため拒否する。
+    if (!(designP > 0)) {
+      throw new Error('designP must be greater than 0 (positivePressure and negativePressure cannot both be zero), got: ' + JSON.stringify(designP));
+    }
 
     return {
       W: W,

@@ -449,6 +449,115 @@ test('AC-06: validateVerifiedCase() はpublicEvidenceDescriptionへの内部限�
   ));
 });
 
+/* ============================================================
+   Phase 2C Consolidated Closure Wave RF-02:
+   public-safe Evidence boundaryを、top-level publicEvidenceDescription
+   だけでなくnested evidence（widthEvidence/heightEvidence/
+   pressureEvidenceのpublicDescription）まで拡張し、共通関数
+   assertPublicSafeEvidenceText() でmakeEvidence()の入口からも強制する。
+============================================================ */
+
+test('RF-02: assertPublicSafeEvidenceText() が既知の非公開パターン（URL/www/プロバイダ名/Windowsパス/UNCパス/Unix絶対パス/長いopaqueトークン）を例外で拒否する', () => {
+  const unsafeTexts = [
+    '参照: http://example.com/doc',
+    '参照: https://example.com/doc',
+    'file:///Users/foo/bar.txt',
+    'see www.example.com for details',
+    'https://drive.google.com/file/d/xyz',
+    'see notion.so/internal-doc',
+    'sharepoint.com/sites/foo',
+    'dropbox.com/s/abc',
+    'C:\\Users\\foo\\bar.docx',
+    '\\\\server\\share\\file.docx',
+    '~/Documents/secret.pdf',
+    '/Users/foo/secret.pdf',
+    '/home/foo/secret.pdf',
+    '/mnt/data/secret.pdf',
+    // 架空の長いopaqueトークン（実際の社内file ID等は用いない、fixture値）
+    'ref token: 1A2b3C4d5E6f7G8h9I0jK1L2M3N4O5'
+  ];
+  for (const text of unsafeTexts) {
+    assert.throws(
+      () => MiyoshiProjectConfig.assertPublicSafeEvidenceText(text, 'test'),
+      `拒否されるはず: ${text}`
+    );
+  }
+});
+
+test('RF-02: assertPublicSafeEvidenceText() は非空文字列かつ既知パターンを含まないテキストを受理する', () => {
+  assert.doesNotThrow(() => MiyoshiProjectConfig.assertPublicSafeEvidenceText('社内資料により確認済み（固有名詞・URLなし）', 'test'));
+  assert.throws(() => MiyoshiProjectConfig.assertPublicSafeEvidenceText('', 'test'));
+  assert.throws(() => MiyoshiProjectConfig.assertPublicSafeEvidenceText(null, 'test'));
+  assert.throws(() => MiyoshiProjectConfig.assertPublicSafeEvidenceText(undefined, 'test'));
+  assert.throws(() => MiyoshiProjectConfig.assertPublicSafeEvidenceText(123, 'test'));
+});
+
+test('RF-02: makeEvidence() はpublicDescriptionへの既知の非公開パターン混入を例外で拒否する（factory入口でのpublic-safe boundary）', () => {
+  assert.throws(() => MiyoshiProjectConfig.makeEvidence('primary', '2026-09-17', '参照: https://drive.google.com/file/d/xyz', true));
+  assert.throws(() => MiyoshiProjectConfig.makeEvidence('primary', '2026-09-17', 'C:\\Users\\foo\\bar.docx', true));
+  assert.throws(() => MiyoshiProjectConfig.makeEvidence('primary', '2026-09-17', '', true));
+  assert.doesNotThrow(() => MiyoshiProjectConfig.makeEvidence('primary', '2026-09-17', '社内資料により確認済み', true));
+});
+
+test('RF-02: makeEvidence() はprivateReferenceAvailableを厳密なbooleanとして検証する（silent coercion禁止）', () => {
+  const nonBooleanValues = ['false', 'true', 1, 0, {}, [], null, undefined, 'yes'];
+  for (const bad of nonBooleanValues) {
+    assert.throws(
+      () => MiyoshiProjectConfig.makeEvidence('primary', '2026-09-17', 'desc', bad),
+      `privateReferenceAvailable=${JSON.stringify(bad)} は例外を投げるはず（厳密なboolean以外は不可）`
+    );
+  }
+  assert.doesNotThrow(() => MiyoshiProjectConfig.makeEvidence('primary', '2026-09-17', 'desc', true));
+  assert.doesNotThrow(() => MiyoshiProjectConfig.makeEvidence('primary', '2026-09-17', 'desc', false));
+});
+
+test('RF-02: validateVerifiedCase() はwidthEvidence.publicDescriptionへの内部限定識別子混入を例外で拒否する（nested evidence, private URL rejection）', () => {
+  const fixture = makeValidVerifiedCaseFixture();
+  const unsafeWidthEvidence = {
+    level: 'primary', checkedAt: '2026-09-17',
+    publicDescription: '参照: https://drive.google.com/file/d/xyz', privateReferenceAvailable: true
+  };
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
+    Object.assign({}, fixture, { evidence: Object.assign({}, fixture.evidence, { widthEvidence: unsafeWidthEvidence }) })
+  ));
+});
+
+test('RF-02: validateVerifiedCase() はheightEvidence.publicDescriptionへのWindows/UNCパス混入を例外で拒否する（nested evidence, path rejection）', () => {
+  const fixture = makeValidVerifiedCaseFixture();
+  const unsafeHeightEvidence = {
+    level: 'primary', checkedAt: '2026-09-17',
+    publicDescription: 'C:\\Users\\foo\\社内資料\\寸法図.pdf', privateReferenceAvailable: true
+  };
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
+    Object.assign({}, fixture, { evidence: Object.assign({}, fixture.evidence, { heightEvidence: unsafeHeightEvidence }) })
+  ));
+});
+
+test('RF-02: validateVerifiedCase() はpressureEvidence.publicDescriptionへの長いopaqueトークン混入を例外で拒否する（nested evidence, opaque ID rejection）', () => {
+  const fixture = makeValidVerifiedCaseFixture();
+  const unsafePressureEvidence = {
+    level: 'primary', checkedAt: '2026-09-17',
+    // 架空のfixture値（実際の社内file ID等は用いない）
+    publicDescription: 'ref: 9zY8xW7vU6tS5rQ4pO3nM2lK1jI0hG',
+    privateReferenceAvailable: true
+  };
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
+    Object.assign({}, fixture, { evidence: Object.assign({}, fixture.evidence, { pressureEvidence: unsafePressureEvidence }) })
+  ));
+});
+
+test('RF-02: validateVerifiedCase() のtop-level publicEvidenceDescriptionはWindowsパス・UNCパス・opaqueIDも拒否する（regex拡張後の回帰）', () => {
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
+    makeValidVerifiedCaseFixture({ publicEvidenceDescription: 'C:\\Users\\foo\\寸法図.pdf' })
+  ));
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
+    makeValidVerifiedCaseFixture({ publicEvidenceDescription: '\\\\server\\share\\寸法図.pdf' })
+  ));
+  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
+    makeValidVerifiedCaseFixture({ publicEvidenceDescription: 'ref: 1A2b3C4d5E6f7G8h9I0jK1L2M3N4O5' })
+  ));
+});
+
 test('Evidence: 公開config全体にprivate URL/IDが混入しない', () => {
   // 関数プロパティを除いたconfig全体をシリアライズして検査する。
   const serialized = JSON.stringify(MiyoshiProjectConfig, (key, val) =>
