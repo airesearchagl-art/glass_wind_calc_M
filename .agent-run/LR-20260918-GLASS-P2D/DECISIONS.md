@@ -93,6 +93,40 @@ full diff reviewで `project-config/project-input.js` がgit上binary扱いに�
   (b) Task Packet revision 2 を発行し、識別子を除いた本文で snapshot と digest を再発行する。
   (b) を選ぶ場合は新digestをHumanが承認する必要がある。agent側では実施しない。
 
+### Human decision — CLOSED（option (a) ACCEPTED）
+
+Humanは **option (a)** を選択した。`TASK_PACKET_SNAPSHOT.md` 内のVercel deployment identifierは
+そのまま保持する。**Task Packet revision 2 は不要。**
+
+```yaml
+decision: option_a_accepted
+task_packet_revision: 1          # 変更なし
+task_packet_digest_sha256: 6d38bb4ff293276195a36551bd1d5fb117230d889a0683912145e468f460a7df
+snapshot_mutation: prohibited
+status: resolved
+```
+
+Humanが示した理由:
+
+1. 当該identifierはsecret / credentialではない。
+2. 公開Vercel deploymentを識別するpublic referenceである。
+3. AC-13が明示的に禁止する項目（private URL / private file ID / internal path / private filename /
+   formal internal project identity / credential / secret / session identifier /
+   execution environment absolute path）のいずれにも該当しない。
+4. `assertPublicSafeEvidenceText()` のopaque-token rejectionは Evidence / publicDescription 等の
+   **入力境界**であり、immutable Task Packet audit snapshot全体に対する universal prohibition としては扱わない。
+5. exact Human Task Packetのimmutability / provenanceを、後からのpolicy拡張によって破壊しない。
+
+**この決定の性質**: これはHard Gate failureのwaiverではなく、**AC-13のscopeをHumanが確定したもの**である。
+canonical Routeは「Hard Checkはwaiver / accepted_by_human / Quality Debt / INCONCLUSIVE / NOT RUN で
+代替できない」と定めるが、本件はFAILの免除ではなくAcceptance Criteriaの意味の確定であり、
+その権限はHumanにある。よってPrivacy Hard Gateは **PASS** として記録する（waiver扱いにしない）。
+
+**この決定の射程（重要）**: これは「今後Run Artifactへdeployment IDを積極的に書いてよい」という
+一般ルールではない。通常のRun Artifact metadataでは opaque deployment ID を不要に保存しない
+現在方針を維持する。今回許容されるのは **immutable Task Packet本文に既に含まれる public reference のみ**。
+W7で除去した3箇所を復元しない。AC-12の記録もexact headのみとし、deployment IDは再追加しない。
+
 ## D-601 — `registered_preset` を名乗れる対象をregistry同一性で限定する
 
 - **状況**: `fromPreset()` は `hasFixedPreset === true` という自称マーカーのみを検査しており、

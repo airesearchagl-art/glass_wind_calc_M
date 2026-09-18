@@ -29,20 +29,21 @@ Wave単位・AC単位のタスク状態。Wave完了ごとに更新する。
 | AC-09 | Regression | PASS |
 | AC-10 | Phase 2D new tests（20カテゴリ） | PASS |
 | AC-11 | Browser verification | PASS |
-| AC-12 | Vercel Preview exact-head | PASS（Wave 7後のexact headで再確認） |
-| AC-13 | Privacy / Disclosure | PARTIAL — Wave 7で3箇所を是正。残1件（immutable snapshot内）はHuman判断へ回付（D-600） |
+| AC-12 | Vercel Preview exact-head | PASS（実装確定head `43f8e2ae` で READY / success） |
+| AC-13 | Privacy / Disclosure | PASS — Wave 7で3箇所を是正。残1件はD-600 option (a) でAC-13対象外と確定 |
 | AC-14 | Documentation | PASS（README同期済 / PR本文同期済） |
 
 ## Next Action
 
 ```text
-なし（agent側で自律的に進める作業は残っていない）。
-
-Human判断待ち:
-  1. TASK_PACKET_SNAPSHOT.md内に残るVercel deployment識別子の扱い（D-600）
-  2. Ready for Review / merge / Production の可否
-  3. Explicit unverified items（実見付W/H・風圧の元計算根拠）の扱い
+1. Final focused independent review
+2. Human Gate — Ready / merge authorization
 ```
+
+Next Action: Independent Focused Review → Human Gate。
+
+D-600（TASK_PACKET_SNAPSHOT.md内のVercel deployment identifier）は
+Human decision option (a) によりCLOSED。Task Packet revisionは1のまま、digestも不変。
 
 ## Wave 7 — Independent Verification repair（完了）
 
@@ -56,3 +57,19 @@ W7-6 全test / browser / privacy sweep 再実行             DONE（133 pass / 0
 ```
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管）。
+
+
+## Final Artifact Reconciliation / Human Decision Closure（完了）
+
+```text
+FR-1 D-600 Human decision (option (a)) をDECISIONS.mdへ記録しclosure   DONE
+FR-2 RUN_STATEのstale state除去（RUNNING/verifier待ち/Wave 5 → actual） DONE
+FR-3 current_artifact_sync_head を RESOLVE_DYNAMICALLY contractへ同期   DONE
+FR-4 AC-12を実装確定head 43f8e2ae へ同期（deployment ID再追加なし）     DONE
+FR-5 Privacy Hard Gate表現の統一（PASS。waiver扱いにしない）            DONE
+FR-6 Remaining tasks / Next action を actual へ同期                    DONE
+FR-7 full test / digest / source無変更 / privacy sweep 再確認           DONE
+FR-8 Preview exact-head（新head）確認 + PR本文同期                     DONE
+```
+
+本フェーズではsource code / tests / security repairを一切変更していない。

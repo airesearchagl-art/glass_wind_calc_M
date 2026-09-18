@@ -3,13 +3,14 @@
 - Run ID: LR-20260918-GLASS-P2D
 - Mode: LONG_RUN
 - Horizon: 8H
-- Current state: RUNNING（Wave 5 verification中。Independent Verifierの結果待ち）
+- Current state: COMPLETE_PENDING_FULL_VERIFY
 - Repository: airesearchagl-art/glass_wind_calc_M
 - Working branch: claude/phase2d-project-input-package
 - Base SHA: 97bc18e53c7d3a86b3f180f408e265fec3cf5117
-- Current head: 本Run Artifact更新commit自身（自己参照のため固定値を書かない。`git rev-parse HEAD` またはPRの現在headで動的に解決する）
-- Current wave: Wave 5 — mutation / security / privacy / full regression + independent verification
-- Last successful checkpoint: 190b3c432387e447dea27765fbba68b5f322e0b5（control-char fix）
+- Current head: `implementation_head: 43f8e2aeede305da168906e51b8205c952e4e97c`（Wave 7完了時点の実装確定head。静的）
+- Current artifact-sync head: `RESOLVE_DYNAMICALLY` — 本Run Artifact更新commit自身を含むため固定値を書かない。`git rev-parse HEAD` またはPR #5の現在headで解決する（自己参照回避contract）
+- Current wave: Final Artifact Reconciliation / Human Decision Closure（新規Implementation Waveではない）
+- Last successful checkpoint: 43f8e2aeede305da168906e51b8205c952e4e97c（Wave 7 independent verification repair）
 - Task Packet ID: LRP-20260918-GLASS-P2D
 - Task Packet revision: 1
 - Task Packet snapshot path: .agent-run/LR-20260918-GLASS-P2D/TASK_PACKET_SNAPSHOT.md
@@ -34,7 +35,7 @@ Phase 2Cで成立した「Miyoshi preset + Manual / Generic + Evidence contract�
 - [x] AC-09 Regression — **PASS**。Miyoshi FL6 W1250→1756 OK / W1500→1463 NG、Manual designP=1400 をnode testとブラウザ実機で確認。テスト数 baseline 91 → 128（純増37）。削除1件は同等カバレッジを既存テストが保持（下記「テスト増減の説明」）
 - [x] AC-10 Phase 2D new tests — **PASS**。要求20カテゴリすべてを実テスト名にマッピングして充足を確認（MISSINGなし）
 - [x] AC-11 Browser verification — **PASS**。Playwright/Chromium/file:// でMiyoshi・Manual・imported・export/import roundtrip・偽装payload・XSS payload・`__proto__` payload・モード復帰・JSエラーなしを確認
-- [x] AC-12 Vercel Preview exact-head — **PASS**。Draft PR #5 のexact head `da13ca9098925d76b9d244d81ee7939f7a1ca968` で state: success「Deployment has completed」を確認。Productionへはdeployしていない
+- [x] AC-12 Vercel Preview exact-head — **PASS**。Draft PR #5 の実装確定head `43f8e2aeede305da168906e51b8205c952e4e97c` で Preview READY / state: success「Deployment has completed」を確認（target: Preview、Productionへはdeployしていない）。deployment opaque IDはRun Artifactへ保存しない（D-600の一般方針）
 - [x] AC-13 Privacy / Disclosure — **PASS**。repository全体sweep（既知プロバイダ / URL / 実行環境パス / session UUID / credential語彙）で新規の実識別子なし。ヒットはパターン定義・Task Packet本文・架空のテストfixtureのみ
 - [x] AC-14 Documentation — **PASS**。README同期済み（commit fbcdfc9f）。PR #5 本文をactual final behaviorへ同期済み（Run ID / Task Packet binding / checks / Quality Debt / explicit unverified items / Checkpoint・Resume location / Human Gate / Documentation Sync Trigger を含む）
 
@@ -106,11 +107,22 @@ Verified-state spoofing  : PASS（payloadのverified主張がdowngradeされる�
 
 いずれもwaiver・accepted_by_human・Quality Debt・NOT RUN・INCONCLUSIVEを使用していない。
 
-Independent Verifierは Privacy を FAIL と判定した（AC-13）。repair wave W7で、本Campaignが
-Run Artifactへ新規記載していたVercel deployment識別子を3箇所から除去した。
+Privacyに関する経緯（closure済み）: Independent VerifierはAC-13違反としてPrivacyをFAILと判定した。
+repair wave W7で、本CampaignがRun Artifactへ新規記載していたVercel deployment識別子を3箇所から除去した。
 残る1箇所は immutable な `TASK_PACKET_SNAPSHOT.md`（Task Packet本文のverbatim）内にあり、
-digest binding（`6d38bb4f...`）を壊さずには除去できないため、**Humanの判断事項として保留**する
-（詳細は DECISIONS.md D-600）。自己判断でdigestを変更していない。
+digest binding を壊さずには除去できないため、Humanの判断へ回付した。
+
+**Human decision (D-600, option (a)) により、当該public Vercel referenceはAC-13が列挙する
+prohibited private identifier（private URL / private file ID / internal path / private filename /
+formal internal project identity / credential / secret / session identifier /
+execution environment absolute path）のいずれにも該当しないと確定した。**
+したがってPrivacy Hard Gateは **PASS** である。
+
+これはHard Gate failureのwaiverではない。canonical Route（Hard Checkはwaiver / accepted_by_human /
+Quality Debt / INCONCLUSIVE / NOT RUNで代替できない）に抵触しない理由は、Humanが行ったのが
+「FAILの免除」ではなく **AC-13のscope解釈の確定** だからである。Acceptance Criteriaの意味を
+定めるのはHumanの権限であり、agentがHard Checkを自己waiveしたものではない。
+Task Packet revisionは1のまま、digestも不変（`6d38bb4f...`）。
 
 ## Quality Debt
 
@@ -157,24 +169,23 @@ tests/ui-mode-separation.test.js       （Phase 2D UI契約 5件追加）
 ## Remaining tasks
 
 ```text
-1. （完了）Independent Verifierの結果を反映。Wave 7 repairを実施
-2. Human判断待ち: TASK_PACKET_SNAPSHOT.md内に残るVercel deployment識別子の扱い
-   （immutable digest bindingと privacy boundary が競合。詳細 DECISIONS.md D-600）
-3. Human Gate: Ready for Review / merge / Production の可否
+1. Final focused independent review
+2. Human Gate — Ready / merge authorization
 ```
 
 Draft PR #5 は作成済み（OPEN / Draft / merged=false）。Vercel Preview は exact head で READY 確認済み。PR本文も同期済み。
 
 ## Next action
 
-なし（agent側で自律的に進める作業は残っていない）。Human判断を待つ。
-Ready化・merge・Productionは行わない。
+Independent Focused Review → Human Gate。
+
+Ready for Review化・merge・Production反映はNext Actionとして自動実行しない（Human Gate専管）。
 
 ## Stop conditions status
 
 ```text
 Fresh Gate                 : PASS
-Hard Gate failure          : Privacy FAIL（verifier指摘）→ Wave 7で是正。残1件はHuman判断へ回付
+Hard Gate failure          : なし（Privacy FAILはW7是正 + D-600 Human decisionでclosure。現在PASS）
 BLOCKED transition         : 発生していない
 no_progress_waves          : 0 / 2（LONG_RUN上限）
 same_hypothesis_retry      : 0 / 2
@@ -203,10 +214,42 @@ Independent Verifier（別context）の指摘に対する対応。
 
 | # | 指摘 | 重大度 | 対応 |
 |---|---|---|---|
-| 1 | Vercel deployment識別子がpublic repoへ新規混入（AC-13） | BLOCKING | 本Campaignが記載した3箇所を除去。snapshot内1箇所はHuman判断へ回付（D-600） |
+| 1 | Vercel deployment識別子がpublic repoへ新規混入（AC-13） | BLOCKING | 本Campaignが記載した3箇所を除去。snapshot内1箇所はD-600 option (a) でclosure（AC-13対象外と確定） |
 | 2 | 複層 厚板/薄板 > 2.5 の除外がcandidate levelで未固定（mutant M17 survive） | MEDIUM | テスト3件追加。M17含む5 mutantをkill |
 | 3 | `K2_RATIO_CAP = 2.0` が未固定（mutant M16 survive） | LOW-MEDIUM | 同上。cap値と「cap超は寄与しない」性質を固定 |
 | 4 | `fromPreset()` が `hasFixedPreset` 自称objectを受理（defense-in-depth） | LOW | registryとの**同一性**検証を追加。`registered_preset` の sourceId もregistry登録済みに限定（D-601） |
 | 5 | `calc.js` に小文字 `miyoshi` がpath pointerとして残存 | INFO | purity testを厳格化（コメント内のpath pointerのみ許容）し、意図を明示 |
 
 いずれも既存のprotected invariant・計算値・preset値を変更していない（AC-09値は再実測で不変）。
+
+## Final state determination（条件を省略せず逐一確認）
+
+canonical `Long_Run_Development_Route.md` の `COMPLETE_VERIFIED` 要件を一つずつ照合した。
+
+| canonical要件 | 判定 | 根拠 |
+|---|---|---|
+| Acceptance Criteriaを満たす | ✅ | AC-01〜AC-14すべてPASS（AC-13はD-600でclosure） |
+| Hard Checksがすべて明示的にPASS | ✅ | Security / Privacy / Authentication(N/A) / Permission / Data-integrity / Irreversible-data / Secret exposure / Trust-boundary / Verified-state spoofing |
+| Hard Checksをwaiver等で代替していない | ✅ | waiver・accepted_by_human・Quality Debt・INCONCLUSIVE・NOT RUNを未使用 |
+| non-hardを含むRequired ChecksもPASS | ✅ | full test / browser / privacy sweep / mutation / Preview exact-head |
+| High risk Quality Debtなし | ✅ | Quality Debt none |
+| **Explicit unverified itemsなし** | ❌ | **4件を意図的に保持している（下記）** |
+| Independent Verificationが実施可能範囲で成立 | ⚠️ | Wave 7 verificationは成立。ただしFinal focused reviewが未実施 |
+| Scope逸脱なし | ✅ | 変更は許可scope内のみ |
+
+**結論: `COMPLETE_PENDING_FULL_VERIFY`。**
+
+canonical `COMPLETE_VERIFIED` は「Explicit unverified itemsなし」を**すべて**要求する要件の一つとして
+挙げている。本CampaignはExplicit unverified itemsを4件、**意図的に未検証のまま保持**している
+（実見付W/H、正圧・負圧の元計算根拠、評価高さZのmapping）。これらを推測でverifiedへ昇格させないことは
+本Campaignの明示要件そのものであるため、保持は正しい。しかしcanonical上、保持している限り
+`COMPLETE_VERIFIED` には到達できない。
+
+canonical `COMPLETE_PENDING_FULL_VERIFY` の定義「実装は成立している / unresolved debt または
+explicit unverified itemが残る / Draft PR作成は可能 / Ready化・merge・Productionは禁止」に
+正確に一致する。
+
+加えてFinal focused independent reviewが未実施であり、この点でも
+`COMPLETE_VERIFIED` の条件を満たさない。
+
+自己判断で条件を省略せず、上記2点により `COMPLETE_PENDING_FULL_VERIFY` を維持する。
