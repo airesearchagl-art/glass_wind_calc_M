@@ -300,3 +300,27 @@ explicit unverified itemが残る / Draft PR作成は可能 / Ready化・merge�
 `COMPLETE_VERIFIED` の条件を満たさない。
 
 自己判断で条件を省略せず、上記2点により `COMPLETE_PENDING_FULL_VERIFY` を維持する。
+
+## Phase 2D closeout（post-merge。Phase 2E Wave 0で記録）
+
+```yaml
+pr_5: MERGED
+final_feature_head: dba12ae72c8496154d828ad8a3f0ac5e76b6657e
+merge_commit_main: a26714c6dd2d8bca80e18fcf1e97d7d184c9254f
+production: READY
+final_focused_independent_review: PASS
+required_fix: 0
+human_merge_authorization: received
+final_run_state: COMPLETE_PENDING_FULL_VERIFY
+task_packet_snapshot: unchanged
+task_packet_digest: unchanged (6d38bb4f…a7df)
+```
+
+Final Run Stateは `COMPLETE_PENDING_FULL_VERIFY` を維持する。merge・Production反映・
+Final Focused Independent Review PASS が成立してもなお、canonical contractが
+`COMPLETE_VERIFIED` に要求する「Explicit unverified itemsなし」を満たさないためである
+（実見付W/H・正圧の元計算根拠・負圧の元計算根拠・floor/Z mappingの4件を意図的に保持）。
+
+これら4件はPhase 2E（LR-20260919-GLASS-P2E）へ引き継ぐ。Phase 2EでもEvidenceなしにclosureしない。
+
+後続作業はPhase 2Eで扱う。本Run Artifactはこれ以上更新しない。
