@@ -32,16 +32,31 @@ Phase 2Cで成立した「Miyoshi preset + Manual / Generic + Evidence contract�
 - [x] AC-06 Safe import / export / replay — **PASS**。Export→Importで計算に用いる全フィールドと候補一覧（先頭構成・許容風圧）が一致。deterministic serialization。backend/localStorage不使用、file://互換
 - [x] AC-07 Import security — **PASS**。`__proto__`/`prototype`/`constructor`、16KB超、深さ8超、unknown field、malformed JSON、HTML/script/URL/絶対パス/制御文字を拒否。eval/Function不使用。prototype pollutionが発生しないことを確認
 - [x] AC-08 Backward compatibility / migration — **PASS**。consumer（tests 2ファイル・README・miyoshi.jsのコメント）を全移行。案件固有複製をcalc.jsへ残していない。READMEにmigrationセクション（削除したexportと現在の正の対応表・before/afterコード例）を記載
-- [x] AC-09 Regression — **PASS**。Miyoshi FL6 W1250→1756 OK / W1500→1463 NG、Manual designP=1400 をnode testとブラウザ実機で確認。テスト数 baseline 91 → 128（純増37）。削除1件は同等カバレッジを既存テストが保持（下記「テスト増減の説明」）
+- [x] AC-09 Regression — **PASS**。Miyoshi FL6 W1250→1756 OK / W1500→1463 NG、Manual designP=1400 をnode testとブラウザ実機で確認。テスト数 baseline 91 pass / 0 fail → final 133 pass / 0 fail（純増+42。うちWave 7 repairで+5）。削除1件は同等カバレッジを既存テストが保持（下記「テスト増減の説明」）
 - [x] AC-10 Phase 2D new tests — **PASS**。要求20カテゴリすべてを実テスト名にマッピングして充足を確認（MISSINGなし）
 - [x] AC-11 Browser verification — **PASS**。Playwright/Chromium/file:// でMiyoshi・Manual・imported・export/import roundtrip・偽装payload・XSS payload・`__proto__` payload・モード復帰・JSエラーなしを確認
-- [x] AC-12 Vercel Preview exact-head — **PASS**。Draft PR #5 の実装確定head `43f8e2aeede305da168906e51b8205c952e4e97c` で Preview READY / state: success「Deployment has completed」を確認（target: Preview、Productionへはdeployしていない）。deployment opaque IDはRun Artifactへ保存しない（D-600の一般方針）
+- [x] AC-12 Vercel Preview exact-head — **PASS**。headを二層に分けて記録する（下記「AC-12 head semantics」）。いずれもtarget: Preview で READY / state: success「Deployment has completed」を確認しており、Productionへはdeployしていない。deployment opaque IDはRun Artifactへ保存しない（D-600の一般方針）
 - [x] AC-13 Privacy / Disclosure — **PASS**。repository全体sweep（既知プロバイダ / URL / 実行環境パス / session UUID / credential語彙）で新規の実識別子なし。ヒットはパターン定義・Task Packet本文・架空のテストfixtureのみ
 - [x] AC-14 Documentation — **PASS**。README同期済み（commit fbcdfc9f）。PR #5 本文をactual final behaviorへ同期済み（Run ID / Task Packet binding / checks / Quality Debt / explicit unverified items / Checkpoint・Resume location / Human Gate / Documentation Sync Trigger を含む）
 
 ### テスト増減の説明（AC-09）
 
-baseline 91 → 128。削除は1件のみ（`calc.test.js` の「既定寸法は1250×2050mmのまま」）で、これはcalc.js側のdeprecated複製を検査するテストであり、比較対象の削除により成立しなくなったもの。同等カバレッジ（案件既定寸法が1250×2050であること）は `project-config.test.js` の既存テストが従来から独立に保持している。追加は37件（core purity 2 / project-input 31 / ui-mode-separation 5 ほか）。
+baseline 91 pass / 0 fail → final 133 pass / 0 fail（純増 **+42**）。
+
+削除は1件のみ（`calc.test.js` の「既定寸法は1250×2050mmのまま」）で、これはcalc.js側のdeprecated複製を検査するテストであり、比較対象の削除により成立しなくなったもの。同等カバレッジ（案件既定寸法が1250×2050であること）は `project-config.test.js` の既存テストが従来から独立に保持している。
+
+追加は43件（43 added − 1 deleted = 純増42）。実測内訳:
+
+| test file | baseline | final | 増減 |
+|---|---:|---:|---:|
+| `tests/calc.test.js` | 23 | 27 | +4（purity +2、Wave 7 invariant +3、削除 −1） |
+| `tests/manual-config.test.js` | 19 | 19 | 0 |
+| `tests/project-config.test.js` | 43 | 43 | 0 |
+| `tests/project-input.test.js` | 0 | 33 | +33（Phase 2D 31、Wave 7 +2） |
+| `tests/ui-mode-separation.test.js` | 6 | 11 | +5 |
+| **合計** | **91** | **133** | **+42** |
+
+Wave 7 repairによる増加は+5件（calc invariant 3 / preset trust boundary 2）。
 
 ## Completed
 
@@ -221,6 +236,38 @@ Independent Verifier（別context）の指摘に対する対応。
 | 5 | `calc.js` に小文字 `miyoshi` がpath pointerとして残存 | INFO | purity testを厳格化（コメント内のpath pointerのみ許容）し、意図を明示 |
 
 いずれも既存のprotected invariant・計算値・preset値を変更していない（AC-09値は再実測で不変）。
+
+## AC-12 head semantics（二層）
+
+Run Artifact自身をcommitすると当然PR headは進むため、「exact head」を一語で扱うと曖昧になる。
+検証対象を次の二層に分けて記録する。
+
+### 1. Implementation verification head（静的）
+
+```yaml
+implementation_verification_head: 43f8e2aeede305da168906e51b8205c952e4e97c
+scope: source / security / tests の実装確定head（Wave 7完了時点）
+vercel_preview: READY / state success / target Preview
+production: not deployed
+```
+
+AC-01〜AC-11 / AC-13 / AC-14 の実装検証、full test 133 pass、browser実機確認、
+mutation check はすべてこのheadに対して成立している。**この値は今後も変わらない。**
+
+### 2. Current PR / artifact-sync head（動的）
+
+```yaml
+current_artifact_sync_head: RESOLVE_DYNAMICALLY
+resolve_by: git rev-parse HEAD / PR #5 current head
+requirement: artifact-only commit後もVercel Preview READY（target Preview）を必須とする
+diff_vs_implementation_head: Run Artifact（.agent-run/）のみ。source / tests / README に差分なし
+```
+
+本Consistency Closure実施時点（Fresh Gate時点）のcurrent headは
+`273bba2719347a4402524551e1dd9f3ba04f9103` であり、このheadでもPreview READY / target Preview を確認済み。
+
+本fix commit自身のSHAは自己参照になるため本文へ固定値で書かない。commit後のheadは
+`git rev-parse HEAD` またはPR #5 current headで解決し、そのheadでのPreview READYを確認する。
 
 ## Final state determination（条件を省略せず逐一確認）
 
