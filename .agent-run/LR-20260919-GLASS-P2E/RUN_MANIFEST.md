@@ -89,7 +89,24 @@ Task Packet §1の要求（133 tests以上 / 0 fail）を満たす。
 | 4 | UI告示風圧計算モード / trace表示 / Miyoshi参考比較 | `7b479406605ad5d456ae3765252b96dca4035993` |
 | 5 | security / privacy / mutation | `90bb9f40c8a41259d2a71eca1698f03a45c695ff` |
 | 7（先行） | README同期 | `e6bf6e9d2a2ad664abd280abded63f94957ffd52` |
-| 6 / 7（収束） | Run Artifact更新・Draft PR・Preview確認 | 本Run Artifact更新commit自身を含むため固定値を書かない |
+| 6 / 7（収束） | Run Artifact更新・Draft PR・Preview確認 | `fe4ad110c60cae02f36d9dfb95d242802486fe44` |
+| 8 | Independent Verification repair | `6cd15e4be7b8ea6991a2eae8f1a547dcdbff2a3b` |
+| — | Final Artifact Reconciliation | `current_artifact_sync_head = RESOLVE_DYNAMICALLY`（commit自身を含むため固定SHAを書かない） |
+
+### Wave 8 の内容
+
+```text
+HTML trace escaping（分岐ラベル `5<Z<40` の消失を修正）
+Cpe × Gpe を絶対値で固定（survivalしていたmutantをkill）
+registered_preset / windInput guard のtest
+UI runtime分岐のカバレッジ
+Run Artifactの矛盾・stale表現の是正
+Miyoshi参考比較の明示選択gate
+```
+
+`6cd15e4be7b8ea6991a2eae8f1a547dcdbff2a3b` が **implementation verification head**（静的）である。
+source / tests / Evidence / UI の検証はすべてこのheadに対して成立している。
+以降のartifact-only commitはこのheadに対して `.agent-run/` のみが異なる。
 
 Run Artifact自身を含むcommitのSHAは、そのcommit確定前に本文へ固定値で書けない（自己参照）。
 確定済みの過去Waveのcheckpoint SHAは上表のとおり。

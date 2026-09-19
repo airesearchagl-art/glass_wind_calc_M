@@ -113,10 +113,47 @@ W7-5 Completion Report                                             DONE
 ## Next Action
 
 ```text
-Independent Verifierの結果反映 → Draft PR → Vercel Preview exact-head → Completion Report
+Final Focused Independent Review → Human Gate
+```
+
+```yaml
+wave_8: DONE
+independent_verification: DONE
+verifier_verdict: PASS WITH FINDINGS
+verifier_findings: 11 / 11 CLOSED
+final_run_artifact_reconciliation: DONE
+ready_for_review: NOT AUTHORIZED
+merge: NOT AUTHORIZED
+production: NOT AUTHORIZED
 ```
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管）。
 Humanは option (b) を選択し、Research Gateは解除された（D-004）。
 
-Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管）。
+
+## Wave 8 — Independent Verification repair（完了）
+
+```text
+W8-1 trace HTML escaping（分岐ラベル消失の修正）          DONE
+W8-2 Cpe × Gpe の組合せ規則を絶対値で固定                 DONE
+W8-3 registered_preset / windInput guard のtest追加       DONE
+W8-4 index.html runtime分岐のソース契約test               DONE
+W8-5 Run Artifactの矛盾・stale表現の是正                  DONE
+W8-6 Miyoshi参考比較の明示選択gate                        DONE
+W8-7 当初survivalした5 mutantの再実行（すべてkill）        DONE
+```
+
+## Final Run Artifact Reconciliation（完了）
+
+```text
+FR-1 Current state を COMPLETE_PENDING_FULL_VERIFY へ同期        DONE
+FR-2 head contractを二層化（implementation / artifact-sync）      DONE
+FR-3 Current wave / last checkpoint を actual へ同期             DONE
+FR-4 test stateを 197 / 0 fail へ同期（baseline 133、純増+64）    DONE
+FR-5 Independent Verification closureを記録                      DONE
+FR-6 Remaining tasks / Next Action を actual へ同期              DONE
+FR-7 RUN_MANIFEST へ Wave 8 を追記                               DONE
+FR-8 digest再hash・source/tests/README/EVIDENCE diff 0 を確認    DONE
+```
+
+本フェーズではsource code / tests / README / EVIDENCE / Task Packetを一切変更していない。

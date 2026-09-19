@@ -3,13 +3,19 @@
 - Run ID: LR-20260919-GLASS-P2E
 - Mode: LONG_RUN
 - Horizon: 8H
-- Current state: RUNNING（Wave 2-5,7完了。Wave 6 independent verification実行中）
+- Current state: COMPLETE_PENDING_FULL_VERIFY
 - Repository: airesearchagl-art/glass_wind_calc_M
 - Working branch: claude/phase2e-wind-pressure-trace
 - Base SHA: a26714c6dd2d8bca80e18fcf1e97d7d184c9254f
-- Current artifact-sync head: `RESOLVE_DYNAMICALLY` — `git rev-parse HEAD` またはPRの現在headで解決する（自己参照回避contract）
-- Current wave: Wave 6 — browser verification / full regression / independent verifier
-- Last successful checkpoint: （Wave 0 commitで確定）
+- Implementation verification head: `6cd15e4be7b8ea6991a2eae8f1a547dcdbff2a3b`（静的）
+  — Wave 8 independent verification repair完了時点の source / tests / Evidence / UI 実装確定head。
+    実装・テスト・browser・mutation・Previewの検証はすべてこのheadに対して成立している。**今後変わらない。**
+- Current artifact-sync head: `RESOLVE_DYNAMICALLY`（動的）
+  — `git rev-parse HEAD` またはPR #6の現在headで解決する。
+    implementation verification head との差分は `.agent-run/` のRun Artifactのみ。
+    本reconciliation commit自身のSHAは自己参照になるため固定値で書かない。
+- Current wave: Final Run Artifact Reconciliation / Independent Verification Closure（新規Implementation Waveではない）
+- Last successful implementation checkpoint: `6cd15e4be7b8ea6991a2eae8f1a547dcdbff2a3b`（Wave 8 — Independent Verification repair）
 - Task Packet ID: LRP-20260919-GLASS-P2E
 - Task Packet revision: 1
 - Task Packet snapshot path: .agent-run/LR-20260919-GLASS-P2E/TASK_PACKET_SNAPSHOT.md
@@ -86,7 +92,7 @@ formulaなしでも着手できるように見えるが:
 ```text
 Fresh Gate                     : PASS（base SHA一致、working tree clean）
 baseline npm test              : PASS（133 pass / 0 fail）
-full npm test (current)        : PASS（190 pass / 0 fail）
+full npm test (current)        : PASS（197 pass / 0 fail。baseline 133 → 197、純増+64。うちWave 8で190→197）
 canonical read                 : PASS（Vault read-onlyでLong-Run route等を参照）
 Research Gate                  : PASS（ESTABLISHED_FROM_HUMAN_SUPPLIED_PRIMARY_EVIDENCE）
 memory-only implementation     : 0件
@@ -95,6 +101,10 @@ known-answer（供給4値）         : PASS（bit-exactで一致。独立再計�
 mutation check（wind core）     : 選定17 mutantをkill（網羅的ではない。独立verifierが38 mutantを追加実施）
 mutation check（integration）   : 選定6 mutantをkill（同上。verifierが15 mutantを追加実施）
 mutation check（verifier指摘）   : 当初survivalした5件を修正後すべてkill（Wave 8）
+formula / source consistency   : PASS（EVIDENCE §4と実装を逐条照合。既知解4値がbit-exact）
+trust boundary                 : PASS
+independent verification       : DONE（別context）— verdict PASS WITH FINDINGS、11件すべてCLOSED
+Vercel Preview                 : success at implementation verification head（artifact commit後の新headでも再確認）
 browser（4 mode / file://）     : PASS（JS error 0）
 privacy sweep                  : PASS（新規URLは公的一次資料8件のみ）
 protected invariants           : PASS（再実測で不変）
@@ -173,15 +183,15 @@ Run Artifact:
 ## Remaining tasks
 
 ```text
-1. Independent Verifierの結果を反映（findingがあればscope内でrepair→再verify）
+1. Final focused independent delta review
 2. Human Gate — Ready for Review / merge / Production の可否
 ```
 
 ## Next action
 
-Independent Verifierの結果を受領し、findingがscope内であれば同Campaign内でrepairして再検証する。
-その後Draft PRとVercel Preview exact-headを確認してCompletion Reportを出す。
-Ready化・merge・Productionは行わない。
+Independent Focused Review → Human Gate。
+
+Ready for Review化・merge・Production反映はNext Actionとして自動実行しない（Human Gate専管）。
 
 （以下はWave 1 BLOCKED時のescalation記録。D-004により解除済み。）
 
@@ -295,6 +305,27 @@ Phase 2D security boundaryはいずれも無変更。
 export前 `1967` / import後 `1967.2571022503244` と表示が食い違った。
 **値は同一で、表示のみの不具合**。表示層で丸めるよう修正し、roundtripの表示が一致することを確認した。
 
+## Independent Verification — closure
+
+```yaml
+independent_verification: DONE
+verdict: PASS WITH FINDINGS
+safety_critical_formula_mismatch: none
+trust_boundary_bypass: none
+privacy_leak: none
+known_answer_reproduction: PASS   # verifier側の独立計算でも4値がbit-exact
+findings: 11
+findings_addressed: 11 / 11
+high_findings:
+  - trace HTML parsing / escaping        -> FIXED
+  - Cpe × Gpe absolute pin missing       -> FIXED
+mutation_wording: selected mutants killed（網羅的ではない）
+```
+
+**mutation testingが正しさを証明した／網羅的である、とは主張しない。**
+選定したmutantが落ちたという事実のみを記録する。実際、当初選定した23件では
+`Cpe × Gpe` の取り違えを検出できておらず、独立verifierの追加mutantで発見された。
+
 ## Wave 8 — Independent Verification repair
 
 独立verifier（別context）の判定: **PASS WITH FINDINGS**。
@@ -330,3 +361,26 @@ recurrenceYears無条件送信、エスケープ除去）を再実行し、**す
 また当時は攻撃者制御文字列がtraceへ到達しないためXSSではなかったが、
 エスケープ境界が存在しない実装は文字列ソースが1つ変わるだけで脆弱になるため、
 値の出どころに関わらず常時エスケープする方針へ変更した。
+
+
+## Final state — COMPLETE_PENDING_FULL_VERIFY を維持する理由
+
+```text
+implementation                 : 完了
+independent verification       : 完了（verdict PASS WITH FINDINGS）
+findings                       : 11 / 11 対応済み（Wave 8）
+source / security / trust repair : 完了
+tests                          : 197 pass / 0 fail
+browser verification           : 完了
+Draft PR                       : 作成済み（#6 OPEN / Draft / merged=false）
+Vercel Preview                 : exact head で success
+```
+
+それでも `COMPLETE_VERIFIED` にはしない。canonical `Long_Run_Development_Route.md` の
+`COMPLETE_VERIFIED` は「Explicit unverified itemsなし」を**すべて**要求する要件の一つとして
+課しており、本Campaignは4件を**意図的に**未検証のまま保持しているためである。
+
+推測でverifiedへ昇格させないことは本Campaignの明示要件そのものであり、保持は正しい。
+しかし保持している限りcanonical上 `COMPLETE_VERIFIED` には到達しない。
+
+加えてFinal focused independent delta reviewが未実施である。
