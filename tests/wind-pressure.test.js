@@ -572,3 +572,78 @@ test('同じ入力は常に同じtraceを返す（決定的）', () => {
   assert.deepEqual(a, b);
   assert.equal(JSON.stringify(a), JSON.stringify(b));
 });
+
+/* ============================================================
+   AC-18 security: trace表示へ到達する値がすべて数値または固定列挙であること
+   （traceがinnerHTMLへ渡されるため、自由文字列が混入しないことを構造で保証する）
+============================================================ */
+
+test('AC-18: windInputに自由文字列を持ち込めない（XSS経路がない）', () => {
+  // 文字列を受け取るfieldはすべて固定列挙。任意文字列は列挙チェックで落ちる。
+  const payloads = [
+    '<script>alert(1)</script>',
+    '"><img src=x onerror=alert(1)>',
+    'javascript:alert(1)',
+    'III"><b>x</b>'
+  ];
+  for (const p of payloads) {
+    assert.throws(() => W.calculateWindPressure(baseInput({ roughnessCategory: p })), /must be one of/);
+    assert.throws(() => W.calculateWindPressure(baseInput({ buildingType: p })), /must be one of/);
+    assert.throws(() => W.calculateWindPressure(baseInput({ zone: p })), /must be one of/);
+    assert.throws(() => W.calculateWindPressure(baseInput({ basis: p })), /must be one of/);
+    // 数値fieldに文字列を入れても通らない
+    assert.throws(() => W.calculateWindPressure(baseInput({ V0: p })), /must be a number/);
+  }
+});
+
+test('AC-18: traceに現れる値は数値・固定列挙・モジュール内定数のみ', () => {
+  const t = W.calculateWindPressure(baseInput({ roughnessCategory: 'IV', buildingShortSideM: 20 }));
+
+  // trace各stepの value は数値か、既知の列挙値のみ
+  const allowedStringValues = W.ROUGHNESS_CATEGORIES;
+  for (const s of t.trace) {
+    if (typeof s.value === 'string') {
+      assert.ok(
+        allowedStringValues.includes(s.value),
+        'trace step ' + s.step + ' の文字列値は既知列挙のみ: ' + s.value
+      );
+    } else {
+      assert.equal(typeof s.value, 'number', 'trace step ' + s.step + ' は数値であること');
+    }
+  }
+
+  // inputsの文字列fieldはすべて既知列挙
+  assert.ok(W.ROUGHNESS_CATEGORIES.includes(t.inputs.inputRoughnessCategory));
+  assert.ok(W.BUILDING_TYPES.includes(t.inputs.buildingType));
+  assert.ok(W.ZONES.includes(t.inputs.zone));
+  assert.ok(W.CALCULATION_BASES.includes(t.basis.type));
+
+  // HTML特殊文字がtrace全体に現れない
+  const json = JSON.stringify(t);
+  assert.doesNotMatch(json, /<script|onerror=|javascript:/i);
+});
+
+test('AC-18: prototype pollutionキーをwindInputへ持ち込めない', () => {
+  const malicious = JSON.parse('{"V0":34,"roughnessCategory":"III","buildingHeightM":10,' +
+    '"eavesHeightM":10,"evaluationHeightM":5,"buildingType":"closed","zone":"general",' +
+    '"basis":"notification_baseline","__proto__":{"polluted":true}}');
+  // JSON.parse は __proto__ を実体のown propertyとして作るため、
+  // unknown field チェックが拾って **拒否** する（黙って無視しない）。
+  assert.throws(() => W.calculateWindPressure(malicious), /unknown wind input field/);
+  assert.equal({}.polluted, undefined, 'prototypeが汚染されていないこと');
+
+  // 明示的に自前オブジェクトへ載せた場合は未知フィールドとして拒否
+  const explicit = baseInput();
+  Object.defineProperty(explicit, 'constructor', { value: 1, enumerable: true });
+  assert.throws(() => W.calculateWindPressure(explicit), /unknown wind input field/);
+});
+
+test('AC-02: wind-pressure.js は eval / Function / DOM を使わない', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'wind-pressure.js'), 'utf8');
+  for (const token of ['eval(', 'new Function', 'innerHTML', 'document.', 'window.',
+                       'fetch(', 'XMLHttpRequest', 'localStorage', 'require(\'http']) {
+    assert.equal(src.includes(token), false, 'wind-pressure.js に ' + token + ' があってはならない');
+  }
+});
