@@ -441,12 +441,14 @@
         <select id="inp-mode">
           <option value="miyoshi" selected>案件プリセット（みよし案件 / Miyoshi）</option>
           <option value="manual">手入力 / Generic（Manual）</option>
+          <option value="notification">告示風圧計算（Notification / Calculated）</option>
           <option value="imported">取り込みデータ（Imported / Unverified）</option>
         </select>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;">
           「案件プリセット」は特定案件用の固定値（検証状況付き）、「手入力 / Generic」は
-          その場で入力した任意の値、「取り込みデータ」は外部から読み込んだ入力条件です。
-          手入力・取り込みデータの値は<strong>本ツールが案件原典と照合したものではありません</strong>。
+          その場で入力した任意の値、「告示風圧計算」は風条件から設計風圧を算定した値、
+          「取り込みデータ」は外部から読み込んだ入力条件です。
+          手入力・告示風圧計算・取り込みデータの値は<strong>本ツールが案件原典と照合したものではありません</strong>。
         </div>
       </div>
 
@@ -463,6 +465,20 @@
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;">
           ⚠ このモードでは、現在画面に表示されているW/H/正圧/負圧をユーザー入力値として扱います。初期表示値（サンプル値）も含め、案件原典（構造計算書・製品資料等）で検証済みの値ではありません。
+        </div>
+      </div>
+
+      <div class="mode-field mode-field-notification form-group" style="margin-bottom:16px;">
+        <div class="meta-chip" style="display:inline-block;">
+          入力モード: <span id="notification-mode-label">告示風圧計算 (Notification / Calculated)</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          告示1458号系算定・板硝子協会推奨に基づき、入力した風条件から設計風圧を算定します。
+          <strong>算定式は一次資料で確認していますが、入力した風条件（V0・粗度区分・高さ・評価高さ等）は本ツールでは検証していません。</strong>
+          式が検証済みであることと、入力値が検証済みであることは別です。
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          これは板硝子協会が推奨する設計手法であり、「すべての建物・すべての壁に法的に必須」という意味ではありません。
         </div>
       </div>
 
@@ -536,6 +552,109 @@
         </div>
       </div>
 
+      <div class="mode-field mode-field-notification form-group">
+        <label>算定基準 basis</label>
+        <select id="inp-wind-basis">
+          <option value="notification_baseline" selected>告示1458号系算定（再現期間の割増なし / y = 1.00）</option>
+          <option value="itakyo_recommended">板硝子協会推奨（再現期間を明示選択）</option>
+        </select>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          再現期間による割増は<strong>協会推奨</strong>であり告示の最低基準ではありません。既定では適用しません。
+        </div>
+      </div>
+
+      <div class="mode-field mode-field-notification mode-field-itakyo form-group">
+        <label>再現期間 recurrenceYears</label>
+        <select id="inp-wind-recurrence">
+          <option value="50" selected>50年（y = 1.00）</option>
+          <option value="100">100年（y = 1.07）</option>
+          <option value="200">200年（y = 1.15）</option>
+          <option value="300">300年（y = 1.19）</option>
+          <option value="500">500年（y = 1.25）</option>
+        </select>
+      </div>
+
+      <div class="mode-field mode-field-notification form-group">
+        <label>基準風速 V0</label>
+        <div class="input-unit">
+          <input type="number" id="inp-wind-v0" value="34" step="1" min="1">
+          <span class="unit-label">m/s</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          本ツールは自治体別のV0表を持ちません。告示1454号で定める地域のV0を確認して入力してください。
+        </div>
+      </div>
+
+      <div class="mode-field mode-field-notification form-group">
+        <label>地表面粗度区分 roughnessCategory</label>
+        <select id="inp-wind-roughness">
+          <option value="I">I</option>
+          <option value="II">II</option>
+          <option value="III" selected>III</option>
+          <option value="IV">IV（板ガラスではIIIの数値を使用）</option>
+        </select>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          粗度区分は所管特定行政庁の指定によります。<strong>住所や都市計画区域から自動判定はしません。</strong>
+        </div>
+      </div>
+
+      <div class="mode-field mode-field-notification form-group">
+        <label>建物高さ buildingHeightM</label>
+        <div class="input-unit">
+          <input type="number" id="inp-wind-building-h" value="14.2" step="0.1" min="0">
+          <span class="unit-label">m</span>
+        </div>
+      </div>
+
+      <div class="mode-field mode-field-notification form-group">
+        <label>軒高 eavesHeightM</label>
+        <div class="input-unit">
+          <input type="number" id="inp-wind-eaves-h" value="14.2" step="0.1" min="0">
+          <span class="unit-label">m</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          H は建物高さと軒高の平均です。<strong>階数からは推定しません。</strong>
+        </div>
+      </div>
+
+      <div class="mode-field mode-field-notification form-group">
+        <label>評価高さ Z（ガラス／壁部分の地上高さ）</label>
+        <div class="input-unit">
+          <input type="number" id="inp-wind-z" value="10" step="0.1" min="0">
+          <span class="unit-label">m</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          <strong>階（1F / 2F / 3F / RF）から Z を自動生成しません。</strong>実際の設置高さを入力してください。
+        </div>
+      </div>
+
+      <div class="mode-field mode-field-notification form-group">
+        <label>建物種別 buildingType</label>
+        <select id="inp-wind-building-type">
+          <option value="closed" selected>閉鎖型（closed）</option>
+          <option value="open">開放型（open）</option>
+        </select>
+      </div>
+
+      <div class="mode-field mode-field-notification form-group">
+        <label>部位 zone</label>
+        <select id="inp-wind-zone">
+          <option value="general" selected>一般部</option>
+          <option value="corner">隅角部</option>
+        </select>
+      </div>
+
+      <div class="mode-field mode-field-notification form-group">
+        <label>建物短辺 b（任意 / 隅角部帯幅の表示用）</label>
+        <div class="input-unit">
+          <input type="number" id="inp-wind-short-side" value="" step="0.1" min="0" placeholder="未入力可">
+          <span class="unit-label">m</span>
+        </div>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          入力すると隅角部の帯幅（0.1 × min(b, 2H)）を表示します。<strong>図面からの自動判定は行いません。</strong>
+        </div>
+      </div>
+
       <div class="form-group">
         <label>候補ガラス構成</label>
         <select id="inp-type">
@@ -598,6 +717,7 @@
 </div>
 
 <script src="calc.js"></script>
+<script src="wind-pressure.js"></script>
 <script src="project-config/miyoshi.js"></script>
 <script src="project-config/manual.js"></script>
 <script src="project-config/registry.js"></script>
@@ -630,9 +750,44 @@ function applyModeVisibility() {
   document.querySelectorAll('.mode-field-manual').forEach(function (el) {
     el.style.display = mode === 'manual' ? '' : 'none';
   });
+  document.querySelectorAll('.mode-field-notification').forEach(function (el) {
+    el.style.display = mode === 'notification' ? '' : 'none';
+  });
   document.querySelectorAll('.mode-field-imported').forEach(function (el) {
     el.style.display = mode === 'imported' ? '' : 'none';
   });
+  // 再現期間は板硝子協会推奨basisのときだけ意味を持つ
+  var basisEl = document.getElementById('inp-wind-basis');
+  var itakyo = mode === 'notification' && basisEl && basisEl.value === 'itakyo_recommended';
+  document.querySelectorAll('.mode-field-itakyo').forEach(function (el) {
+    el.style.display = itakyo ? '' : 'none';
+  });
+}
+
+// UIから風圧算定の入力条件を組み立てる。
+// 階・住所・図面からの推定は一切行わない（すべて明示入力）。
+function buildWindInputFromUI() {
+  var basis = document.getElementById('inp-wind-basis').value;
+  var shortSideRaw = document.getElementById('inp-wind-short-side').value;
+  var windInput = {
+    V0: parseFloat(document.getElementById('inp-wind-v0').value),
+    roughnessCategory: document.getElementById('inp-wind-roughness').value,
+    buildingHeightM: parseFloat(document.getElementById('inp-wind-building-h').value),
+    eavesHeightM: parseFloat(document.getElementById('inp-wind-eaves-h').value),
+    evaluationHeightM: parseFloat(document.getElementById('inp-wind-z').value),
+    buildingType: document.getElementById('inp-wind-building-type').value,
+    zone: document.getElementById('inp-wind-zone').value,
+    basis: basis
+  };
+  if (shortSideRaw !== '' && shortSideRaw !== null) {
+    windInput.buildingShortSideM = parseFloat(shortSideRaw);
+  }
+  // 再現期間はitakyo_recommendedのときだけ渡す。
+  // notification_baselineへ暗黙に割増を持ち込まない。
+  if (basis === 'itakyo_recommended') {
+    windInput.recurrenceYears = parseInt(document.getElementById('inp-wind-recurrence').value, 10);
+  }
+  return windInput;
 }
 
 /* ============================================================
@@ -667,8 +822,10 @@ function buildCurrentProjectInput() {
     if (!importedPackage) {
       throw new Error('取り込み済みのデータがありません。先にImportしてください。');
     }
-    // 取り込みデータはW/H/構成/係数のUI変更を反映しつつ、trust stateは維持する
-    return ProjectInput.createProjectInput({
+    // 取り込みデータはW/H/構成/係数のUI変更を反映しつつ、trust stateは維持する。
+    // 風圧算定由来のpackageは windInput を引き継ぎ、圧力は再計算させる
+    // （取り込んだ圧力値をそのまま信用しない）。
+    var rebuilt = {
       schemaVersion: importedPackage.schemaVersion,
       sourceKind: 'imported_unverified',
       sourceId: null,
@@ -684,6 +841,19 @@ function buildCurrentProjectInput() {
         verificationStatus: 'unverified',
         note: importedPackage.provenance.note
       }
+    };
+    if (importedPackage.windInput) {
+      rebuilt.windInput = importedPackage.windInput;
+    }
+    return ProjectInput.createProjectInput(rebuilt);
+  }
+
+  if (mode === 'notification') {
+    return ProjectInput.fromWindCalculation({
+      widthMm: W, heightMm: H,
+      glassType: glassType,
+      extraFactor: extraFactor,
+      windInput: buildWindInputFromUI()
     });
   }
 
@@ -735,12 +905,15 @@ function importProjectInput() {
 
     var summary = document.getElementById('imported-summary');
     if (summary) {
-      // 取り込み由来の値を含むためtextContentのみを使用する
+      // 取り込み由来の値を含むためtextContentのみを使用する。
+      // 風圧算定由来のpackageは非整数になりうるため、表示はここで丸める
+      // （内部値は丸めない。丸めは表示層の責務）。
       summary.textContent =
         '取り込み内容: ' + pkg.widthMm + '×' + pkg.heightMm + 'mm / 正圧 ' +
-        pkg.positivePressure + ' / 負圧 ' + pkg.negativePressure +
-        ' / 設計風圧 ' + pkg.designPressure + ' N/m² / ' + pkg.glassType +
-        '（verificationStatus: ' + pkg.provenance.verificationStatus + '）';
+        fmt(pkg.positivePressure, 0) + ' / 負圧 ' + fmt(pkg.negativePressure, 0) +
+        ' / 設計風圧 ' + fmt(pkg.designPressure, 0) + ' N/m² / ' + pkg.glassType +
+        '（verificationStatus: ' + pkg.provenance.verificationStatus + '）' +
+        (pkg.windInput ? ' ／ 風圧算定由来（トレース再計算可）' : '');
     }
 
     setIoStatus('✓ Importしました。取り込みデータ（未検証）として計算します。', false);
@@ -757,6 +930,114 @@ function importProjectInput() {
 
 function fmt(n, d = 0) {
   return n.toFixed(d);
+}
+
+/* ============================================================
+   Wind Pressure Trace の表示（Phase 2E）
+
+   丸めはこの表示層だけで行う。算定側（wind-pressure.js）は丸めない。
+   Miyoshi presetとの比較は**参考比較（diagnostic）**であり、
+   presetの置換でも検証状況の昇格でもない。
+============================================================ */
+
+// trace値の表示整形。単位ごとに桁数を変える（内部値は丸めない）。
+function fmtTrace(value, unit) {
+  if (typeof value !== 'number') return String(value);
+  if (unit === 'N/m²') return fmt(value, 1);
+  if (unit === 'm') return fmt(value, 2);
+  return fmt(value, 4);
+}
+
+// 既存Miyoshi presetとの参考比較（AC-10）。
+// presetを置換せず、差を可視のまま示す。
+function renderMiyoshiComparisonHtml(trace) {
+  if (!trace) return '';
+  var preset;
+  try {
+    preset = PresetRegistry.getPreset('miyoshi');
+  } catch (e) {
+    return '';
+  }
+  var zoneKey = trace.inputs.zone;
+  var presetNeg = preset.getNegativePressure(zoneKey);
+  if (typeof presetNeg !== 'number') return '';
+
+  var calcNeg = Math.abs(trace.negative.pressure);
+  var presetAbs = Math.abs(presetNeg);
+  var diff = calcNeg - presetAbs;
+  var pct = (diff / presetAbs) * 100;
+
+  return `
+    <div class="sec-title" style="margin-top:18px;">参考比較: 案件プリセット vs 告示風圧計算</div>
+    <div class="notice" style="margin-bottom:10px;border-color:rgba(245,158,11,0.4);">
+      <strong style="color:var(--warn);">⚠ 参考比較（comparison only） — 案件プリセットの算定根拠は未解決です</strong><br>
+      これは<strong>現在入力されている風条件で算定した値</strong>と既存の案件プリセット値を並べたものです。案件プリセットがどのH・Z・建物種別で算定されたかは本ツールでは確認できていません（preset provenance unresolved）。<strong>数値が近くても、プリセットの検証状況は変わりません。</strong>この比較でプリセット値を置き換えることもしません。
+    </div>
+    <table>
+      <thead><tr><th>項目</th><th>案件プリセット</th><th>告示風圧計算（現在の入力）</th><th>差</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>負圧（${zoneKey === 'general' ? '一般部' : '隅角部'}）</td>
+          <td>${fmt(presetAbs, 0)} N/m²</td>
+          <td>${fmt(calcNeg, 1)} N/m²</td>
+          <td class="${Math.abs(pct) < 5 ? '' : 'ng'}">${diff >= 0 ? '+' : ''}${fmt(diff, 1)} N/m²（${pct >= 0 ? '+' : ''}${fmt(pct, 2)}%）</td>
+        </tr>
+      </tbody>
+    </table>
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;">
+      比較に用いた入力: V0=${trace.inputs.V0} m/s ／ 粗度区分=${trace.inputs.inputRoughnessCategory} ／ H=${fmt(trace.normalized.meanHeightH, 2)} m ／ Z=${trace.inputs.evaluationHeightM} m ／ ${trace.inputs.buildingType === 'closed' ? '閉鎖型' : '開放型'}。
+      これらは<strong>ユーザーが入力した仮定</strong>であり、案件原典で確認された値ではありません。
+    </div>`;
+}
+
+function renderWindTraceHtml(trace) {
+  if (!trace) return '';
+
+  var rows = trace.trace.map(function (step) {
+    return `
+      <tr>
+        <td>${step.step}</td>
+        <td style="font-family:ui-monospace,monospace;font-size:11px;">${step.formula}</td>
+        <td>${fmtTrace(step.value, step.unit)}</td>
+        <td>${step.unit}</td>
+      </tr>`;
+  }).join('');
+
+  var subst = trace.normalized.roughnessSubstitutionApplied ? `
+    <div class="notice" style="margin-bottom:10px;border-color:rgba(245,158,11,0.4);">
+      入力した地表面粗度区分は <strong>${trace.inputs.inputRoughnessCategory}</strong> ですが、計算には
+      <strong>${trace.normalized.calculationRoughnessCategory}</strong> の数値（Zb=${trace.normalized.Zb} / ZG=${trace.normalized.ZG} / α=${trace.normalized.alpha}）を用いています。<br>
+      ${trace.normalized.roughnessSubstitutionNote}
+    </div>` : '';
+
+  var geometry = trace.geometry ? `
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;">
+      隅角部の帯幅: 0.1 × min(b, 2H) = 0.1 × ${fmt(trace.geometry.aPrime, 2)} =
+      <strong>${fmt(trace.geometry.cornerStripWidth, 2)} m</strong>
+      （b=${trace.inputs.buildingShortSideM} m。図面からの自動判定は行っていません）
+    </div>` : (trace.inputs.zone === 'corner' ? `
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;">
+      隅角部として計算しています。建物短辺 b を入力すると帯幅を表示します。
+    </div>` : '');
+
+  return `
+    <div class="sec-title" style="margin-top:18px;">風圧算定トレース（${trace.basis.note}）</div>
+    ${subst}
+    <div class="meta-chip" style="display:inline-block;margin-bottom:8px;">
+      式の検証状況: <span>一次資料で確認済み</span>
+    </div>
+    <div class="meta-chip" style="display:inline-block;margin-bottom:8px;">
+      入力値の検証状況: <span>未検証（ユーザー入力）</span>
+    </div>
+    <table>
+      <thead><tr><th>ステップ</th><th>式</th><th>値</th><th>単位</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${geometry}
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;">
+      表示のみ丸めています。内部計算では丸めていません。
+    </div>
+    ${renderMiyoshiComparisonHtml(trace)}`;
 }
 
 function renderResults(result) {
@@ -791,6 +1072,10 @@ function renderResults(result) {
       <div class="notice" style="margin-bottom:14px;border-color:rgba(245,158,11,0.4);">
         <strong style="color:var(--warn);">⚠ 取り込みデータ（未検証） — 本ツールは内容を検証していません</strong><br>
         外部から取り込んだ入力条件（W=${W}mm/H=${H}mm/正圧=${fmt(posP,0)}/負圧=${fmt(negP,0)}）で計算しています。取り込み元のデータが「検証済み」「案件プリセット」と記載していても、本ツールはそれを検証済みとして扱わず、常に未検証（verificationStatus: unverified）として扱います。「案件適合OK」の根拠として扱わず、必ず案件図・構造計算書等の原典で確認してください。
+      </div>` : (mode === 'notification' ? `
+      <div class="notice" style="margin-bottom:14px;border-color:rgba(245,158,11,0.4);">
+        <strong style="color:var(--warn);">⚠ 算定値 — 式は一次資料で確認済み／入力した風条件は未検証</strong><br>
+        入力した風条件から算定した設計風圧（正圧=${fmt(posP,0)} / 負圧=${fmt(negP,0)} N/m²）で計算しています。<strong>算定式・係数は一次資料で確認していますが、入力したV0・粗度区分・建物高さ・軒高・評価高さ・建物種別・部位は本ツールでは検証していません。</strong>式が検証済みであることは、入力値が検証済みであることを意味しません。板硝子協会が推奨する設計手法であり、すべての建物・すべての壁への法的要求ではありません。
       </div>` : (mode === 'manual' ? `
       <div class="notice" style="margin-bottom:14px;border-color:rgba(245,158,11,0.4);">
         <strong style="color:var(--warn);">⚠ ユーザー入力値 — 案件原典との照合は本ツールでは未実施</strong><br>
@@ -799,7 +1084,10 @@ function renderResults(result) {
       <div class="notice" style="margin-bottom:14px;border-color:rgba(245,158,11,0.4);">
         <strong style="color:var(--warn);">⚠ 参考計算 — 案件実寸未確認</strong><br>
         入力寸法 ${W}×${H}mm は本ツールの<strong>未検証な既定値（UNVERIFIED PROJECT DEFAULT）</strong>です。特定案件のガラス確定寸法として検証されたものではありません。この判定結果を「案件適合OK」の根拠として扱わず、案件図・メーカー資料の実寸を確認のうえ再計算してください。
-      </div>` : ''));
+      </div>` : '')));
+
+  // 風圧算定trace（告示風圧計算モード / 風圧由来の取り込みデータ）
+  const traceHtml = renderWindTraceHtml(result.windTrace);
 
   // 結論カード
   const conclusionHtml = `
@@ -992,7 +1280,7 @@ function renderResults(result) {
     </div>` : '';
 
   document.getElementById('result-area').innerHTML =
-    conclusionHtml + windHtml + calcDetailHtml + okTableHtml + ngTableHtml + scopeTableHtml;
+    conclusionHtml + traceHtml + windHtml + calcDetailHtml + okTableHtml + ngTableHtml + scopeTableHtml;
 }
 
 /* ============================================================
@@ -1001,7 +1289,7 @@ function renderResults(result) {
 
 function runCalc() {
   // 入力値取得（モード非依存の共通項目）
-  const mode        = getInputMode(); // 'miyoshi' | 'manual' | 'imported'
+  const mode        = getInputMode(); // 'miyoshi' | 'manual' | 'notification' | 'imported'
   const W           = parseFloat(document.getElementById('inp-W').value);
   const H           = parseFloat(document.getElementById('inp-H').value);
   const typeKey     = document.getElementById('inp-type').value;
@@ -1034,6 +1322,15 @@ function runCalc() {
   const designP = pkg.designPressure;
   const windStatus = pkg.provenance.verificationStatus;
 
+  // 風圧算定trace。packageには保存されていないため windInput から再計算する
+  // （取り込んだ中間値を信用しない。AC-18）。
+  let windTrace = null;
+  try {
+    windTrace = ProjectInput.windTraceFor(pkg);
+  } catch (e) {
+    windTrace = null;
+  }
+
   let floorKey = null, zoneKey = null, isUnverifiedDefault = false;
   if (mode === 'miyoshi') {
     floorKey = document.getElementById('inp-floor').value;
@@ -1061,7 +1358,8 @@ function runCalc() {
     typeLabel: GlassCalc.GLASS_TYPES[pkg.glassType].label,
     best,
     okCandidates, ngCandidates, outOfScopeCandidates,
-    isUnverifiedDefault
+    isUnverifiedDefault,
+    windTrace
   });
 }
 
@@ -1109,6 +1407,10 @@ window.addEventListener('DOMContentLoaded', function() {
   document.getElementById('inp-H').value = dflt.H;
 
   // モード切替UIの初期化（Phase 2C, AC-08）
+  var basisSel = document.getElementById('inp-wind-basis');
+  if (basisSel) {
+    basisSel.addEventListener('change', function () { applyModeVisibility(); });
+  }
   document.getElementById('inp-mode').addEventListener('change', function () {
     applyModeVisibility();
     runCalc();
