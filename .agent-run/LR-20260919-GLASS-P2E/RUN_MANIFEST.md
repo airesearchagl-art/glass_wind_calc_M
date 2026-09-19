@@ -81,6 +81,15 @@ Task Packet §1の要求（133 tests以上 / 0 fail）を満たす。
 
 | Wave | Goal | Commit（full SHA） |
 |---|---|---|
-| 0 | Fresh Gate / Phase 2D closeout / Run Artifact初期化 / baseline | 本Wave 0 commit自身を含むため固定値を書かない（自己参照回避） |
+| 0 | Fresh Gate / Phase 2D closeout / Run Artifact初期化 / baseline | `6d9ff267bcf3b82301961d652eb1ef91614e013d` |
+| 1（BLOCKED） | Research Gate試行 → 一次資料へ到達不能 | `d7d6ed588c4a9c52b234d54ada319b0fb7a413f7` |
+| 1（解除） | Human提供Evidenceによる Research Gate 成立 | `f5dd772e264a7f57e743f6b8081cccbda57e9196` |
+| 2 | `wind-pressure.js`（汎用風圧算定コア + trace） | `c9ba59d4ae1aa39947a67cff98672a48c8a3d874` |
+| 3 | Project Input Package v2統合 / migration | `80b5e62f62807db3d118afe75ed49faba9bb0a0c` |
+| 4 | UI告示風圧計算モード / trace表示 / Miyoshi参考比較 | `7b479406605ad5d456ae3765252b96dca4035993` |
+| 5 | security / privacy / mutation | `90bb9f40c8a41259d2a71eca1698f03a45c695ff` |
+| 7（先行） | README同期 | `e6bf6e9d2a2ad664abd280abded63f94957ffd52` |
+| 6 / 7（収束） | Run Artifact更新・Draft PR・Preview確認 | 本Run Artifact更新commit自身を含むため固定値を書かない |
 
-以降のWaveは成立ごとに追記する。
+Run Artifact自身を含むcommitのSHAは、そのcommit確定前に本文へ固定値で書けない（自己参照）。
+確定済みの過去Waveのcheckpoint SHAは上表のとおり。

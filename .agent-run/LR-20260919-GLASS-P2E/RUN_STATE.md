@@ -3,12 +3,12 @@
 - Run ID: LR-20260919-GLASS-P2E
 - Mode: LONG_RUN
 - Horizon: 8H
-- Current state: RUNNING（Wave 1 Research Gate成立 — Human提供Evidenceにより再開）
+- Current state: RUNNING（Wave 2-5,7完了。Wave 6 independent verification実行中）
 - Repository: airesearchagl-art/glass_wind_calc_M
 - Working branch: claude/phase2e-wind-pressure-trace
 - Base SHA: a26714c6dd2d8bca80e18fcf1e97d7d184c9254f
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY` — `git rev-parse HEAD` またはPRの現在headで解決する（自己参照回避contract）
-- Current wave: Wave 2 — Wind input contract / Trace data model / pure calculation core
+- Current wave: Wave 6 — browser verification / full regression / independent verifier
 - Last successful checkpoint: （Wave 0 commitで確定）
 - Task Packet ID: LRP-20260919-GLASS-P2E
 - Task Packet revision: 1
@@ -26,25 +26,25 @@ generic Wind Pressure Trace Engineを導入する。preset / manual / notificati
 ## Acceptance Criteria
 
 - [x] AC-01 Research Gate — **PASS**（`human_supplied_primary_evidence`。memory-only / snippet実装は0件）
-- [ ] AC-02 Generic Wind Core（project-independent pure module、Miyoshi literal 0） — BLOCKED（AC-01依存）
-- [ ] AC-03 Traceability（inputs → intermediates → final、丸めは表示時のみ） — BLOCKED（AC-01依存）
-- [ ] AC-04 Formula vs Input verification separation（trust promotion禁止） — BLOCKED（AC-01依存）
-- [ ] AC-05 Notification mode（既存3 mode回帰なし） — BLOCKED（AC-01依存）
-- [ ] AC-06 Project Input integration（GlassCalcへのbypass禁止） — BLOCKED（AC-01依存）
-- [x] AC-07 Design pressure contract — **PASS**（無変更）
-- [ ] AC-08 Replay（export → import → recalculate） — BLOCKED（AC-01依存）
-- [x] AC-09 Migration — **PASS（vacuously）**（PIP v1へ一切変更を加えていない）
-- [ ] AC-10 Miyoshi diagnostic（comparison ≠ replacement） — BLOCKED（AC-01依存）
+- [x] AC-02 Generic Wind Core — **PASS**。`wind-pressure.js` は案件非依存。Miyoshi literal 0（source grep testで固定）
+- [x] AC-03 Traceability — **PASS**。17ステップのtrace（式・値・単位）。内部丸めなし、丸めは表示層のみ
+- [x] AC-04 Formula vs Input separation — **PASS**。`verified_primary_source` / `user_input_unverified` / `calculated` を分離
+- [x] AC-05 Notification mode — **PASS**。4モード目を追加。既定は案件プリセットのまま、既存3モードは実機で回帰なし
+- [x] AC-06 Project Input integration — **PASS**。PIP v2経由。GlassCalcへのbypassなし
+- [x] AC-07 Design pressure contract — **PASS**。`max(|正圧|,|負圧|)` を維持
+- [x] AC-08 Replay — **PASS**。export→import→recalcで風圧・trace・ガラス候補が一致（実機確認済み）
+- [x] AC-09 Migration — **PASS**。v1は`windInput: null`のv2へ決定的migrate、挙動不変。v1+windInputは拒否、v3以上はfail closed
+- [x] AC-10 Miyoshi diagnostic — **PASS**。side-by-side比較を表示。置換・昇格せず、provenance未解決を明示
 - [x] AC-11 No automatic Z inference — **PASS（vacuously）**。floor→Zの推測を一切実装していない
-- [ ] AC-12 Error boundary（fail closed、NaN/Infinity reject） — BLOCKED（AC-01依存）
-- [ ] AC-13 Unit discipline — BLOCKED（AC-01依存）
-- [ ] AC-14 Known-answer tests — BLOCKED（AC-01依存）
-- [x] AC-15 Miyoshi regression — **PASS**（実装未変更のため baseline のまま成立）
-- [x] AC-16 Existing tests — **PASS**（133 pass / 0 fail。削除なし）
-- [ ] AC-17 Browser（4 mode、JS error 0） — BLOCKED（AC-01依存）
-- [x] AC-18 Security — **PASS**（source無変更のためPhase 2D boundaryをそのまま維持）
-- [x] AC-19 Privacy — **PASS**（private識別子の追加なし。記録したのはofficial public source URLのみ）
-- [ ] AC-20 Documentation — BLOCKED（AC-01依存）
+- [x] AC-12 Error boundary — **PASS**。NaN/Infinity/非正/型違い/未知フィールド/不正列挙をfail closedで拒否
+- [x] AC-13 Unit discipline — **PASS**。m / m/s / N/m² をtrace各stepに明示。`wind-pressure.js` はmmを扱わない
+- [x] AC-14 Known-answer tests — **PASS**。供給known-answer 4値をbit-exactで固定。境界・補間・基準を網羅
+- [x] AC-15 Miyoshi regression — **PASS**。1756.09756097561 / 1463.4146341463415 / Manual 1400 を再実測
+- [x] AC-16 Existing tests — **PASS**。baseline 133 → 190 pass / 0 fail。テスト削除なし
+- [x] AC-17 Browser — **PASS**。4モード + trace伝播 + 改竄import + fail closed を実機確認。JS error 0
+- [x] AC-18 Security — **PASS**。改竄pressureは再計算で無効化。trace到達値は数値/固定列挙のみ。Phase 2D boundary維持
+- [x] AC-19 Privacy — **PASS**。新規URLは公的一次資料8件のみ（AC-19が明示的に許可）。private識別子なし
+- [x] AC-20 Documentation — **PASS**。README同期。逆算記述を出典裏付けへ訂正。§18の表現規則に従う
 
 ## Completed
 
@@ -56,7 +56,9 @@ generic Wind Pressure Trace Engineを導入する。preset / manual / notificati
 
 ## Current implementation state
 
-**実装コードは1行も書いていない。これは意図した結果である。**
+（下記はWave 1でBLOCKEDだった時点の記録。Human提供EvidenceによりD-004で解除され、Wave 2以降を実施した。）
+
+**当時、実装コードは1行も書いていなかった。これは意図した結果である。**
 
 Wave 1のResearch Gateが成立しなかったため、Task Packet §5「Research Gateが成立しない場合、
 その部分のimplementationはBLOCKED」および §9「一次資料で必要性と定義を確認する前に
@@ -84,26 +86,31 @@ formulaなしでも着手できるように見えるが:
 ```text
 Fresh Gate                     : PASS（base SHA一致、working tree clean）
 baseline npm test              : PASS（133 pass / 0 fail）
-full npm test (current)        : PASS（133 pass / 0 fail。source無変更のためbaselineと同一）
+full npm test (current)        : PASS（190 pass / 0 fail）
 canonical read                 : PASS（Vault read-onlyでLong-Run route等を参照）
-Research Gate                  : **NOT_ESTABLISHED**（一次資料host全てegress policyで403）
-memory-only implementation     : 0件（推測実装を行っていない）
-source / tests drift vs base   : 0
-privacy sweep                  : PASS（official public source URLのみ。private識別子なし）
+Research Gate                  : PASS（ESTABLISHED_FROM_HUMAN_SUPPLIED_PRIMARY_EVIDENCE）
+memory-only implementation     : 0件
+websearch-snippet implementation: 0件
+known-answer（供給4値）         : PASS（bit-exactで一致。独立再計算で確認）
+mutation check（wind core）     : PASS（17 mutantすべてkill）
+mutation check（integration）   : PASS（6 mutantすべてkill）
+browser（4 mode / file://）     : PASS（JS error 0）
+privacy sweep                  : PASS（新規URLは公的一次資料8件のみ）
+protected invariants           : PASS（再実測で不変）
 ```
 
 ## Hard Checks（Quality Debt化禁止）
 
 ```text
-Safety-critical formula mismatch : N/A — 風圧式を実装していないためmismatchが発生しえない
-Security                         : PASS（source無変更。Phase 2D boundaryをそのまま維持）
-Privacy                          : PASS（private識別子の追加なし。official public source URLのみ）
+Safety-critical formula mismatch : PASS — EVIDENCE.md §4と実装を逐条照合。供給known-answer 4値がbit-exactで一致
+Security                         : PASS（改竄pressureの再計算による無効化、eval/Function/DOM不使用）
+Privacy                          : PASS（新規は公的一次資料URLのみ）
 Permission                       : PASS（権限・branch protection・credentialの変更なし）
-Data integrity                   : PASS（既存contract無変更）
+Data integrity                   : PASS（designPressure契約維持、決定的正規化、roundtrip一致）
 Irreversible data                : PASS（不可逆操作なし。main直接write・force push・branch削除なし）
 Secret exposure                  : PASS
-Trust-boundary bypass            : PASS（source無変更）
-Verified-state spoofing          : PASS（Miyoshi presetのverificationStatusを一切変更していない）
+Trust-boundary bypass            : PASS（imported → registered_preset への昇格経路なし。windInputもdowngrade対象）
+Verified-state spoofing          : PASS（式のverifiedが入力をverifiedへ昇格させない。preset値・statusは無変更）
 ```
 
 いずれもwaiver・accepted_by_human・Quality Debt・NOT RUN・INCONCLUSIVEを使用していない。
@@ -149,15 +156,17 @@ DECISIONS.md を参照。
 ## Remaining tasks
 
 ```text
-Humanの判断・対応が必要（agent側で自律的に解消できない）:
-
-1. Research Gateのunblock方法の決定（下記 Next action の選択肢）
-2. unblock後: Wave 1完了 → Wave 2-7（TASK_QUEUE.md参照）
+1. Independent Verifierの結果を反映（findingがあればscope内でrepair→再verify）
+2. Human Gate — Ready for Review / merge / Production の可否
 ```
 
 ## Next action
 
-**Human escalation。** agent側で自律的に進められる作業は残っていない。
+Independent Verifierの結果を受領し、findingがscope内であれば同Campaign内でrepairして再検証する。
+その後Draft PRとVercel Preview exact-headを確認してCompletion Reportを出す。
+Ready化・merge・Productionは行わない。
+
+（以下はWave 1 BLOCKED時のescalation記録。D-004により解除済み。）
 
 Research Gateをunblockするための選択肢:
 
@@ -235,3 +244,32 @@ resumable: true  # same branch, same task packet, same digest
 Phase 2D security boundaryはいずれも無変更。
 
 **再開可能性**: 同一branch・同一Task Packet・同一digestでWave 1から再開できる。
+
+
+## Wave 2-7 実施サマリ
+
+| Wave | 内容 | 結果 |
+|---|---|---|
+| 2 | `wind-pressure.js`（汎用風圧算定コア + trace） | 33 tests / 17 mutantすべてkill |
+| 3 | PIP v2統合（windInput保存、trace非保存、v1 migration） | 11 tests / 6 mutantすべてkill |
+| 4 | UI告示風圧計算モード / trace表示 / Miyoshi参考比較 | 9 tests / 実機4モード確認 |
+| 5 | security / privacy / mutation | 4 tests / privacy sweep PASS |
+| 7 | README同期（先行実施） | §18の表現規則に準拠 |
+| 6 | browser / full regression / independent verifier | 実機PASS。verifier実行中 |
+
+### 設計上の要点
+
+1. **traceをpackageへ保存しない**。保存するのは `windInput` のみで、traceは常に再計算する。
+   payloadが主張する中間値・圧力を信用する経路を構造的に作らない（D-008）。
+2. **算定基準を二分する**。`notification_baseline`（y=1.00固定）と `itakyo_recommended`（明示選択）。
+   業界推奨を告示の最低基準へ暗黙に混ぜない（D-005）。
+3. **粗度区分IV→IIIを二層で保持**。入力を書き換えず、読み替えと理由を表示する（D-006）。
+4. **式のverifiedが入力をverifiedへ昇格させない**（AC-04）。
+5. **自動推定を実装しない**。粗度区分・階→Z・自治体別V0・隅角部判定はすべて明示入力（AC-11 / D-007）。
+
+### Wave 4で自己検出した不具合
+
+取り込みデータのサマリ表示が圧力を未整形で出力していた。preset/manualの値は整数のため
+従来は顕在化しなかったが、風圧算定値は非整数になるため
+export前 `1967` / import後 `1967.2571022503244` と表示が食い違った。
+**値は同一で、表示のみの不具合**。表示層で丸めるよう修正し、roundtripの表示が一致することを確認した。
