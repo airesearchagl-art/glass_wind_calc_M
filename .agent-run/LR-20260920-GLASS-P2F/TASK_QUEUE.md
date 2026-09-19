@@ -14,11 +14,12 @@ W0-6 Phase 2E post-merge closeout（snapshot/digestは不変）         DONE
 ## Wave 1 — Existing architecture inventory
 
 ```text
-W1-1 validateVerifiedCase() / verifiedCases の確認                TODO
-W1-2 Evidence factory / promotion guard の確認                    TODO
-W1-3 verificationStatus / privateReferenceAvailable の確認        TODO
-W1-4 getPublicLabel() / PIP / preset registry の確認              TODO
-W1-5 再利用 vs generic抽出の方針決定（DECISIONSへ記録）            TODO
+W1-1 validateVerifiedCase() / verifiedCases の確認                DONE
+W1-2 Evidence factory / promotion guard の確認                    DONE
+W1-3 verificationStatus / privateReferenceAvailable の確認        DONE
+W1-4 getPublicLabel() / PIP / preset registry の確認              DONE
+W1-5 再利用 vs generic抽出の方針決定（D-004）                      DONE
+W1-6 Evidence contractを evidence.js へ抽出（重複解消）            DONE
 ```
 
 **Task Packet §7**: 新moduleを作る前に必ず確認する。既存contractを重複実装しない。
@@ -27,19 +28,23 @@ W1-5 再利用 vs generic抽出の方針決定（DECISIONSへ記録）          
 ## Wave 2 — Evidence Ledger / promotion gate / Verified Case validator
 
 ```text
-W2-1 generic Evidence Ledger（field-level fact）                  TODO
-W2-2 promotion gate（fail closed）                                TODO
-W2-3 Verified Case validator（case-level）                        TODO
-W2-4 partial facts が case-level verified へ昇格しないこと        TODO
+W2-0 Promotion Gateをtrusted構築経路へ接続（§3 A/B/C）            DONE
+W2-1 public primary source referenceの構造validator（§4）          DONE
+W2-2 sourceReferenceの正規形を定義（§5）                           DONE
+W2-3 gate mutation / regression tests（§6の12カテゴリ）            DONE
+W2-4 generic Evidence Ledger（field-level fact）                  DONE
+W2-5 Verified Case validator（case-level）                        DONE
+W2-6 partial facts が case-level verified へ昇格しないこと        DONE
 ```
 
 ## Wave 3 — private Evidence reconciliation
 
 ```text
-W3-1 Evidenceが実際に利用可能な範囲でのみ実施                      N/A（Evidence UNAVAILABLE）
+W3-1 Evidenceが実際に利用可能な範囲でのみ実施   SKIPPED_BY_DESIGN / NO_EVIDENCE_AVAILABLE
 ```
 
 **Evidence UNAVAILABLEのため、project-specific promotionは行わない（§23 / D-001）。**
+これは失敗ではない。データを捏造してwaveを埋めない。
 
 ## Wave 4 — UI
 
@@ -80,19 +85,19 @@ W7-5 Completion Report + Human Evidence Request Matrix             TODO
 | AC | 内容 | 状態 |
 |---|---|---|
 | AC-01 | Private Evidenceがpublic repoへ入らない | TODO |
-| AC-02 | Existing contracts inventory / 重複実装なし | TODO |
-| AC-03 | Generic Evidence Ledger | TODO |
-| AC-04 | promotion guard fail closed | TODO |
-| AC-05 | partial → case-level 自動昇格なし | TODO |
-| AC-06 | Verified Case validator | TODO |
-| AC-07 | sample defaultをEvidenceなしに昇格しない | TODO |
+| AC-02 | Existing contracts inventory / 重複実装なし | PASS |
+| AC-03 | Generic Evidence Ledger | PASS |
+| AC-04 | promotion guard fail closed | PASS |
+| AC-05 | partial → case-level 自動昇格なし | PASS |
+| AC-06 | Verified Case validator | PASS |
+| AC-07 | sample defaultをEvidenceなしに昇格しない | PASS |
 | AC-08 | CW寸法 / pitchからpane推定しない | TODO |
-| AC-09 | 近似一致だけでpressure昇格しない | TODO |
-| AC-10 | floor→Z推測しない | TODO |
-| AC-11 | reconciliation table | TODO |
-| AC-12 | MATCH と verified の分離 | TODO |
-| AC-13 | mismatch時にpreset自動更新しない | TODO |
-| AC-14 | verifiedCases はgate通過caseのみ | TODO |
+| AC-09 | 近似一致だけでpressure昇格しない | PASS |
+| AC-10 | floor→Z推測しない | PASS |
+| AC-11 | reconciliation table | PASS |
+| AC-12 | MATCH と verified の分離 | PASS |
+| AC-13 | mismatch時にpreset自動更新しない | PASS |
+| AC-14 | verifiedCases はgate通過caseのみ | PASS |
 | AC-15 | imported dataはverifiedを作れない | TODO |
 | AC-16 | UIでEvidence status明確 | TODO |
 | AC-17 | 4 modes regressionなし | TODO |

@@ -185,6 +185,7 @@
   var makeEvidence = ProjectEvidence.makeEvidence;
   var assertEvidenceConsistency = ProjectEvidence.assertEvidenceConsistency;
   var verifiedValue = ProjectEvidence.verifiedValue;
+  var assertPromotionGate = ProjectEvidence.assertPromotionGate;
 
   // 案件識別情報そのものは社内基本設計資料で確認済み（verificationStatus:
   // 'verified'）。ただし本リポジトリは public であるため、施主名・建物名称・
@@ -206,7 +207,9 @@
     '社内基本設計資料により案件識別情報を確認済み。本リポジトリは公開のため、固有名詞・社内資料参照は開示しない。',
     true
   );
-  assertEvidenceConsistency('verified', identityEvidence, 'identity');
+  // Phase 2F §3-B: identity の構築も強化後のgateを通す。
+  // verified規則を二重に持たない（単一のcanonical path）。
+  assertPromotionGate('verified', identityEvidence, 'identity');
 
   var config = {
     projectId: 'miyoshi',
@@ -485,7 +488,7 @@
     }
     // pane W / pane H / pressure のそれぞれについて、
     // 「primary evidence かつ妥当なcheckedAt」というhard conditionを、
-    // 既存のassertEvidenceConsistency('verified', ...) を再利用して強制する
+    // Phase 2Fの強化後gate assertPromotionGate('verified', ...) を再利用して強制する
     // （検証ロジックを重複させない）。
     // RF-02: 各evidenceのpublicDescriptionにもpublic-safe boundaryを適用する
     // （top-levelのpublicEvidenceDescriptionだけでなく、nested evidenceの
@@ -495,7 +498,15 @@
     // でも独立して強制する（defense in depth）。
     ['widthEvidence', 'heightEvidence', 'pressureEvidence'].forEach(function (key) {
       var entryEvidence = evidence[key];
-      assertEvidenceConsistency('verified', entryEvidence, 'verifiedCase.' + caseObj.caseId + '.' + key);
+      // Phase 2F §3-C: case-level検証も強化後のgateを通す。
+      // level=primary / checkedAt妥当 でも、privateReferenceAvailable=false かつ
+      // 妥当なpublic primary referenceが無い場合は**拒否**する。
+      assertPromotionGate(
+        'verified',
+        entryEvidence,
+        'verifiedCase.' + caseObj.caseId + '.' + key,
+        { sourceReference: (evidence.sourceReferences || {})[key] || null }
+      );
       assertPublicSafeEvidenceText(
         entryEvidence && entryEvidence.publicDescription,
         'verifiedCase.' + caseObj.caseId + '.' + key + '.publicDescription'

@@ -104,3 +104,54 @@ miyoshi.js は解決して同名のローカル別名へ束ねるため、**約8
   strictly stronger であって別基準ではないため、既存の挙動・既存テストを壊さない。
 - **確認**: 既存configの `verified` な値（identity / wind.V0 / wind.roughnessCategory）は
   いずれも `privateReferenceAvailable: true` を持つため、強化後のgateも通過する（実測）。
+
+## D-006 — Promotion Gateをtrusted構築経路へ接続する（Required Fix）
+
+- **指摘（正当）**: Wave 1で `assertPromotionGate()` を追加したが、
+  実際の構築経路（`verifiedValue()` / identity構築 / `validateVerifiedCase()`）は
+  従来の `assertEvidenceConsistency()` のままだった。
+  **gateが存在するだけで呼ばれていなければ、強化要件は実質advisoryである。**
+- **決定**: 3経路すべてを `assertPromotionGate()` へ接続する。verified規則を二重に持たない。
+- **確認**: 各経路を弱いguardへ戻すmutationを実施し、いずれもtestが落ちることを確認した
+  （§6-10の要求そのもの）。
+
+## D-007 — public source referenceは「非空文字列」では不十分（Required Fix）
+
+- **指摘（正当）**: 初版は `typeof === 'string' && length > 0` を参照の十分条件にしていた。
+  これでは `"x"` や private Drive URL でもverifiedを通せてしまう。
+- **決定**: `assertPublicPrimarySourceReference()` を実装し、構造要件を課す。
+  https / 資格情報なし / localhost・loopback・私設ネットワークでない /
+  既知private provider（Drive・Docs・Notion・SharePoint・Dropbox）でない /
+  単一ラベルホストでない / token等を提供元にしていない。
+- **`assertPublicSafeEvidenceText()` を再利用しない理由**: あちらは publicDescription 用で
+  URLを含むこと自体を拒否する。こちらは公的な公開URLを受け入れる場所であり、要件が正反対。
+- **コードが判定できることの限界を明記する**: 検証しているのは**public-safeな構造**であって、
+  その資料が本当に一次資料か・発行者が信頼できるかではない。
+  それはHuman / reviewerの判断であり、構造が通ったことを真正性の証明と読み替えてはならない。
+
+## D-008 — sourceReferenceは監査可能な正規形として保持する（§5）
+
+- **決定**: `{ kind: 'public_primary', url }` を正規形とし、Ledger entryが保持する。
+  validation時にだけ渡す一時optionでは「安全に保持されている」を満たさない。
+- **private Evidence**: `sourceReference = null`。URL / ファイル名 / IDを保持しない。
+  保持するのは `privateReferenceAvailable: true` だけ。
+- **public URLを publicDescription へ入れない**（役割が逆であることをtestで固定）。
+
+## D-009 — reconciliationは「Evidenceが先、数値が後」
+
+- **決定**: `reconcileFact()` はEvidenceの検証状況を先に見る。
+  verifiedでなければ、**数値が完全一致していても** `INSUFFICIENT_EVIDENCE` を返す。
+- **理由**: AC-12「MATCHとverifiedを明確に分離」。逆順に判定すると
+  「数値が合っているから検証済み」という最も危険な誤解をコードが追認してしまう。
+- **現状**: Evidence UNAVAILABLEのため、4群すべてが `INSUFFICIENT_EVIDENCE` を返す。
+
+## D-010 — mutation testが露呈したcase promotionの抜け穴
+
+- **状況**: `evaluateCasePromotion()` の `verificationStatus !== 'verified'` チェックを
+  削除するmutationが**生き残った**。当初のfixtureが `indirect` / `none` evidenceを
+  使っていたため、gate側で落ちて結果的にcaseも落ちていただけだった。
+- **実際の穴**: `partially_verified` でありながら primary + privateReference の
+  evidenceを持つentryがあると、gateは素通りするためcaseが誤って昇格しうる。
+- **対応**: 当該条件を直接突くテストを追加し、mutationがkillされることを確認した。
+- **記録する理由**: 「テストが通っている」ことと「その分岐が検証されている」ことは別である、
+  という具体例として残す。
