@@ -40,3 +40,67 @@
 - **理由**: Task Packet §17が明示。verifiedCasesの存在意義は
   「full promotion gateを通ったcaseだけを保持すること」であり、
   件数が0であることはbugではなく**正しい状態**である。
+
+## D-004 — Evidence contractを `project-config/evidence.js` へ抽出する（Wave 1 inventory結果）
+
+### inventory結果（Task Packet §7）
+
+repository-wide searchの結果、Evidence contractは**すべて案件固有モジュール
+`project-config/miyoshi.js` の内部にあった**。
+
+| 契約 | 元の場所 | 性質 |
+|---|---|---|
+| `EVIDENCE_LEVELS` | miyoshi.js | 案件非依存 |
+| `VERIFICATION_STATUSES` | miyoshi.js（+ project-input.jsに**重複定義**） | 案件非依存 |
+| `isValidCheckedAt` | miyoshi.js | 案件非依存 |
+| `PUBLIC_UNSAFE_TEXT_PATTERNS` / `assertPublicSafeEvidenceText` | miyoshi.js | 案件非依存 |
+| `makeEvidence` | miyoshi.js | 案件非依存 |
+| `assertEvidenceConsistency`（promotion guard） | miyoshi.js | 案件非依存 |
+| `verifiedValue` | miyoshi.js | 案件非依存 |
+| `validateVerifiedCase` | miyoshi.js | **案件形状に依存**（floor/zoneの値域がMiyoshi固有） |
+
+### 決定
+
+契約の単一の正を `project-config/evidence.js` へ**移動**する（再実装しない）。
+miyoshi.js は解決して同名のローカル別名へ束ねるため、**約85箇所の呼び出しは無変更**で、
+差分は定義ブロックのみに閉じる。
+
+あわせて project-input.js の `VERIFICATION_STATUSES` 重複定義も解消する
+（一方だけ変更されたときに黙って乖離する状態だった）。
+
+### 理由
+
+- Task Packet AC-02「重複実装しない」を満たすには、generic Evidence Ledgerが
+  契約を再実装しない必要がある。契約が案件固有モジュールに閉じている限り不可能。
+- §7は「必要ならgeneric moduleへ抽出してよい」と明示的に許可している。
+- 別案件のconfigが同じ契約を使えるようになる（Phase 2Fの目的そのもの）。
+
+### やらなかったこと（§7「不用意なlarge refactorはしない」）
+
+- `validateVerifiedCase` の全面generic化は行わない（案件形状に依存するため、
+  Wave 2でgeneric case validatorを**別に**用意し、既存はそのまま残す）。
+- 呼び出し側の書き換えは行わない（別名束ねで吸収）。
+- 案件fact・verificationStatus・evidence値は一切変更しない。
+
+### 抽出時に見つけた実害バグ（browserでのみ再現）
+
+`miyoshi.js` のUMD factoryは **`global` を引数に取らない**
+（`registry.js` / `project-input.js` とsignatureが異なる）。
+そのため最初に書いた resolver の `typeof global === 'object'` は
+ブラウザで常にfalseとなり、`require` も存在しないため
+**module loadが例外で失敗**した（Node testsは `global` が存在するため素通り）。
+
+`globalThis` を直接参照する形へ修正し、実機で全モードの動作と JS error 0 を確認した。
+再発防止として、resolverが bare `global` に依存しないこと・
+`index.html` が evidence.js を miyoshi.js より前に読み込むことをテストで固定する。
+
+## D-005 — promotion gateは既存guardを「置換」せず「強化」する
+
+- **状況**: Task Packet §9は、verified昇格の条件として既存guardにない
+  `privateReferenceAvailable === true` または安全なpublic source referenceを要求する。
+- **決定**: 既存 `assertEvidenceConsistency()` は変更せず、
+  それを**内部で必ず呼ぶ** `assertPromotionGate()` を追加して条件を上乗せする。
+- **理由**: §9の「existing promotion guardと矛盾させない」を満たす最も安全な形。
+  strictly stronger であって別基準ではないため、既存の挙動・既存テストを壊さない。
+- **確認**: 既存configの `verified` な値（identity / wind.V0 / wind.roughnessCategory）は
+  いずれも `privateReferenceAvailable: true` を持つため、強化後のgateも通過する（実測）。

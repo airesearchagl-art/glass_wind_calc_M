@@ -145,186 +145,46 @@
   'use strict';
 
   // ============================================================
-  // Evidence model（Phase 2B, Task 1/2/7。2026-09-17 Evidence Guard
-  // Required Fixでhard validationを強化）
+  // Evidence model
   // ============================================================
-
-  var EVIDENCE_LEVELS = ['primary', 'indirect', 'none'];
-
-  // 許容されるverificationStatusの全体（RF-02）。
-  // assertEvidenceConsistency() の冒頭でこれ以外を即rejectすることで、
-  // タイプミス（'verifed'）や大文字小文字違い（'Verified'）でpromotion
-  // guardを迂回できないことを保証する。テストからも参照できるよう
-  // config.VERIFICATION_STATUSES として公開する。
-  var VERIFICATION_STATUSES = ['verified', 'partially_verified', 'unverified'];
-
-  // checkedAt契約（RF-03）: "YYYY-MM-DD" 形式の文字列、または null のみ許容。
-  // 単なるtruthy判定ではなく、実在するカレンダー日付であることまで検証する
-  // （例: '2026-13-40' や '2026-02-30' のような形式は合っていても実在しない
-  // 日付は reject する）。
-  var CHECKED_AT_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-
-  function isValidCheckedAt(checkedAt) {
-    if (checkedAt === null) {
-      return true;
+  //
+  // Evidence contract（level / checkedAt / public-safe boundary /
+  // promotion guard）の**単一の正は project-config/evidence.js** にある。
+  // Phase 2Fで、案件非依存の契約を案件固有モジュールから切り出した。
+  //
+  // ここでは解決したものを同名のローカル別名へ束ねるだけなので、
+  // 以下のconfig定義のコードと挙動は抽出前と変わらない。
+  // 契約を再実装していない（Phase 2F AC-02: 重複実装しない）。
+  function resolveEvidenceContract() {
+    // 注意: 本ファイルのUMD factoryは global を引数に取らない
+    // （registry.js / project-input.js とはsignatureが異なる）。
+    // ブラウザでは `global` という識別子が存在しないため、
+    // globalThis を直接参照する必要がある。
+    var g = (typeof globalThis !== 'undefined') ? globalThis : null;
+    if (g && g.ProjectEvidence) {
+      return g.ProjectEvidence;
     }
-    if (typeof checkedAt !== 'string' || !CHECKED_AT_PATTERN.test(checkedAt)) {
-      return false;
-    }
-    var parts = checkedAt.split('-');
-    var year = Number(parts[0]);
-    var month = Number(parts[1]);
-    var day = Number(parts[2]);
-    if (month < 1 || month > 12) {
-      return false;
-    }
-    // UTC基準でその年月の末日を求め、dayがその範囲内であることを確認する
-    // （うるう年の2月29日等も正しく扱える）。
-    var daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-    if (day < 1 || day > daysInMonth) {
-      return false;
-    }
-    return true;
-  }
-
-  // public-safe boundary（RF-02）: publicDescription（および将来
-  // publicEvidenceDescription等）へ渡してよいテキストかどうかを検証する
-  // 共通ガード。既知のURL/パス/プロバイダ/opaqueトークンのパターンに
-  // マッチした場合のみ拒否する「既知パターンの自動検出」であり、
-  // 正式案件名・機密名称等の非パターン文字列までは検出できない
-  // （repository-wide review・Human reviewが別途必要）。
-  var PUBLIC_UNSAFE_TEXT_PATTERNS = [
-    { name: 'url-scheme', pattern: /\b[a-z][a-z0-9+.-]*:\/\//i },
-    { name: 'www', pattern: /\bwww\./i },
-    { name: 'known-private-provider', pattern: /drive\.google|docs\.google|notion\.(so|com)|sharepoint|dropbox/i },
-    { name: 'windows-absolute-path', pattern: /[A-Za-z]:\\/ },
-    { name: 'unc-path', pattern: /\\\\[^\\\s]+\\[^\\\s]*/ },
-    { name: 'unix-home-or-absolute-path', pattern: /(^|\s)(~\/|\/Users\/|\/home\/|\/mnt\/)/ },
-    { name: 'opaque-long-token', pattern: /\b[A-Za-z0-9_-]{28,}\b/ }
-  ];
-
-  function assertPublicSafeEvidenceText(text, label) {
-    if (typeof text !== 'string' || !text) {
-      throw new Error((label || 'publicDescription') + ' must be a non-empty string');
-    }
-    for (var i = 0; i < PUBLIC_UNSAFE_TEXT_PATTERNS.length; i++) {
-      var entry = PUBLIC_UNSAFE_TEXT_PATTERNS[i];
-      if (entry.pattern.test(text)) {
-        throw new Error(
-          (label || 'publicDescription') + ' must not contain private URLs/paths/identifiers (matched known-unsafe pattern: ' + entry.name + ')'
-        );
+    if (typeof require === 'function') {
+      try {
+        return require('./evidence.js');
+      } catch (e) {
+        /* fallthrough */
       }
     }
-    return true;
+    throw new Error(
+      'MiyoshiProjectConfig: project-config/evidence.js (ProjectEvidence) is required but not available'
+    );
   }
 
-  // Evidence記述オブジェクトを組み立てるヘルパー。
-  // publicDescription / privateReferenceAvailable のみを保持し、
-  // 実際のURL・ファイルID・ファイル名は一切保持しない設計とする
-  // （呼び出し側がそれらを渡すこと自体を想定していない）。
-  //
-  // Phase 2C AC-05（Evidence factory hardening）: 従来は
-  // `checkedAt: checkedAt || null` という実装で、''・false・0・undefined等の
-  // 不正な入力を静かに（例外を投げずに）null へ丸め込んでいた。これは
-  // 「呼び出し側の実装ミスでchecked日付を渡し忘れた」ケースと「意図的に
-  // 未確認を表すnull/undefinedを渡した」ケースを区別できず、契約違反を
-  // 検知できないまま通過させてしまう危険があった。
-  // ここでは level・checkedAt の両方を factory の入口で検証し、
-  // null/undefined 以外の不正な checkedAt は即座に例外を投げる
-  // （assertEvidenceConsistency() へ委ねる事後検証だけに依存しない）。
-  //
-  // Phase 2C Closure Wave RF-02: publicDescription にも
-  // assertPublicSafeEvidenceText() を適用し（public-safe boundaryを
-  // factory入口まで前倒し）、privateReferenceAvailable は
-  // `!!privateReferenceAvailable` という従来のsilent boolean coercionを
-  // やめ、厳密なboolean型のみ許容するようにした。
-  function makeEvidence(level, checkedAt, publicDescription, privateReferenceAvailable) {
-    if (EVIDENCE_LEVELS.indexOf(level) === -1) {
-      throw new Error('makeEvidence(): invalid evidence level: ' + JSON.stringify(level) + ' (must be one of ' + EVIDENCE_LEVELS.join(', ') + ')');
-    }
-    var normalizedCheckedAt = (checkedAt === undefined || checkedAt === null) ? null : checkedAt;
-    if (!isValidCheckedAt(normalizedCheckedAt)) {
-      throw new Error(
-        'makeEvidence(): checkedAt must be null/undefined or a valid "YYYY-MM-DD" date string, got: ' + JSON.stringify(checkedAt)
-      );
-    }
-    assertPublicSafeEvidenceText(publicDescription, 'makeEvidence(): publicDescription');
-    if (typeof privateReferenceAvailable !== 'boolean') {
-      throw new Error(
-        'makeEvidence(): privateReferenceAvailable must be a boolean (true/false), got: ' + JSON.stringify(privateReferenceAvailable)
-      );
-    }
-    return {
-      level: level,
-      checkedAt: normalizedCheckedAt,
-      publicDescription: publicDescription,
-      privateReferenceAvailable: privateReferenceAvailable
-    };
-  }
+  var ProjectEvidence = resolveEvidenceContract();
 
-  // Evidence promotion guard（Task 7。RF-01〜RF-03でhard contract化）。
-  //
-  // - verificationStatus は VERIFICATION_STATUSES のいずれかでなければ
-  //   即reject（RF-02）。
-  // - evidence は必須。evidence.level は EVIDENCE_LEVELS のいずれかで
-  //   なければreject。
-  // - evidence.checkedAt は null または妥当な "YYYY-MM-DD" 文字列で
-  //   なければreject（単なるtruthy判定ではない。RF-03）。
-  // - verificationStatus が 'verified' の場合は、さらに
-  //   evidence.level === 'primary' かつ evidence.checkedAt が
-  //   設定されていることを必須とする。
-  //
-  // この関数は verifiedValue() 経由の値だけでなく、identity の構築時にも
-  // 直接呼び出す（RF-01）。これにより 'verified' な値はすべて、
-  // モジュール読み込み（require / <script>実行）の時点でこの契約を
-  // 満たしていない限り、モジュール自体の評価が例外で失敗する
-  // fail-fast設計になる。config.validateAllEvidence() による事後検証は
-  // あくまで回帰確認用の補助であり、これに依存した検出ではない。
-  function assertEvidenceConsistency(verificationStatus, evidence, label) {
-    if (VERIFICATION_STATUSES.indexOf(verificationStatus) === -1) {
-      throw new Error(
-        'Invalid verificationStatus: ' + JSON.stringify(verificationStatus) +
-        ' (must be one of ' + VERIFICATION_STATUSES.join(', ') + ')' + (label ? ' (' + label + ')' : '')
-      );
-    }
-    if (!evidence || typeof evidence !== 'object') {
-      throw new Error('evidence metadata is required' + (label ? ' for ' + label : ''));
-    }
-    if (EVIDENCE_LEVELS.indexOf(evidence.level) === -1) {
-      throw new Error('evidence.level must be one of ' + EVIDENCE_LEVELS.join(', ') + (label ? ' (' + label + ')' : ''));
-    }
-    if (!isValidCheckedAt(evidence.checkedAt)) {
-      throw new Error(
-        'evidence.checkedAt must be null or a valid "YYYY-MM-DD" date string, got: ' +
-        JSON.stringify(evidence.checkedAt) + (label ? ' (' + label + ')' : '')
-      );
-    }
-    if (verificationStatus === 'verified') {
-      if (evidence.level !== 'primary') {
-        throw new Error(
-          'verificationStatus "verified" requires evidence.level === "primary"' + (label ? ' (' + label + ')' : '')
-        );
-      }
-      if (!evidence.checkedAt) {
-        throw new Error(
-          'verificationStatus "verified" requires evidence.checkedAt to be set' + (label ? ' (' + label + ')' : '')
-        );
-      }
-    }
-    return true;
-  }
-
-  // 個々の入力値に検証メタデータ・根拠メタデータを付与するヘルパー。
-  // verificationStatus: 'verified' | 'partially_verified' | 'unverified'
-  function verifiedValue(value, unit, verificationStatus, evidence, label) {
-    assertEvidenceConsistency(verificationStatus, evidence, label);
-    return {
-      value: value,
-      unit: unit,
-      verificationStatus: verificationStatus,
-      evidence: evidence
-    };
-  }
+  var EVIDENCE_LEVELS = ProjectEvidence.EVIDENCE_LEVELS;
+  var VERIFICATION_STATUSES = ProjectEvidence.VERIFICATION_STATUSES;
+  var isValidCheckedAt = ProjectEvidence.isValidCheckedAt;
+  var assertPublicSafeEvidenceText = ProjectEvidence.assertPublicSafeEvidenceText;
+  var makeEvidence = ProjectEvidence.makeEvidence;
+  var assertEvidenceConsistency = ProjectEvidence.assertEvidenceConsistency;
+  var verifiedValue = ProjectEvidence.verifiedValue;
 
   // 案件識別情報そのものは社内基本設計資料で確認済み（verificationStatus:
   // 'verified'）。ただし本リポジトリは public であるため、施主名・建物名称・

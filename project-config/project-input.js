@@ -62,7 +62,9 @@
   var SOURCE_KINDS = [
     'registered_preset', 'manual', 'notification_calculation', 'imported_unverified'
   ];
-  var VERIFICATION_STATUSES = ['verified', 'partially_verified', 'unverified'];
+  // verificationStatusの値域は案件非依存のEvidence contractが正（Phase 2F）。
+  // ここで配列を再定義すると、一方だけ変更されたときに黙って乖離する。
+  var VERIFICATION_STATUSES = resolveEvidenceContract().VERIFICATION_STATUSES;
 
   // package top-levelで許可されるキー（これ以外はreject: AC-07 unknown field）
   var ALLOWED_TOP_LEVEL_KEYS = [
@@ -134,6 +136,21 @@
 
   function knownGlassTypes() {
     return Object.keys(resolveGlassCalc().GLASS_TYPES);
+  }
+
+  // 依存解決（project-config/evidence.js）。verificationStatusの値域の正。
+  function resolveEvidenceContract() {
+    if (global && global.ProjectEvidence) {
+      return global.ProjectEvidence;
+    }
+    if (typeof require === 'function') {
+      try {
+        return require('./evidence.js');
+      } catch (e) {
+        /* fallthrough */
+      }
+    }
+    throw new Error('ProjectInput: project-config/evidence.js (ProjectEvidence) is required but not available');
   }
 
   // 依存解決（wind-pressure.js）。windInputを持つpackageでのみ必要になる。

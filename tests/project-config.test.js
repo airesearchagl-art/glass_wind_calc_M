@@ -283,13 +283,23 @@ test('RF-01: identityの構築時（モジュール読み込み時）にpromotio
   const src = fs.readFileSync(PROJECT_CONFIG_SRC_PATH, 'utf8');
 
   function requireBrokenCopy(brokenSrc) {
-    const tmpFile = path.join(os.tmpdir(), 'miyoshi-evidence-guard-test-' + process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.js');
+    // Phase 2FでEvidence contractを project-config/evidence.js へ抽出したため、
+    // 壊したコピーも evidence.js を解決できる必要がある。
+    // コピー先へ evidence.js も一緒に置き、`require('./evidence.js')` が
+    // 自己完結で解決できるようにする（同一プロセスで先にロードされた
+    // global.ProjectEvidence に偶然依存させない）。
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'miyoshi-evidence-guard-test-'));
+    const tmpFile = path.join(tmpDir, 'miyoshi.js');
+    fs.writeFileSync(
+      path.join(tmpDir, 'evidence.js'),
+      fs.readFileSync(path.join(__dirname, '..', 'project-config', 'evidence.js'), 'utf8')
+    );
     fs.writeFileSync(tmpFile, brokenSrc);
     try {
       delete require.cache[require.resolve(tmpFile)];
       require(tmpFile);
     } finally {
-      fs.unlinkSync(tmpFile);
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   }
 
@@ -613,4 +623,73 @@ test('代表ケース: FL6 W=1500/H=2050/2F/general/extraFactor=1.00 → ≈1463
   assert.ok(fl6, 'FL6候補が存在するはず');
   assert.ok(Math.abs(fl6.P - 1463.4146341463415) < 1e-6);
   assert.equal(fl6.status, 'ng');
+});
+
+/* ============================================================
+   Phase 2F: Evidence contract抽出の回帰ガード
+   （browserでのみ再現したmodule解決バグの再発防止）
+============================================================ */
+
+test('Phase 2F: Evidence contractの正は evidence.js であり miyoshi.js は再実装しない', () => {
+  const evidence = require('../project-config/evidence.js');
+  // 契約の実体が evidence.js にある
+  for (const fn of ['makeEvidence', 'assertEvidenceConsistency', 'isValidCheckedAt',
+                    'assertPublicSafeEvidenceText', 'verifiedValue',
+                    'EVIDENCE_LEVELS', 'VERIFICATION_STATUSES']) {
+    assert.ok(evidence[fn] !== undefined, 'evidence.js が ' + fn + ' を持つこと');
+  }
+  // miyoshi.js が公開する関数は evidence.js のものと同一実体（コピーではない）
+  assert.equal(MiyoshiProjectConfig.makeEvidence, evidence.makeEvidence);
+  assert.equal(MiyoshiProjectConfig.isValidCheckedAt, evidence.isValidCheckedAt);
+  assert.equal(MiyoshiProjectConfig.assertPublicSafeEvidenceText, evidence.assertPublicSafeEvidenceText);
+  assert.equal(MiyoshiProjectConfig.VERIFICATION_STATUSES, evidence.VERIFICATION_STATUSES);
+
+  // miyoshi.js のソースに契約の再実装が残っていないこと
+  const src = fs.readFileSync(PROJECT_CONFIG_SRC_PATH, 'utf8');
+  assert.doesNotMatch(src, /function makeEvidence\s*\(/, 'makeEvidenceを再定義していない');
+  assert.doesNotMatch(src, /function assertEvidenceConsistency\s*\(/, 'promotion guardを再定義していない');
+  assert.doesNotMatch(src, /function isValidCheckedAt\s*\(/, 'isValidCheckedAtを再定義していない');
+  assert.doesNotMatch(src, /var EVIDENCE_LEVELS = \[/, 'EVIDENCE_LEVELSを再定義していない');
+});
+
+test('Phase 2F: evidence contractの解決が bare `global` 識別子に依存しない（browser互換）', () => {
+  // miyoshi.js のUMD factoryは global を引数に取らないため、
+  // `typeof global` はブラウザで常に undefined になる。
+  // resolver が globalThis を参照していることをソースで固定する。
+  const src = fs.readFileSync(PROJECT_CONFIG_SRC_PATH, 'utf8');
+  const start = src.indexOf('function resolveEvidenceContract');
+  assert.ok(start > -1, 'resolveEvidenceContract が存在すること');
+  const body = src.slice(start, src.indexOf('\n  }', start));
+  assert.match(body, /globalThis/, 'resolverは globalThis を参照すること');
+  assert.doesNotMatch(body, /typeof global ===/, 'bare `global` に依存しないこと');
+
+  // factory signature が引数なしであるという前提自体も固定する
+  assert.match(src, /\}\)\(typeof globalThis !== 'undefined' \? globalThis : this, function \(\) \{/);
+});
+
+test('Phase 2F: index.html が evidence.js を miyoshi.js より前に読み込む', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const ev = html.indexOf('src="project-config/evidence.js"');
+  const mi = html.indexOf('src="project-config/miyoshi.js"');
+  const pi = html.indexOf('src="project-config/project-input.js"');
+  assert.ok(ev > -1, 'evidence.js のscriptタグが存在すること');
+  assert.ok(ev < mi, 'evidence.js は miyoshi.js より前');
+  assert.ok(ev < pi, 'evidence.js は project-input.js より前');
+});
+
+test('Phase 2F: 既存の verified な値はすべて強化後のpromotion gateを通る', () => {
+  const evidence = require('../project-config/evidence.js');
+  // identity / wind.V0 / wind.roughnessCategory の3件
+  const verifiedEntries = [
+    ['identity', MiyoshiProjectConfig.identity.evidence],
+    ['wind.V0', MiyoshiProjectConfig.wind.V0.evidence],
+    ['wind.roughnessCategory', MiyoshiProjectConfig.wind.roughnessCategory.evidence]
+  ];
+  for (const [label, ev] of verifiedEntries) {
+    assert.doesNotThrow(
+      () => evidence.assertPromotionGate('verified', ev, label),
+      label + ' は強化後のgateを通ること'
+    );
+    assert.equal(ev.privateReferenceAvailable, true, label + ' は private reference を持つ');
+  }
 });
