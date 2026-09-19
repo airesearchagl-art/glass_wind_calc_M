@@ -136,3 +136,157 @@ test('UI mode separation (RF-01): 手入力モードの入力カード注意書�
   assert.match(html, /初期表示値（サンプル値）も含め/);
   assert.doesNotMatch(html, /W\/H\/正圧\/負圧はすべてその場で入力した値/);
 });
+
+/* ============================================================
+   Phase 2E: 告示風圧計算モードのUI契約（AC-05 / AC-11 / AC-13）
+============================================================ */
+
+test('AC-05: 告示風圧計算モードが選択肢として存在し、既存3モードを壊さない', () => {
+  const html = readIndexHtml();
+  assert.match(html, /<option value="notification">/);
+  // 既存3モードが残っていること
+  assert.match(html, /<option value="miyoshi" selected>/);
+  assert.match(html, /<option value="manual">/);
+  assert.match(html, /<option value="imported">/);
+  // 既定は案件プリセットのまま（既存挙動を変えない）
+  assert.match(html, /<option value="miyoshi" selected>/);
+});
+
+test('AC-05: 風圧入力欄はすべて mode-field-notification でラップされている', () => {
+  const html = readIndexHtml();
+  const windFieldIds = [
+    'inp-wind-basis', 'inp-wind-recurrence', 'inp-wind-v0', 'inp-wind-roughness',
+    'inp-wind-building-h', 'inp-wind-eaves-h', 'inp-wind-z',
+    'inp-wind-building-type', 'inp-wind-zone', 'inp-wind-short-side'
+  ];
+  for (const id of windFieldIds) {
+    assert.ok(html.includes('id="' + id + '"'), id + ' が存在すること');
+    // 各入力は mode-field-notification のブロック内にある
+    const idx = html.indexOf('id="' + id + '"');
+    const before = html.slice(0, idx);
+    const lastBlock = before.lastIndexOf('mode-field-notification');
+    const lastOtherBlock = Math.max(
+      before.lastIndexOf('mode-field-miyoshi'),
+      before.lastIndexOf('mode-field-manual'),
+      before.lastIndexOf('mode-field-imported')
+    );
+    assert.ok(lastBlock > lastOtherBlock, id + ' は notification ブロック内にあること');
+  }
+});
+
+test('AC-11: UIに階→評価高さ/建物高さの自動変換が存在しない', () => {
+  const html = readIndexHtml();
+  // buildWindInputFromUI() の本体そのものに階・住所由来の入力が現れない。
+  // （呼び出し側の近傍に inp-floor があっても無関係なので、本体だけを切り出す）
+  const fnStart = html.indexOf('function buildWindInputFromUI');
+  assert.ok(fnStart > -1, 'buildWindInputFromUI が存在すること');
+  const fnBody = html.slice(fnStart, html.indexOf('\n}', fnStart));
+  for (const token of ['inp-floor', 'floorKey', 'floor', 'MiyoshiProjectConfig', '住所']) {
+    assert.equal(
+      fnBody.includes(token), false,
+      'buildWindInputFromUI() が ' + token + ' を参照してはならない'
+    );
+  }
+  // 風圧入力はすべて風圧用の明示フィールドから読む
+  for (const id of ['inp-wind-v0', 'inp-wind-roughness', 'inp-wind-building-h',
+                    'inp-wind-eaves-h', 'inp-wind-z']) {
+    assert.ok(fnBody.includes(id), 'buildWindInputFromUI() は ' + id + ' を読むこと');
+  }
+  // 明示入力であることをUIが述べている
+  assert.match(html, /階（1F \/ 2F \/ 3F \/ RF）から Z を自動生成しません/);
+  assert.match(html, /階数からは推定しません/);
+});
+
+test('AC-13: 風圧入力欄が単位を明示している', () => {
+  const html = readIndexHtml();
+  // V0 は m/s、高さ系は m
+  const v0Block = html.slice(html.indexOf('id="inp-wind-v0"'), html.indexOf('id="inp-wind-v0"') + 300);
+  assert.match(v0Block, /m\/s/);
+  for (const id of ['inp-wind-building-h', 'inp-wind-eaves-h', 'inp-wind-z', 'inp-wind-short-side']) {
+    const block = html.slice(html.indexOf('id="' + id + '"'), html.indexOf('id="' + id + '"') + 300);
+    assert.match(block, /unit-label">m</, id + ' の単位が m であること');
+  }
+});
+
+test('AC-04: UIが式の検証状況と入力値の検証状況を分けて表示する', () => {
+  const html = readIndexHtml();
+  assert.match(html, /式の検証状況/);
+  assert.match(html, /入力値の検証状況/);
+  assert.match(html, /式が検証済みであることは、入力値が検証済みであることを意味しません/);
+});
+
+test('AC-10: Miyoshi比較が「参考比較」であり置換でないことをUIが明示する', () => {
+  const html = readIndexHtml();
+  assert.match(html, /参考比較/);
+  assert.match(html, /comparison only/);
+  assert.match(html, /preset provenance unresolved|案件プリセットの算定根拠は未解決/);
+  assert.match(html, /数値が近くても、プリセットの検証状況は変わりません/);
+  assert.match(html, /この比較でプリセット値を置き換えることもしません/);
+});
+
+test('AC-19 / §11: 業界推奨を法的要求として記述していない', () => {
+  const html = readIndexHtml();
+  assert.match(html, /板硝子協会が推奨する設計手法であり/);
+  assert.match(html, /法的に必須.*ではありません|法的要求ではありません/);
+  // 「すべての建物に法的に必須」という主張がないこと
+  assert.doesNotMatch(html, /すべての建物・すべての壁に法的に必須です/);
+});
+
+test('AC-03: 表示層だけで丸め、取り込みサマリも丸める', () => {
+  const html = readIndexHtml();
+  // 取り込みサマリの設計風圧がfmt()を通っている（生の浮動小数を出さない）
+  assert.match(html, /設計風圧 ' \+ fmt\(pkg\.designPressure, 0\)/);
+  assert.match(html, /表示のみ丸めています。内部計算では丸めていません/);
+});
+
+test('AC-06: wind-pressure.js がcalc.jsの後・project-input.jsの前に読み込まれる', () => {
+  const html = readIndexHtml();
+  const calcIdx = html.indexOf('src="calc.js"');
+  const windIdx = html.indexOf('src="wind-pressure.js"');
+  const piIdx = html.indexOf('src="project-config/project-input.js"');
+  assert.ok(calcIdx > -1 && windIdx > -1 && piIdx > -1, '3つのscriptが存在すること');
+  assert.ok(calcIdx < windIdx, 'calc.js が wind-pressure.js より先');
+  assert.ok(windIdx < piIdx, 'wind-pressure.js が project-input.js より先');
+});
+
+/* ============================================================
+   Independent verification repair（Phase 2E Wave 8）
+   index.html のruntime分岐をソース契約として固定する。
+   （node:testはUIを実行しないため、変更されれば落ちる形で書く）
+============================================================ */
+
+test('AC-03: trace表示がHTMLエスケープを通している', () => {
+  const html = readIndexHtml();
+  assert.match(html, /function escHtml\(/, 'escHtml が定義されていること');
+  // trace行の4セルすべてがescHtmlを通る
+  assert.match(html, /<td>\$\{escHtml\(step\.step\)\}<\/td>/);
+  assert.match(html, /\$\{escHtml\(step\.formula\)\}/);
+  assert.match(html, /\$\{escHtml\(fmtTrace\(step\.value, step\.unit\)\)\}/);
+  assert.match(html, /<td>\$\{escHtml\(step\.unit\)\}<\/td>/);
+  // 未エスケープの生interpolationが残っていないこと
+  assert.doesNotMatch(html, /<td>\$\{step\.formula\}<\/td>/);
+  assert.doesNotMatch(html, /\$\{trace\.normalized\.roughnessSubstitutionNote\}/);
+});
+
+test('AC-05: recurrenceYears は itakyo_recommended のときだけ送られる', () => {
+  const html = readIndexHtml();
+  const fnStart = html.indexOf('function buildWindInputFromUI');
+  const fnBody = html.slice(fnStart, html.indexOf('\n}', fnStart));
+  // 条件付きであること（無条件に送ると notification_baseline が例外になる）
+  assert.match(fnBody, /if \(basis === 'itakyo_recommended'\)[\s\S]{0,200}recurrenceYears/);
+  // recurrenceYears の代入がその条件の外に無いこと
+  const assignments = (fnBody.match(/windInput\.recurrenceYears\s*=/g) || []).length;
+  assert.equal(assignments, 1, 'recurrenceYears の代入は1箇所だけ');
+});
+
+test('AC-08: 取り込みpackageの windInput が再構築時に引き継がれる', () => {
+  const html = readIndexHtml();
+  // これが失われるとimport後にtraceを再計算できず、replayが成立しない
+  assert.match(html, /if \(importedPackage\.windInput\) \{\s*\n?\s*rebuilt\.windInput = importedPackage\.windInput;/);
+});
+
+test('AC-10: 参考比較は明示選択したときだけ表示される', () => {
+  const html = readIndexHtml();
+  assert.match(html, /id="inp-wind-compare"/);
+  assert.match(html, /compareSel\.value !== 'on'/);
+});
