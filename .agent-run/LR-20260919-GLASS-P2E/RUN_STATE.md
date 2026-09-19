@@ -3,12 +3,12 @@
 - Run ID: LR-20260919-GLASS-P2E
 - Mode: LONG_RUN
 - Horizon: 8H
-- Current state: **BLOCKED**（Wave 1 Research Gate不成立 — 一次資料へ到達不能）
+- Current state: RUNNING（Wave 1 Research Gate成立 — Human提供Evidenceにより再開）
 - Repository: airesearchagl-art/glass_wind_calc_M
 - Working branch: claude/phase2e-wind-pressure-trace
 - Base SHA: a26714c6dd2d8bca80e18fcf1e97d7d184c9254f
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY` — `git rev-parse HEAD` またはPRの現在headで解決する（自己参照回避contract）
-- Current wave: Wave 1 — Official-source Research Gate（NOT_ESTABLISHED）
+- Current wave: Wave 2 — Wind input contract / Trace data model / pure calculation core
 - Last successful checkpoint: （Wave 0 commitで確定）
 - Task Packet ID: LRP-20260919-GLASS-P2E
 - Task Packet revision: 1
@@ -25,7 +25,7 @@ generic Wind Pressure Trace Engineを導入する。preset / manual / notificati
 
 ## Acceptance Criteria
 
-- [ ] AC-01 Research Gate — **BLOCKED**（一次資料へegress policyで到達不能。memory-only implementationは0件を維持）
+- [x] AC-01 Research Gate — **PASS**（`human_supplied_primary_evidence`。memory-only / snippet実装は0件）
 - [ ] AC-02 Generic Wind Core（project-independent pure module、Miyoshi literal 0） — BLOCKED（AC-01依存）
 - [ ] AC-03 Traceability（inputs → intermediates → final、丸めは表示時のみ） — BLOCKED（AC-01依存）
 - [ ] AC-04 Formula vs Input verification separation（trust promotion禁止） — BLOCKED（AC-01依存）
@@ -186,7 +186,7 @@ Fresh Gate                 : PASS
 Hard Gate failure          : なし（Research Gate不成立は tool unavailable であり
                              HARD_GATE_FAILUREとは区別される）
 BLOCKED reason             : Wave 1 Research Gate NOT_ESTABLISHED（egress policy 403）
-BLOCKED transition         : **発生（Wave 1）** — D-002
+BLOCKED transition         : 発生（Wave 1）→ **解除済み**（D-004、Human提供Evidence）
 no_progress_waves          : 0 / 2（LONG_RUN上限）
 same_hypothesis_retry      : 0 / 2
 repair_strategies          : 0 / 3

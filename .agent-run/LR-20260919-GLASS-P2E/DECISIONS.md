@@ -58,3 +58,48 @@
      特にREADMEのCpe値は案件負圧値からの**逆算**として導入されたものであり、
      一次資料確認を経ていない（EVIDENCE.md §1.5に記録）。
 - **帰結**: 「実装しない」ことを失敗ではなく正しい結果として扱う。
+
+## D-004 — Research GateをHuman提供Evidenceで成立させる（BLOCKED解除）
+
+- **状況**: Wave 1で実行環境から一次資料へ到達できずBLOCKEDとなった（D-002）。
+  Humanがoption (b)を選択し、外部で独立に確認した一次資料の内容を提供した。
+- **決定**: Research Gateを `ESTABLISHED_FROM_HUMAN_SUPPLIED_PRIMARY_EVIDENCE` として成立させ、
+  Wave 2以降を再開する。
+- **provenanceの明示**: `human_supplied_primary_evidence`。
+  **本実行環境が当該文書を取得したとは主張しない。** §1.3の403記録は事実として保持する。
+- **これが該当しないもの**: memory-only implementation / WebSearchスニペット実装 /
+  Hard Gate waiver のいずれでもない。Task Packet §14が認める「Human提供Evidence」の経路である。
+- **不採用を維持するもの**: モデルの記憶、WebSearchスニペット（D-003を維持）。
+  blocked hostへの再試行およびegress policyの変更は行わない。
+- **digest確認**: 再開前にTask Packet digestを再hashし
+  `137e9cde…185f` と一致することを確認済み。
+
+## D-005 — 算定基準を notification_baseline / itakyo_recommended に二分する
+
+- **状況**: 再現期間係数 y は**板硝子協会の推奨**であり、告示の最低基準ではない。
+- **決定**: 算定基準を明示的に2つ持つ。
+  - `notification_baseline`: y = 1.00 固定（`recurrenceYears: null`）
+  - `itakyo_recommended`: y を 50 / 100 / 200 / 300 / 500年 から**明示選択**
+- **禁止**: `y > 1.00` への暗黙のdefault。基準はtraceに必ず記録する。
+- **理由**: 業界推奨を法的要求へ格上げしないため（Task Packet §11）。
+  基準を混ぜると「告示準拠」と「協会推奨」の区別が消え、後から追跡できなくなる。
+
+## D-006 — 粗度区分 IV → III の読み替えを「入力」と「計算」の二層で保持する
+
+- **状況**: 板硝子協会の指示により、板ガラスでは粗度区分IVのとき区分IIIの数値を用いる。
+- **決定**: ユーザー入力を書き換えない。traceに両方を保持する。
+  - `inputRoughnessCategory: 'IV'`（ユーザーが入力したまま）
+  - `calculationRoughnessCategory: 'III'`（Zb=5 / ZG=450 / α=0.20）
+  - 読み替えが発生したことを示すフラグと説明をtraceへ載せる
+- **理由**: silent rewriteは追跡可能性を壊す。第三者が後から
+  「なぜIVなのにIIIのパラメータなのか」を追えることがPhase 2Eの目的そのものである。
+- **注**: 1454号表のIV行（Zb=10 / ZG=550 / α=0.27）は**表としては保持する**が、
+  板ガラス計算では到達しない。表の出典を残しつつ読み替え規則を明示するため。
+
+## D-007 — V0 の自治体別lookupを実装しない
+
+- **決定**: Phase 2E v1では自治体別V0 lookupを実装しない。V0は明示的入力とする。
+- **理由**: 全国のV0表と現行の自治体名・対応関係を**部分的に**encodeすると、
+  「一部は正しい」テーブルになり、実装しないことより危険である（D-003と同じ判断基準）。
+- **検証**: 有限 / 正 / 保守的hard boundsを文書化して適用する。
+  式がverifiedであることを理由にV0をverified扱いしない。
