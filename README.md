@@ -19,9 +19,27 @@
 ## 出典（法令・技術資料）
 
 - **国土交通省 平成12年建設省告示第1458号**（4辺支持ガラスの構造計算に関する基準）
+- **国土交通省 平成12年建設省告示第1454号**（Eの数値の算出方法並びにV0及び風力係数）
 - **板硝子協会「4辺支持板ガラスの耐風圧強度計算法」**
+- **板硝子協会「帳壁に用いる板ガラスの風圧力計算法」**（Phase 2Eの風圧算定の主根拠）
 
-本ツールの許容耐風圧計算式・複層ガラスの適用範囲は、上記2点に準拠しています。
+本ツールの許容耐風圧計算式・複層ガラスの適用範囲は上記に準拠しています。
+Phase 2Eで追加した風圧算定（告示風圧計算モード）の式・係数・適用条件は、
+`.agent-run/LR-20260919-GLASS-P2E/EVIDENCE.md` §4 に出典・採用範囲・未確認事項を記録しています。
+
+参考（公開一次資料）:
+
+| 資料 | 公開URL |
+|---|---|
+| 告示1454号 本文（建築研究所 掲載） | `https://www.kenken.go.jp/japanese/research/lecture/h16/slide/06-1/ref/No6.htm` |
+| 告示1458号 本文（建築研究所 掲載） | `https://www.kenken.go.jp/japanese/research/lecture/h16/slide/06-1/ref/No1.htm` |
+| 地表面粗度区分の合理化（国土交通省） | `https://www.mlit.go.jp/jutakukentiku/build/content/H12-1454.pdf` |
+| 板ガラスの耐風圧設計（板硝子協会） | `https://glass-wonderland.jp/cms/wp-content/uploads/2020/10/2024_g05_039-_2503.pdf` |
+
+> ⚠️ **法令上の適用範囲と業界推奨の区別**
+> 板硝子協会の計算法は、告示が定める最低基準より広い範囲へ推奨として適用されるものです。
+> 本ツールは「すべての建物・すべての壁に法的に必須」とは主張しません。
+> 表示上も「告示1458号系算定」「板硝子協会推奨による帳壁ガラス設計風圧」と区別して記載しています。
 
 ---
 
@@ -81,14 +99,15 @@ cd glass_wind_calc_M
 
 ---
 
-## 入力モード（Phase 2C〜2D）
+## 入力モード（Phase 2C〜2E）
 
-本ツールは「入力モード」セレクタで、以下の3つのモードを切り替えられます。**各モードは独立したモジュールであり、手入力・取り込みデータにみよし案件のプリセット値が暗黙的に適用されることはありません**（`project-config/manual.js` は `project-config/miyoshi.js` を一切 `require`/参照しません）。
+本ツールは「入力モード」セレクタで、以下の4つのモードを切り替えられます。**各モードは独立したモジュールであり、手入力・取り込みデータにみよし案件のプリセット値が暗黙的に適用されることはありません**（`project-config/manual.js` は `project-config/miyoshi.js` を一切 `require`/参照しません）。
 
 | モード | sourceKind | 信頼度 | 値の出どころ |
 |---|---|---|---|
 | 案件プリセット（みよし案件） | `registered_preset` | プリセットの検証状況をそのまま保持（現状 `partially_verified`） | repository内のbuilt-in config（`project-config/miyoshi.js`） |
 | 手入力 / Generic | `manual` | 常に `unverified` | ユーザーがその場で入力した値 |
+| 告示風圧計算 | `notification_calculation` | 常に `unverified`（**式は検証済み / 入力値は未検証**） | 入力した風条件から算定した値（Phase 2E） |
 | 取り込みデータ | `imported_unverified` | **常に `unverified`** | 外部から読み込んだJSON |
 
 **取り込みデータは、payloadが「検証済み」「案件プリセット」と主張していても、本ツールはそれを検証済みとして扱いません**（詳細は下記「Project Input Package」）。
@@ -123,22 +142,32 @@ Phase 1〜2Bで確立した既存動作そのものです。`project-config/miyo
 ### schemaVersion
 
 ```
-schemaVersion: 1
+schemaVersion: 2   （Phase 2Eで 1 → 2。v1も引き続き読み込める）
 ```
 
 サポート外の `schemaVersion` は読み込み時に拒否されます（将来の形式変更時に、古い実装が新しいpackageを誤って解釈しないための境界）。
+
+**v1 → v2 migration（Phase 2E）**
+
+| 項目 | 挙動 |
+|---|---|
+| v1 packageの読み込み | **可能**。`windInput: null` のv2として決定的に正規化される |
+| v1の計算値・candidate一覧 | **変わらない** |
+| v1 packageが `windInput` を持つ場合 | 矛盾として**拒否**（`windInput` はv2で導入） |
+| `schemaVersion: 3` 以上 | **fail closed で拒否**。silent reinterpretationはしない |
 
 ### package構造
 
 | フィールド | 説明 |
 |---|---|
-| `schemaVersion` | 現在は `1` のみ |
-| `sourceKind` | `registered_preset` / `manual` / `imported_unverified` |
+| `schemaVersion` | `2`（読み込みは `1` と `2`。`3` 以上は拒否） |
+| `sourceKind` | `registered_preset` / `manual` / `notification_calculation` / `imported_unverified` |
 | `sourceId` | registered presetのprojectId（それ以外は `null`） |
 | `widthMm` / `heightMm` | ガラス1枚の見付寸法（> 0） |
 | `positivePressure` / `negativePressure` | 設計風圧の入力値（符号は強制しない） |
 | `designPressure` | **常に再計算される**（下記） |
 | `glassType` | `calc.js` の `GLASS_TYPES` に存在するキーのみ |
+| `windInput` | 告示風圧計算の**入力条件のみ**（v2で追加。算定済みtraceは保存しない。下記） |
 | `extraFactor` | 告示外の追加低減係数（`0 < value <= 1.0`） |
 | `provenance` | `publicLabel` / `verificationStatus` / `note`（公開してよい情報のみ） |
 
@@ -208,6 +237,105 @@ designPressure = max(abs(positivePressure), abs(negativePressure))
 
 ---
 
+## 告示風圧計算モード（Phase 2E）
+
+入力した風条件から帳壁ガラスの設計風圧を算定し、**入力値・式・係数・中間値・最終値まで追跡できる**
+モードです。算定コアは `wind-pressure.js`（案件非依存の汎用モジュール）。
+
+### 計算の流れ
+
+```text
+風条件を入力
+  ↓  wind-pressure.js
+Wind Pressure Trace（各ステップの式・値・単位）
+  ↓
+positivePressure / negativePressure
+  ↓  project-config/project-input.js
+Project Input Package（schemaVersion 2）
+  ↓
+calc.js（GlassCalc）
+```
+
+`calc.js` は風圧式を知らず、`wind-pressure.js` はガラス強度式を知りません。
+GlassCalcへの特別なbypassはなく、他モードと同じ経路を通ります。
+
+### 算定式
+
+```text
+H      = (建物高さ + 軒高) / 2                    [m]
+H'     = max(H, Zb)                               [m]
+Er     = 1.7 × (H' / ZG)^α                        [-]
+qBar   = 0.6 × Er² × (V0 × y)²                    [N/m²]
+Cf     = 外圧ピーク係数 − 内圧ピーク係数          [-]   ※正圧・負圧を別々に算定
+W      = qBar × Cf                                [N/m²]
+設計風圧 = max(|W+|, |W−|)                        [N/m²]
+```
+
+地表面粗度区分ごとの Zb / ZG / α:
+
+| 区分 | Zb [m] | ZG [m] | α |
+|---|---:|---:|---:|
+| I | 5 | 250 | 0.10 |
+| II | 5 | 350 | 0.15 |
+| III | 5 | 450 | 0.20 |
+| IV | 10 | 550 | 0.27 |
+
+> **板ガラスでは粗度区分IVのとき区分IIIの数値を用います**（板硝子協会）。
+> 本ツールは入力を書き換えず、`inputRoughnessCategory: IV` と
+> `calculationRoughnessCategory: III` の**両方をトレースに表示**します。
+> 読み替えが起きたことと、その理由が画面で確認できます。
+
+### 2つの算定基準（重要）
+
+再現期間による割増は**板硝子協会の推奨**であり、告示の最低基準ではありません。
+本ツールは両者を混ぜず、基準を明示的に選択させます。
+
+| 基準 | 再現期間係数 y | 意味 |
+|---|---|---|
+| `notification_baseline`（既定） | **1.00 固定** | 告示1458号系算定。割増を適用しない |
+| `itakyo_recommended` | 50年 1.00 / 100年 1.07 / 200年 1.15 / 300年 1.19 / 500年 1.25 | 板硝子協会推奨。**再現期間を明示選択したときのみ**適用 |
+
+`notification_baseline` は `recurrenceYears` を受け付けず、
+`itakyo_recommended` は明示選択がなければ例外になります。
+**y > 1.00 へ暗黙にdefaultする経路は存在しません。**
+
+### 式の検証状況と入力値の検証状況は別（重要）
+
+```text
+formulaVerificationStatus : verified_primary_source   ← 式・係数は一次資料で確認済み
+inputVerificationStatus   : user_input_unverified     ← 入力したV0・高さ・Z等は未検証
+calculationStatus         : calculated
+```
+
+**式が検証済みであることは、あなたが入力した値が検証済みであることを意味しません。**
+V0・粗度区分・建物高さ・軒高・評価高さ・建物種別・部位は、本ツールが案件原典と照合したものではありません。
+UIでもこの2つを別々のチップとして表示します。
+
+### 自動推定をしないもの
+
+以下はいずれも**明示的な入力**であり、本ツールが推定することはありません。
+
+| 項目 | なぜ推定しないか |
+|---|---|
+| 地表面粗度区分 | 所管特定行政庁の指定による。住所・都市計画区域から機械的に決まらない |
+| 建物高さ / 軒高 / 評価高さ Z | **階（1F / 2F / 3F / RF）から Z を生成しません。** みよし案件の階↔Z対応は未解決のままです |
+| 基準風速 V0 | 全国のV0表を部分的に実装すると「一部だけ正しい」表になるため、実装していません |
+| 隅角部かどうか | 図面からのpoint-in-zone自動判定は行いません（`zone` は明示選択） |
+
+### 案件プリセットとの参考比較（diagnostic）
+
+告示風圧計算モードでは、既存の案件プリセット値と算定値を並べて表示します。
+
+**これは参考比較であり、プリセットの置換でも検証状況の昇格でもありません。**
+案件プリセットがどのH・Z・建物種別で算定されたかは本ツールでは確認できていません
+（preset provenance unresolved）。数値が近くてもプリセットの `verificationStatus` は変わりません。
+
+### 丸め
+
+内部計算では丸めません。丸めは表示層のみです。
+
+---
+
 ## 設計定数
 
 ### 設計風圧（正圧・負圧）＝「みよし案件プリセット」値
@@ -219,7 +347,9 @@ designPressure = max(abs(positivePressure), abs(negativePressure))
 値そのものは変更していません。
 
 - **基準風速 V0 = 34 m/s・地表面粗度区分 III は、社内基本設計資料（外構の風荷重条件）で直接確認済み**（`verificationStatus: "verified"`）です。みよし市の法定値 V0=32m/s とは異なり、本案件では34m/sを案件側設計条件として採用しているため、32m/sへの変更は行いません。
-- 負圧値を告示1458号のCpe（H≦45m：一般部 -1.8／隅角部 -2.2）で逆算すると、918 / 1.8 = 510 N/m²、1122 / 2.2 = 510 N/m² となり、**平均速度圧 qbar ≈ 510 N/m²** 相当で揃います。
+- 負圧側の外圧ピーク係数（H≦45m：一般部 -1.8／隅角部 -2.2）は、**Phase 2Eで一次資料（板硝子協会）により確認済み**です（`.agent-run/LR-20260919-GLASS-P2E/EVIDENCE.md` §4.3）。Phase 2D以前は案件の負圧値からの逆算として導入されていましたが、現在は係数表そのものが出典で裏付けられています。
+- この係数を用いると、918 / 1.8 = 510 N/m²、1122 / 2.2 = 510 N/m² となり、**平均速度圧 qbar ≈ 510 N/m²** 相当で揃います。
+- **ただし、係数表が確認できたことと、案件プリセットが特定のH・Zで算定されたことは別です。** 上記の qbar ≈ 510 N/m² は「そう仮定すると整合する」という観察であり、案件プリセットの算定条件を確認したものではありません（preset provenance unresolved）。
 - 正圧側（1297 / 1525 / 1695 / 1729）も、qbar ≈ 510 N/m² に告示1458号のCpe・Gpe（閉鎖型建築物の内圧係数を含む）を適用することで概ね再現可能です。
 - **ただし、V0・地表面粗度区分そのものの確認と、各階の正圧・負圧プリセット値の確認は別軸です。** V0=34m/s・地表面粗度区分IIIは外構・地表面の風荷重条件として確認できていますが、これらの階別プリセット値の元となった外装材/ガラス構造計算書、および各階の評価高さZとの厳密な対応付けは依然として**未確認**です。したがって階別正圧・部位別負圧プリセット値自体は `verificationStatus: "partially_verified"` のまま維持し、固定値を告示からの自動算定式へ置換していません。
 - 本リポジトリは公開のため、社内資料のURL・ファイルID・ファイル名等の内部限定識別子はここには記載していません。社内での厳密な対応関係は社内の非公開ドキュメントで管理しています。
@@ -303,17 +433,19 @@ P_IGU = min(P_outer, P_inner)
 glass_wind_calc_M/
 ├── index.html                    # UI（入力フォーム・結果表示・入力モード切替）。calc.js / project-config を読み込んで使用
 ├── calc.js                       # 汎用計算コア（k1・k2・許容耐風圧・candidate generation等。案件非依存）
+├── wind-pressure.js              # 汎用風圧算定コア（Phase 2E）。Er・qBar・Cpe/Gpe・Cf・trace。案件非依存
 ├── project-config/
 │   ├── miyoshi.js                # 「みよし案件」固有プリセット（設計風圧・初期寸法）＋検証状況・Evidenceメタデータ
 │   ├── manual.js                 # 「手入力 / Generic」モードの入力契約（Phase 2C）。miyoshi.jsに非依存
 │   ├── registry.js               # generic preset registry（Phase 2D）。built-in presetのみ登録可・unknownはfail closed
-│   └── project-input.js          # versioned Project Input Package（Phase 2D）。validator / serialize / 安全なimport
+│   └── project-input.js          # versioned Project Input Package（Phase 2D〜2E）。v2でwindInputを保持
 ├── tests/
 │   ├── calc.test.js              # 汎用計算コアの known-answer test + core purity（node:test）
 │   ├── project-config.test.js    # project-config分離の整合性・Evidence契約・代表ケース回帰テスト
 │   ├── manual-config.test.js     # 手入力モードの回帰・不正入力・Miyoshi非依存性のテスト（Phase 2C）
 │   ├── project-input.test.js     # Project Input Package / registry / import security のテスト（Phase 2D）
-│   └── ui-mode-separation.test.js # 入力モードのUI契約テスト（Phase 2C〜2D）
+│   ├── wind-pressure.test.js     # 風圧算定のknown-answer / 境界 / 単位 / 検証状態分離（Phase 2E）
+│   └── ui-mode-separation.test.js # 入力モードのUI契約テスト（Phase 2C〜2E）
 ├── package.json
 └── README.md                     # このファイル
 ```
@@ -466,8 +598,9 @@ node --test
 | `tests/calc.test.js` | 汎用計算コアのknown-answer test、寸法感度、TP適用範囲、**core purity**（案件固有値がcalc.jsに存在しないこと） |
 | `tests/project-config.test.js` | 案件presetの値・`verificationStatus`・Evidence契約・代表ケース回帰 |
 | `tests/manual-config.test.js` | 手入力モードの入力契約・不正入力・Miyoshi非依存性 |
-| `tests/project-input.test.js` | Project Input Package / preset registry / trust boundary / import security |
-| `tests/ui-mode-separation.test.js` | 入力モードのUI契約（表示分離・textContent境界・package経由の計算） |
+| `tests/project-input.test.js` | Project Input Package / preset registry / trust boundary / import security / v1→v2 migration |
+| `tests/wind-pressure.test.js` | 風圧算定のknown-answer・境界（Er / Cpe / Gpe / 負圧 / 再現期間）・単位規律・検証状態分離・案件非依存性 |
+| `tests/ui-mode-separation.test.js` | 入力モードのUI契約（表示分離・textContent境界・package経由の計算・自動推定の不在） |
 
 ### 必須ケース
 
@@ -606,6 +739,7 @@ Phase 2Aで `project-config/miyoshi.js` を分離したことに伴うテスト�
 
 | バージョン | 日付 | 内容 |
 |-----------|------|------|
+| v1.6.0-phase2e | 2026-09-19 | **Phase 2E：追跡可能な帳壁ガラス風圧算定エンジン。**（1）`wind-pressure.js` を新設し、案件非依存の汎用風圧算定コアを導入。`H=(建物高さ+軒高)/2`、`H'=max(H,Zb)`、`Er=1.7×(H'/ZG)^α`、`qBar=0.6×Er²×(V0×y)²`、`Cf=外圧ピーク係数−内圧ピーク係数`（正圧・負圧を別算定）、`W=qBar×Cf`、`設計風圧=max(|W+|,|W−|)` を実装し、**各ステップの式・値・単位をtraceとして保持**する。採用した式・係数・適用条件は一次資料に基づき `.agent-run/LR-20260919-GLASS-P2E/EVIDENCE.md` §4 へ出典付きで記録（provenance: `human_supplied_primary_evidence`）。（2）**式の検証状況と入力値の検証状況を分離**（`formulaVerificationStatus: verified_primary_source` / `inputVerificationStatus: user_input_unverified`）。式が検証済みでも、ユーザーが入力したV0・粗度区分・高さ・評価高さ・建物種別・部位をverifiedへ昇格させない。（3）**自動推定を実装しない**：粗度区分の住所・都市計画区域からの判定、階→評価高さZ／建物高さの導出、自治体別V0 lookup、図面からの隅角部判定はいずれも行わず、すべて明示入力。階由来のキーは未知フィールドとして拒否する。（4）板ガラスの粗度区分IV→III読み替えを**入力と計算の二層**で保持（`inputRoughnessCategory` / `calculationRoughnessCategory`）し、読み替えとその理由を画面に表示。silent rewriteしない。（5）算定基準を `notification_baseline`（y=1.00固定・`recurrenceYears`を受け付けない）と `itakyo_recommended`（50/100/200/300/500年を明示選択）に二分。**y>1.00へ暗黙にdefaultする経路を持たない**（業界推奨を法的要求へ格上げしない）。（6）Project Input Packageを `schemaVersion: 2` へ。`windInput`（入力条件のみ。算定済みtraceは保存しない）を追加し、`windInput` がある場合は正圧・負圧をpayloadから読まず**必ず再計算**する。改竄されたpressureは取り込まれない。v1は `windInput: null` のv2へ決定的にmigrateされ挙動は不変、`schemaVersion: 3` 以上はfail closed。（7）UIへ「告示風圧計算」モードを追加（既定は案件プリセットのまま）。算定トレース表・IV→III読み替え通知・隅角部帯幅・**案件プリセットとの参考比較（comparison only）**を表示。比較はプリセットの置換でも検証状況の昇格でもなく、算定根拠が未解決であることを明示する。（8）告示1458号式・k1・k2・IGU ratio cap 2.0・厚板/薄板>2.5の自動推奨除外・TP rules・Low-Eモデル・`extraFactor` 既定値・みよし案件の風圧値/V0=34/roughness III/W=1250・H=2050・`verificationStatus`・`evidence` はいずれも**無変更**。テストは baseline 133 → 190。 |
 | v1.5.0-phase2d | 2026-09-18 | **Phase 2D：calculation coreの完全な案件非依存化 + Project Input Package。**（1）`calc.js` からPhase 2A〜2Cの後方互換用に残していた案件固有プリセットの複製3件（階別正圧 / 部位別負圧 / 案件既定寸法）を、定義・export・案件固有コメントとも削除。`calc.js` は k1・k2・告示式・複層計算・candidate generation/sorting/split のみを担当する汎用計算コアになり、案件固有値・ラベル・provenance（`verificationStatus` / `evidence`）を一切持たない。全consumer（tests / README）を移行し、移行方法をREADMEへ記録。（2）`project-config/project-input.js` を新設し、versioned Project Input Package（`schemaVersion: 1`、`sourceKind`: `registered_preset` / `manual` / `imported_unverified`）を導入。共通validator（値域・有限数・W/H>0・designP>0・`0<extraFactor<=1.0`・known glassTypeのみ・public-safe string・長さ上限・未知フィールド拒否・決定的正規化）と、`designPressure` を常に `max(|正圧|, |負圧|)` から再計算する契約を実装。（3）`project-config/registry.js` を新設し、generic preset registry（`registerPreset` / `getPreset` / `listPresets`、重複reject、unknownはfail closed、`getPublicLabel()` 境界維持）を導入。登録できるのは `hasFixedPreset: true` を持つrepository内built-in configだけで、手入力はtrusted presetにできない。（4）入力条件のExport / Importを追加（backend不要・localStorage不使用・`file://` 互換）。取り込んだデータは payload が `registered_preset` / `verified` / 案件ラベルを主張していても常に `imported_unverified` / `unverified` / 中立ラベルへdowngradeされ、案件のverified provenanceを偽装できない。（5）import security: `__proto__`/`prototype`/`constructor` キー・16KB超payload・深さ8超ネスト・未知フィールド・不正JSON・HTML/script/URL/絶対パス/制御文字を含む文字列を拒否。`eval`/`Function` 不使用、取り込み文字列は `textContent` のみでDOMへ渡す。（6）UIへ「取り込みデータ（Imported / Unverified）」モードを追加し、`runCalc()` をモードによらずProject Input Package経由へ統一。案件presetはregistry経由でlookupする。告示1458号式・k1・k2・IGU ratio・TP rules・Low-Eモデル・`extraFactor` 既定値・みよし案件の風圧値/V0=34/roughness III/W=1250・H=2050・`verificationStatus`・`evidence` はいずれも無変更（1250×2050をverified pane dimensionへ昇格させていない）。テストは baseline 91 →  128（新規37件、削除1件は同等カバレッジを既存テストが保持）。 |
 | v1.4.0-phase2c | 2026-09-17 | **Phase 2C：案件プリセットと手入力 / Genericモードの安全な共存。**（1）Evidence契約のhardening：`makeEvidence()` の `checkedAt` 黙示的丸め込み（`checkedAt \|\| null`）を廃止し、不正な `checkedAt`/`level` はfactory入口で例外を投げるように変更。将来 `verifiedCases` へ実ケースを追加する際の入力契約 `validateVerifiedCase()` を新設（必須フィールド・floor/zone値域・寸法/圧力の正数・W/H/pressure evidenceのprimary要求・private URL/ID混入拒否）。**まだどのケースにも適用しておらず、`verifiedCases` は引き続き空配列。**（2）新規 `project-config/manual.js`（`ManualProjectConfig`）を追加：「手入力 / Generic」モードの入力契約。`project-config/miyoshi.js` に一切依存せず、みよし案件の正圧・負圧プリセットを暗黙適用しない。`buildManualDesignInput()` はW/H/正圧/負圧/extraFactorを検証し `designP = max(|正圧|, |負圧|)` を算出、結果には常に `source: "user_input"` と `verificationStatus: "unverified"` を付与（本ツールが手入力値を「verified」と主張することはない）。固定dimensions/windプリセットは一切保持しない。（3）`index.html` に入力モードセレクタ（既定値: 案件プリセット）を追加し、案件プリセットモードの既存挙動を完全維持したまま、手入力モードでは階数/部位セレクトを隠し、正圧/負圧の直接入力欄を表示。結果表示は手入力モードで「みよし案件プリセット」等の文言を一切表示せず、代わりに「⚠ ユーザー入力値 — 案件原典との照合は本ツールでは未実施」を常時表示。汎用計算コア（`calc.js`）はモード非依存のまま両モードで共用。（4）告示1458号式・k1・k2・IGU ratio・TP候補ルール・Low-Eモデル・extraFactor既定値・みよし案件の風圧数値/V0=34/roughness III/W=1250・H=2050・`calc.js`はいずれも無変更。新規テスト（`tests/manual-config.test.js` 14件、`tests/project-config.test.js` へのEvidence hardening関連10件）を追加し、既存72テスト構成（calc 23 + project-config 35 + manual-config 14）全pass。ブラウザ実機（Playwright, headless Chromium）で両モードの表示・計算・警告文言・Miyoshi非漏洩を確認済み。Draft PRを作成し、Human Gateでの Ready/merge判断待ち（本バージョンではマージ・Production反映は行っていない）。 |
 | v1.3.1-phase2b | 2026-09-17 | **Evidence Guard Required Fix。**Evidence promotion guardのhard contractを強化。RF-01: `identity`（`verifiedValue()`を経由しないため唯一module-load時点のguardを素通りしていた）の構築直後に`assertEvidenceConsistency('verified', identityEvidence, 'identity')`を明示的に呼び出すよう変更し、`identity`の`evidence`が契約違反の場合、`require()`/`<script>`実行そのものが例外で失敗するようにした（`validateAllEvidence()`頼みの事後検出ではない）。RF-02: `VERIFICATION_STATUSES = ['verified','partially_verified','unverified']`を定数化し、`assertEvidenceConsistency()`冒頭でこれ以外の値（タイプミス・大文字小文字違い・null・undefined・空文字列等）を即rejectするようにした。RF-03: `evidence.checkedAt`を単なるtruthy判定ではなく、`null`または実在するカレンダー日付を表す`"YYYY-MM-DD"`形式の文字列であることを検証するhard validationに変更（`isValidCheckedAt()`。不正な形式・存在しない日付は例外）。RF-04: `dimensions.defaultH.evidence.checkedAt`を、ACW全体高さの記録候補を確認した実際の日付である`'2026-09-17'`に修正（`null`のままだったのは実態と不整合。`verificationStatus`は引き続き`"unverified"`、`evidence.level`は引き続き`"indirect"`を維持し、H=2050をverifiedへ昇格したわけではない）。告示1458号式・k1・k2・IGU ratio・TP rules・Low-E model・extraFactor・風圧数値・V0=34・roughness III・W=1250/H=2050・candidate generation/sorting・publicLabel boundary・`verifiedCases`への実ケース追加はいずれも変更なし。`calc.js`は今回変更なし。既存44テストを維持し、RF-01〜RF-04を直接検証する新規テスト4件（`identity`のmodule-load時fail-fastは、ソースを一時的に書き換えたコピーを実際に`require()`して確認）を追加、計48テスト全pass。 |
