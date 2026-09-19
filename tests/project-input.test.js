@@ -736,3 +736,38 @@ test('AC-05: 告示風圧計算はregistered presetを名乗れない', () => {
     /must have provenance.verificationStatus "unverified"/
   );
 });
+
+test('AC-15 / AC-18: registered_preset は windInput を持てない（preset値の上書き防止）', () => {
+  // windInput があると正圧・負圧は算定値で上書きされる。
+  // registered_preset がこれを持てると、presetの値が計算値で置換されてしまう。
+  // そのguardを直接固定する（独立verifierが未カバーを検出）。
+  const preset = PresetRegistry.getPreset('miyoshi');
+  const base = ProjectInput.fromPreset(preset, {
+    floorKey: '2', zoneKey: 'general',
+    widthMm: 1250, heightMm: 2050, glassType: 'fl_single', extraFactor: 1.0
+  });
+
+  assert.throws(
+    () => ProjectInput.createProjectInput(Object.assign({}, base, {
+      schemaVersion: 2, windInput: validWindInput()
+    })),
+    /windInput is only allowed for sourceKind/
+  );
+
+  assert.throws(
+    () => ProjectInput.createProjectInput(validPackage({
+      schemaVersion: 2, sourceKind: 'manual', windInput: validWindInput()
+    })),
+    /windInput is only allowed for sourceKind/
+  );
+
+  // 許可されるのは notification_calculation と imported_unverified のみ
+  assert.deepEqual(
+    ProjectInput.WIND_INPUT_SOURCE_KINDS,
+    ['notification_calculation', 'imported_unverified']
+  );
+
+  // presetの値は算定値で置換されない
+  assert.equal(base.positivePressure, preset.getPositivePressure('2'));
+  assert.equal(base.windInput, null);
+});

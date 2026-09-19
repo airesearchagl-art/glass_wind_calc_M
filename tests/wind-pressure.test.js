@@ -647,3 +647,53 @@ test('AC-02: wind-pressure.js は eval / Function / DOM を使わない', () => 
     assert.equal(src.includes(token), false, 'wind-pressure.js に ' + token + ' があってはならない');
   }
 });
+
+/* ============================================================
+   Independent verification repair（Phase 2E Wave 8）
+============================================================ */
+
+test('AC-14: 正圧の外圧ピーク係数は Cpe × Gpe（積）であることを絶対値で固定', () => {
+  // 独立verifierが「* を + に変えても全testが通る」ことを検出したため、
+  // 組合せ規則そのものを絶対値で固定する。
+  // 積と和では設計風圧が約40%変わる（安全性に直結する）。
+  const t = W.calculateWindPressure(baseInput());
+
+  // 組合せ規則（積であること）
+  assert.equal(t.positive.externalPeakCoefficient, t.positive.Cpe * t.positive.Gpe);
+  assert.notEqual(t.positive.externalPeakCoefficient, t.positive.Cpe + t.positive.Gpe);
+
+  // 既知の入力に対する絶対値で固定する
+  //   H=14.2 > 5, Z=10 > 5, α=0.20 → Cpe = (10/14.2)^0.4
+  //   Z=10 は 5<Z<40 → Gpe = 3.1 + (2.3-3.1)*(10-5)/(40-5)
+  const expectedCpe = Math.pow(10 / 14.2, 2 * 0.20);
+  const expectedGpe = 3.1 + (2.3 - 3.1) * ((10 - 5) / (40 - 5));
+  approx(t.positive.Cpe, expectedCpe, 'Cpe:');
+  approx(t.positive.Gpe, expectedGpe, 'Gpe:');
+  approx(t.positive.externalPeakCoefficient, expectedCpe * expectedGpe, '外圧ピーク係数（積）:');
+
+  // 最終的な正圧も絶対値で固定する（qBar × Cf まで通して確認）
+  //   閉鎖型・外圧正 → 内圧 -0.5 なので Cf = Cpe*Gpe + 0.5
+  const expectedCf = expectedCpe * expectedGpe + 0.5;
+  approx(t.positive.Cf, expectedCf, 'Cf+:');
+  approx(t.positive.pressure, 503.08024004410464 * expectedCf, '正圧:');
+
+  // 和であればこの値から大きく外れる（mutantが確実に落ちる余裕があること）
+  const wrongIfSum = 503.08024004410464 * (expectedCpe + expectedGpe + 0.5);
+  assert.ok(
+    Math.abs(wrongIfSum - t.positive.pressure) > 500,
+    '積と和の差が十分大きく、取り違えを検出できること'
+  );
+});
+
+test('AC-03: 分岐ラベルの文字列がHTMLタグとして解釈されうる形を含む（エスケープ必須の記録）', () => {
+  // '5<Z<40 (linear interpolation)' のように `<` の直後に英字が続くため、
+  // 表示側は必ずエスケープしなければならない（index.html の escHtml）。
+  // この性質が変わったら表示側の前提も見直すこと。
+  const interpolated = W.calcGpePositive(22.5, 'III');
+  assert.match(interpolated.branch, /^5<Z<40/);
+  assert.ok(/<[A-Za-z]/.test(interpolated.branch), 'タグ様の並びを含む');
+
+  const negInterp = W.calcNegativeExternalPeak(52.5, 'general');
+  assert.match(negInterp.branch, /^45<H<60/);
+  assert.ok(/<[A-Za-z]/.test(negInterp.branch), 'タグ様の並びを含む');
+});

@@ -92,8 +92,9 @@ Research Gate                  : PASS（ESTABLISHED_FROM_HUMAN_SUPPLIED_PRIMARY_
 memory-only implementation     : 0件
 websearch-snippet implementation: 0件
 known-answer（供給4値）         : PASS（bit-exactで一致。独立再計算で確認）
-mutation check（wind core）     : PASS（17 mutantすべてkill）
-mutation check（integration）   : PASS（6 mutantすべてkill）
+mutation check（wind core）     : 選定17 mutantをkill（網羅的ではない。独立verifierが38 mutantを追加実施）
+mutation check（integration）   : 選定6 mutantをkill（同上。verifierが15 mutantを追加実施）
+mutation check（verifier指摘）   : 当初survivalした5件を修正後すべてkill（Wave 8）
 browser（4 mode / file://）     : PASS（JS error 0）
 privacy sweep                  : PASS（新規URLは公的一次資料8件のみ）
 protected invariants           : PASS（再実測で不変）
@@ -149,8 +150,24 @@ DECISIONS.md を参照。
 ## Files changed
 
 ```text
-.agent-run/LR-20260919-GLASS-P2E/*  (新規7ファイル)
-.agent-run/LR-20260918-GLASS-P2D/*  (post-merge closeoutのみ。snapshot / digestは不変)
+新規:
+  wind-pressure.js                    汎用風圧算定コア + trace
+  tests/wind-pressure.test.js         風圧算定のknown-answer / 境界 / 単位 / 検証状態分離
+
+変更:
+  index.html                          告示風圧計算モード / trace表示 / 参考比較 / HTMLエスケープ
+  project-config/project-input.js     PIP v2（windInput / migration / 再計算契約）
+  tests/project-input.test.js         PIP v2統合・migration・import securityのテスト
+  tests/ui-mode-separation.test.js    UI契約テスト（notification mode / 自動推定の不在）
+  README.md                           Phase 2E同期・逆算記述の訂正
+
+Run Artifact:
+  .agent-run/LR-20260919-GLASS-P2E/*  (新規7ファイル)
+  .agent-run/LR-20260918-GLASS-P2D/*  (post-merge closeoutのみ。snapshot / digestは不変)
+
+無変更（再実測で確認）:
+  calc.js / project-config/miyoshi.js / manual.js / registry.js
+  tests/calc.test.js / project-config.test.js / manual-config.test.js
 ```
 
 ## Remaining tasks
@@ -216,7 +233,11 @@ repair_strategies          : 0 / 3
 ```
 
 
-## BLOCKED — escalation summary
+## BLOCKED — escalation summary（Wave 1時点の記録。D-004で解除済み）
+
+> **注意: 以下はWave 1でBLOCKEDだった時点の記録である。**
+> Human提供Evidence（D-004）により解除され、Wave 2〜8を実施済み。
+> 現在の実装状況・テスト数は本ファイル冒頭および「Wave 2-7 実施サマリ」を参照。
 
 ```yaml
 blocked_at: Wave 1 (Official-source Research Gate)
@@ -273,3 +294,39 @@ Phase 2D security boundaryはいずれも無変更。
 従来は顕在化しなかったが、風圧算定値は非整数になるため
 export前 `1967` / import後 `1967.2571022503244` と表示が食い違った。
 **値は同一で、表示のみの不具合**。表示層で丸めるよう修正し、roundtripの表示が一致することを確認した。
+
+## Wave 8 — Independent Verification repair
+
+独立verifier（別context）の判定: **PASS WITH FINDINGS**。
+安全性に関わるformula mismatch・trust-boundary bypass・privacy漏洩はいずれも検出されず、
+供給known-answer 4値はverifier側の独立計算でもbit-exactに再現された。
+指摘11件すべてに対応した。
+
+| # | 指摘 | 重大度 | 対応 |
+|---|---|---|---|
+| 1 | trace分岐ラベル `5<Z<40` がHTMLタグとして解釈され、ラベルと閉じタグが消失 | **HIGH** | `escHtml()` を導入し、trace表示の全interpolationをエスケープ。実機で復元を確認 |
+| 2 | `Cpe × Gpe` を `+` に変えても全testが通る（設計風圧が約41%変化） | **HIGH** | 組合せ規則と正圧を絶対値で固定するtestを追加 |
+| 3 | `WIND_INPUT_SOURCE_KINDS` に `registered_preset` を足してもtestが通る | MEDIUM | preset値の上書き防止guardを直接固定するtestを追加 |
+| 4 | index.htmlのruntime分岐（windInput引き継ぎ / recurrenceYears条件）が未カバー | MEDIUM | 2構文をソース契約testで固定 |
+| 5 | TASK_QUEUEのAC表がRUN_STATEと矛盾（AC-09/16/18がBLOCKED時点のまま） | MEDIUM | 実態へ同期 |
+| 6 | RUN_STATEの「Files changed」がRun Artifactのみ。BLOCKEDブロックに履歴マーカーなし | LOW | 実ファイル一覧へ更新し、履歴である旨を明示 |
+| 7 | mutation checkの「PASS」表現が網羅性を過大に示唆 | LOW | 「選定N件をkill（網羅的ではない）」へ修正 |
+| 8 | `eavesHeightM <= buildingHeightM` / 高さ上限が一次資料の規則ではない | LOW | EVIDENCE §4.5bへ「ツール側の入力検証」として明記 |
+| 9 | 参考比較が無関係な建物・取り込みpackageにも常時表示される | LOW | 明示選択（`inp-wind-compare`）でgate |
+| 10 | index.html内で `H` がガラス高さ(mm)と平均高さ(m)の二義 | INFO | 混用は発生していない。記録のみ |
+| 11 | windInputを持たない取り込みpackageはpayload圧力を保持 | INFO | Phase 2Dからの既定contract。Phase 2Eの退行ではない。記録のみ |
+
+### 検証
+
+指摘1〜4の修正後、当初survivalした5 mutant（積/和、sourceKind拡張、windInput引き継ぎ削除、
+recurrenceYears無条件送信、エスケープ除去）を再実行し、**すべてkill**されることを確認した。
+テストは 190 → 197 pass / 0 fail。ソースは各mutation後に復元し、一致を確認済み。
+
+### #1 が重要だった理由
+
+計算値そのものは正しかったが、「この係数は端点間を補間した値である」という
+**traceabilityの核心にあたる情報が画面から消えていた**。AC-03が要求するのは数値ではなく
+導出の追跡可能性であり、表示欠落はその要件に直接反する。
+また当時は攻撃者制御文字列がtraceへ到達しないためXSSではなかったが、
+エスケープ境界が存在しない実装は文字列ソースが1つ変わるだけで脆弱になるため、
+値の出どころに関わらず常時エスケープする方針へ変更した。

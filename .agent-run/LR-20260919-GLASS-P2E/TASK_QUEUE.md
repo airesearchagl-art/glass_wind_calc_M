@@ -95,19 +95,19 @@ W7-5 Completion Report                                             DONE
 | AC-04 | Formula vs Input verification separation | DONE |
 | AC-05 | Notification mode | DONE |
 | AC-06 | Project Input integration | DONE |
-| AC-07 | Design pressure contract | PASS（無変更） |
+| AC-07 | Design pressure contract | PASS（max(|正圧|,|負圧|) を維持。告示風圧計算経路でも同契約） |
 | AC-08 | Replay | DONE |
-| AC-09 | Migration | PASS（vacuously。PIP v1無変更） |
+| AC-09 | Migration | PASS（PIP v1→v2の決定的migration。v1挙動不変、v1+windInput拒否、v3以上fail closed） |
 | AC-10 | Miyoshi diagnostic | DONE |
-| AC-11 | No automatic Z inference | PASS（vacuously。推測を実装していない） |
+| AC-11 | No automatic Z inference | PASS（粗度区分・階→Z・自治体別V0・隅角部判定をいずれも実装せず明示入力。階由来キーは未知フィールドとして拒否） |
 | AC-12 | Error boundary | DONE |
 | AC-13 | Unit discipline | DONE |
 | AC-14 | Known-answer tests | DONE |
-| AC-15 | Miyoshi regression | PASS（無変更） |
-| AC-16 | Existing tests（133+） | PASS（133 pass / 0 fail、削除なし） |
+| AC-15 | Miyoshi regression | PASS（1756.09756097561 / 1463.4146341463415 / Manual 1400 を再実測。preset値・statusは無変更） |
+| AC-16 | Existing tests（133+） | PASS（baseline 133 → 197 pass / 0 fail、テスト削除なし） |
 | AC-17 | Browser | DONE |
-| AC-18 | Security | PASS（source無変更） |
-| AC-19 | Privacy | PASS（official public source URLのみ） |
+| AC-18 | Security | PASS（改竄pressureの再計算による無効化、trace到達値は数値/固定列挙のみ、HTMLエスケープ境界、Phase 2D boundary維持） |
+| AC-19 | Privacy | PASS（新規URLは公的一次資料8件のみ。private識別子なし） |
 | AC-20 | Documentation | DONE |
 
 ## Next Action

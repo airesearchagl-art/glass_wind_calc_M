@@ -285,7 +285,11 @@ Z = 地上からのガラス／壁部分の高さ [m]  — 明示的入力
 
 #### 正圧側 外圧ピーク係数
 
+外圧ピーク係数は **`CpePositive × GpePositive`（積）** である。
+
 ```text
+externalPeakPositive = CpePositive × GpePositive
+
 CpePositive:
   H <= 5                    -> 1.0
   H >  5 かつ Z <= 5        -> (5 / H)^(2α)
@@ -366,6 +370,20 @@ Phase 2E v1 では自治体別V0 lookupを実装しない。V0は明示的入力
 Miyoshi diagnosticでは、既にverified/primaryである2つの事実
 （`V0 = 34 m/s`、`roughness III`）のみregistered presetから投入してよい。
 それ以外のMiyoshi風条件は現時点でverifiedではないため自動投入しない。
+
+### 4.5b ツール側の入力検証（一次資料の規則ではない）
+
+以下は**一次資料が定める算定規則ではなく、本ツールが入力誤りを弾くために設けた境界**である。
+いずれもfail closed（拒否するだけで、黙って値を調整しない）。
+
+| 検証 | 値 | 位置づけ |
+|---|---|---|
+| `V0` のhard bounds | 1 〜 200 m/s | §4.5が認める「保守的に選んだhard bounds」。範囲内でもverifiedを意味しない |
+| 高さ系のhard bounds | 0 < x ≤ 2000 m | 実在しない値・入力誤りを弾くためのツール側境界 |
+| `eavesHeightM <= buildingHeightM` | — | 物理的整合性のチェック。**一次資料が定めた規則ではない** |
+
+**一次資料が定めていない関係は発明していない。** 特に `Z <= H` のような上限関係は課していない
+（§4.3の指示どおり）。`Z = 500, H = 10` のような入力も算定式どおりに処理される。
 
 ### 4.6 検証状態の分離（§13）
 

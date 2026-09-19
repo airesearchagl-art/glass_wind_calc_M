@@ -645,6 +645,17 @@
       </div>
 
       <div class="mode-field mode-field-notification form-group">
+        <label>案件プリセットとの参考比較</label>
+        <select id="inp-wind-compare">
+          <option value="on" selected>表示する（参考比較 / comparison only）</option>
+          <option value="off">表示しない</option>
+        </select>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+          無関係な建物を算定している場合は「表示しない」を選んでください。比較を表示してもプリセット値は置き換わりません。
+        </div>
+      </div>
+
+      <div class="mode-field mode-field-notification form-group">
         <label>建物短辺 b（任意 / 隅角部帯幅の表示用）</label>
         <div class="input-unit">
           <input type="number" id="inp-wind-short-side" value="" step="0.1" min="0" placeholder="未入力可">
@@ -940,6 +951,22 @@ function fmt(n, d = 0) {
    presetの置換でも検証状況の昇格でもない。
 ============================================================ */
 
+// innerHTMLへ差し込む文字列のエスケープ。
+//
+// trace中の分岐ラベルには '5<Z<40 (linear interpolation)' のように
+// `<` の直後に英字が続く文字列がある。これを未エスケープでinnerHTMLへ渡すと
+// HTMLパーサが開始タグとして解釈し、ラベルと閉じタグが飲み込まれる
+// （= 「補間した」という最も重要な情報が画面から消える）。
+//
+// 現在trace到達値はモジュール内定数と検証済み列挙のみだが、
+// エスケープ境界を持たない実装は文字列ソースが1つ変わるだけで脆弱になるため、
+// 値の出どころに関わらず常にエスケープする。
+function escHtml(value) {
+  return String(value).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
 // trace値の表示整形。単位ごとに桁数を変える（内部値は丸めない）。
 function fmtTrace(value, unit) {
   if (typeof value !== 'number') return String(value);
@@ -952,6 +979,11 @@ function fmtTrace(value, unit) {
 // presetを置換せず、差を可視のまま示す。
 function renderMiyoshiComparisonHtml(trace) {
   if (!trace) return '';
+  // 参考比較は明示的に選択されたときだけ表示する。
+  // 無関係な建物の算定や、他者から取り込んだpackageに対して
+  // 常に案件プリセットとの比較を出すのは適切でない。
+  var compareSel = document.getElementById('inp-wind-compare');
+  if (compareSel && compareSel.value !== 'on') return '';
   var preset;
   try {
     preset = PresetRegistry.getPreset('miyoshi');
@@ -985,7 +1017,7 @@ function renderMiyoshiComparisonHtml(trace) {
       </tbody>
     </table>
     <div style="font-size:11px;color:var(--text3);margin-top:6px;">
-      比較に用いた入力: V0=${trace.inputs.V0} m/s ／ 粗度区分=${trace.inputs.inputRoughnessCategory} ／ H=${fmt(trace.normalized.meanHeightH, 2)} m ／ Z=${trace.inputs.evaluationHeightM} m ／ ${trace.inputs.buildingType === 'closed' ? '閉鎖型' : '開放型'}。
+      比較に用いた入力: V0=${escHtml(trace.inputs.V0)} m/s ／ 粗度区分=${escHtml(trace.inputs.inputRoughnessCategory)} ／ H=${fmt(trace.normalized.meanHeightH, 2)} m ／ Z=${escHtml(trace.inputs.evaluationHeightM)} m ／ ${trace.inputs.buildingType === 'closed' ? '閉鎖型' : '開放型'}。
       これらは<strong>ユーザーが入力した仮定</strong>であり、案件原典で確認された値ではありません。
     </div>`;
 }
@@ -996,32 +1028,32 @@ function renderWindTraceHtml(trace) {
   var rows = trace.trace.map(function (step) {
     return `
       <tr>
-        <td>${step.step}</td>
-        <td style="font-family:ui-monospace,monospace;font-size:11px;">${step.formula}</td>
-        <td>${fmtTrace(step.value, step.unit)}</td>
-        <td>${step.unit}</td>
+        <td>${escHtml(step.step)}</td>
+        <td style="font-family:ui-monospace,monospace;font-size:11px;">${escHtml(step.formula)}</td>
+        <td>${escHtml(fmtTrace(step.value, step.unit))}</td>
+        <td>${escHtml(step.unit)}</td>
       </tr>`;
   }).join('');
 
   var subst = trace.normalized.roughnessSubstitutionApplied ? `
     <div class="notice" style="margin-bottom:10px;border-color:rgba(245,158,11,0.4);">
-      入力した地表面粗度区分は <strong>${trace.inputs.inputRoughnessCategory}</strong> ですが、計算には
-      <strong>${trace.normalized.calculationRoughnessCategory}</strong> の数値（Zb=${trace.normalized.Zb} / ZG=${trace.normalized.ZG} / α=${trace.normalized.alpha}）を用いています。<br>
-      ${trace.normalized.roughnessSubstitutionNote}
+      入力した地表面粗度区分は <strong>${escHtml(trace.inputs.inputRoughnessCategory)}</strong> ですが、計算には
+      <strong>${escHtml(trace.normalized.calculationRoughnessCategory)}</strong> の数値（Zb=${escHtml(trace.normalized.Zb)} / ZG=${escHtml(trace.normalized.ZG)} / α=${escHtml(trace.normalized.alpha)}）を用いています。<br>
+      ${escHtml(trace.normalized.roughnessSubstitutionNote)}
     </div>` : '';
 
   var geometry = trace.geometry ? `
     <div style="font-size:11px;color:var(--text3);margin-top:6px;">
       隅角部の帯幅: 0.1 × min(b, 2H) = 0.1 × ${fmt(trace.geometry.aPrime, 2)} =
       <strong>${fmt(trace.geometry.cornerStripWidth, 2)} m</strong>
-      （b=${trace.inputs.buildingShortSideM} m。図面からの自動判定は行っていません）
+      （b=${escHtml(trace.inputs.buildingShortSideM)} m。図面からの自動判定は行っていません）
     </div>` : (trace.inputs.zone === 'corner' ? `
     <div style="font-size:11px;color:var(--text3);margin-top:6px;">
       隅角部として計算しています。建物短辺 b を入力すると帯幅を表示します。
     </div>` : '');
 
   return `
-    <div class="sec-title" style="margin-top:18px;">風圧算定トレース（${trace.basis.note}）</div>
+    <div class="sec-title" style="margin-top:18px;">風圧算定トレース（${escHtml(trace.basis.note)}）</div>
     ${subst}
     <div class="meta-chip" style="display:inline-block;margin-bottom:8px;">
       式の検証状況: <span>一次資料で確認済み</span>

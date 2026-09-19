@@ -248,3 +248,45 @@ test('AC-06: wind-pressure.js がcalc.jsの後・project-input.jsの前に読み
   assert.ok(calcIdx < windIdx, 'calc.js が wind-pressure.js より先');
   assert.ok(windIdx < piIdx, 'wind-pressure.js が project-input.js より先');
 });
+
+/* ============================================================
+   Independent verification repair（Phase 2E Wave 8）
+   index.html のruntime分岐をソース契約として固定する。
+   （node:testはUIを実行しないため、変更されれば落ちる形で書く）
+============================================================ */
+
+test('AC-03: trace表示がHTMLエスケープを通している', () => {
+  const html = readIndexHtml();
+  assert.match(html, /function escHtml\(/, 'escHtml が定義されていること');
+  // trace行の4セルすべてがescHtmlを通る
+  assert.match(html, /<td>\$\{escHtml\(step\.step\)\}<\/td>/);
+  assert.match(html, /\$\{escHtml\(step\.formula\)\}/);
+  assert.match(html, /\$\{escHtml\(fmtTrace\(step\.value, step\.unit\)\)\}/);
+  assert.match(html, /<td>\$\{escHtml\(step\.unit\)\}<\/td>/);
+  // 未エスケープの生interpolationが残っていないこと
+  assert.doesNotMatch(html, /<td>\$\{step\.formula\}<\/td>/);
+  assert.doesNotMatch(html, /\$\{trace\.normalized\.roughnessSubstitutionNote\}/);
+});
+
+test('AC-05: recurrenceYears は itakyo_recommended のときだけ送られる', () => {
+  const html = readIndexHtml();
+  const fnStart = html.indexOf('function buildWindInputFromUI');
+  const fnBody = html.slice(fnStart, html.indexOf('\n}', fnStart));
+  // 条件付きであること（無条件に送ると notification_baseline が例外になる）
+  assert.match(fnBody, /if \(basis === 'itakyo_recommended'\)[\s\S]{0,200}recurrenceYears/);
+  // recurrenceYears の代入がその条件の外に無いこと
+  const assignments = (fnBody.match(/windInput\.recurrenceYears\s*=/g) || []).length;
+  assert.equal(assignments, 1, 'recurrenceYears の代入は1箇所だけ');
+});
+
+test('AC-08: 取り込みpackageの windInput が再構築時に引き継がれる', () => {
+  const html = readIndexHtml();
+  // これが失われるとimport後にtraceを再計算できず、replayが成立しない
+  assert.match(html, /if \(importedPackage\.windInput\) \{\s*\n?\s*rebuilt\.windInput = importedPackage\.windInput;/);
+});
+
+test('AC-10: 参考比較は明示選択したときだけ表示される', () => {
+  const html = readIndexHtml();
+  assert.match(html, /id="inp-wind-compare"/);
+  assert.match(html, /compareSel\.value !== 'on'/);
+});
