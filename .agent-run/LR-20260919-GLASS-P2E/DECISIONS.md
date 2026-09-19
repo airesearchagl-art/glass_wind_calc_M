@@ -103,3 +103,35 @@
   「一部は正しい」テーブルになり、実装しないことより危険である（D-003と同じ判断基準）。
 - **検証**: 有限 / 正 / 保守的hard boundsを文書化して適用する。
   式がverifiedであることを理由にV0をverified扱いしない。
+
+## D-008 — Project Input Package を v2 へ上げ、traceではなく windInput を保存する
+
+- **決定**: `schemaVersion` を 2 へ上げ、`windInput`（告示風圧計算の入力条件）を任意フィールドとして追加する。
+  **算定済みのtrace・中間値・結果はpackageへ保存しない。**
+- **理由**:
+  1. traceを保存すると「payloadが主張する中間値」を信用する経路ができる。
+     Phase 2Dが `designPressure` に対して確立した「常に再計算し、主張値を信用しない」契約と
+     同じ思想を風圧側にも適用する（AC-18）。
+  2. 入力だけを保存すれば、traceは常に検証済みの式から導出される。
+     改竄された正圧・負圧・中間値は構造的に取り込まれない。
+  3. payloadが小さくなり、replayが「再現」ではなく「再計算」になる（AC-08の本来の意味）。
+- **実装**:
+  - `windInput` がある場合、`positivePressure` / `negativePressure` は
+    payload値を**読まず** wind-pressure.js の算定結果で決定する。
+  - `windTraceFor(pkg)` が必要時に `windInput` からtraceを再計算する。
+  - `windInput` を持てるのは `notification_calculation` と `imported_unverified` のみ。
+    `registered_preset` / `manual` は持てない。
+  - `notification_calculation` は `windInput` 必須。
+- **migration（AC-09）**:
+  - v1 package は受理し、`windInput: null` のv2として決定的に正規化する。
+  - v1 package が `windInput` を持つことは矛盾なので拒否する。
+  - 3以上の未知versionは silent reinterpretation せず fail closed で拒否する。
+  - v1の既存export/import挙動（計算値・candidate一覧）は変わらない。
+
+## D-009 — 取り込んだ風圧packageもtrust downgradeを受ける
+
+- **決定**: import時に `sourceKind` は従来どおり `imported_unverified` へ強制downgradeされるが、
+  `windInput` は保持し、traceは再計算できるようにする。
+- **理由**: 式のverified性と入力のverified性は独立である（AC-04）。
+  取り込んだ風条件はunverifiedだが、それを**検証済みの式**で評価した結果を表示することには意味がある。
+  逆に、取り込んだpackageがverified provenanceや案件ラベルを主張しても採用しない。

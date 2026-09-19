@@ -55,10 +55,13 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (global) {
   'use strict';
 
-  var SCHEMA_VERSION = 1;
-  var SUPPORTED_SCHEMA_VERSIONS = [1];
+  // Phase 2Eで v2 へ。v2は windInput（告示風圧計算の入力条件）を任意で保持する。
+  var SCHEMA_VERSION = 2;
+  var SUPPORTED_SCHEMA_VERSIONS = [1, 2];
 
-  var SOURCE_KINDS = ['registered_preset', 'manual', 'imported_unverified'];
+  var SOURCE_KINDS = [
+    'registered_preset', 'manual', 'notification_calculation', 'imported_unverified'
+  ];
   var VERIFICATION_STATUSES = ['verified', 'partially_verified', 'unverified'];
 
   // package top-levelで許可されるキー（これ以外はreject: AC-07 unknown field）
@@ -66,9 +69,26 @@
     'schemaVersion', 'sourceKind', 'sourceId',
     'widthMm', 'heightMm',
     'positivePressure', 'negativePressure', 'designPressure',
-    'glassType', 'extraFactor', 'provenance'
+    'glassType', 'extraFactor', 'provenance',
+    'windInput'
   ];
   var ALLOWED_PROVENANCE_KEYS = ['publicLabel', 'verificationStatus', 'note'];
+
+  /**
+   * v2の windInput で許可されるキー（wind-pressure.js の入力契約と一致させる）。
+   *
+   * package内には**算定済みのtraceを保存しない**。保存するのは入力だけで、
+   * traceは常に再計算する。理由は designPressure と同じで、
+   * payloadが主張する中間値・結果を信用しないため（AC-18）。
+   */
+  var WIND_INPUT_KEYS = [
+    'V0', 'roughnessCategory', 'buildingHeightM', 'eavesHeightM',
+    'evaluationHeightM', 'buildingType', 'zone', 'buildingShortSideM',
+    'basis', 'recurrenceYears'
+  ];
+
+  /** windInput を保持できる sourceKind。 */
+  var WIND_INPUT_SOURCE_KINDS = ['notification_calculation', 'imported_unverified'];
 
   // 安全境界（AC-07）
   var MAX_PAYLOAD_BYTES = 16 * 1024;   // 16KB
@@ -89,6 +109,10 @@
   ];
 
   var IMPORTED_PUBLIC_LABEL = '取り込みデータ (Imported / Unverified)';
+  var NOTIFICATION_PUBLIC_LABEL = '告示風圧計算 (Notification / Calculated)';
+  var NOTIFICATION_NOTE =
+    '告示1458号系算定・板硝子協会推奨に基づく算定値。式は一次資料で確認しているが、' +
+    '入力した風条件（V0・粗度区分・高さ・評価高さ等）は本ツールでは検証していない。';
   var IMPORTED_NOTE = '外部から取り込んだ入力条件。本ツールは内容を検証しておらず、案件原典との照合も行っていない。';
 
   // ------------------------------------------------------------
@@ -110,6 +134,21 @@
 
   function knownGlassTypes() {
     return Object.keys(resolveGlassCalc().GLASS_TYPES);
+  }
+
+  // 依存解決（wind-pressure.js）。windInputを持つpackageでのみ必要になる。
+  function resolveWindPressure() {
+    if (global && global.WindPressure) {
+      return global.WindPressure;
+    }
+    if (typeof require === 'function') {
+      try {
+        return require('../wind-pressure.js');
+      } catch (e) {
+        /* fallthrough */
+      }
+    }
+    throw new Error('ProjectInput: WindPressure (wind-pressure.js) is required but not available');
   }
 
   // 依存解決（project-config/registry.jsのpreset registry）
@@ -201,12 +240,18 @@
     }
     assertAllowedKeys(raw, ALLOWED_TOP_LEVEL_KEYS, 'project input package');
 
-    // schemaVersion
+    // schemaVersion（未知バージョンはfail closed: AC-09）
     if (SUPPORTED_SCHEMA_VERSIONS.indexOf(raw.schemaVersion) === -1) {
       throw new Error(
         'unsupported schemaVersion: ' + JSON.stringify(raw.schemaVersion) +
         ' (supported: ' + SUPPORTED_SCHEMA_VERSIONS.join(', ') + ')'
       );
+    }
+
+    // v1 → v2 migration（決定的。v1は windInput を持たないので null になる）
+    var incomingVersion = raw.schemaVersion;
+    if (incomingVersion === 1 && raw.windInput !== undefined && raw.windInput !== null) {
+      throw new Error('schemaVersion 1 package must not carry windInput');
     }
 
     // sourceKind
@@ -239,9 +284,44 @@
     var widthMm = requirePositiveInRange(raw.widthMm, 'widthMm', MAX_DIMENSION_MM);
     var heightMm = requirePositiveInRange(raw.heightMm, 'heightMm', MAX_DIMENSION_MM);
 
+    // windInput（v2。告示風圧計算の入力条件）
+    //
+    // packageには**入力だけ**を保存し、算定済みのtrace・中間値は保存しない。
+    // windInputがある場合、正圧・負圧は payloadの主張値ではなく
+    // wind-pressure.js の算定結果で**必ず上書きする**（designPressureと同じ思想）。
+    // したがって改竄されたpressure値は取り込まれない（AC-18）。
+    var windInput = null;
+    var windTrace = null;
+    if (raw.windInput !== undefined && raw.windInput !== null) {
+      if (WIND_INPUT_SOURCE_KINDS.indexOf(sourceKind) === -1) {
+        throw new Error(
+          'windInput is only allowed for sourceKind ' + JSON.stringify(WIND_INPUT_SOURCE_KINDS) +
+            ' (got ' + JSON.stringify(sourceKind) + ')'
+        );
+      }
+      if (typeof raw.windInput !== 'object' || Array.isArray(raw.windInput)) {
+        throw new Error('windInput must be an object');
+      }
+      assertAllowedKeys(raw.windInput, WIND_INPUT_KEYS, 'windInput');
+      // wind-pressure.js 側が値域・型・列挙値・NaN/Infinityをfail closedで検証する。
+      windTrace = resolveWindPressure().calculateWindPressure(raw.windInput);
+      windInput = {};
+      for (var wi = 0; wi < WIND_INPUT_KEYS.length; wi++) {
+        var wk = WIND_INPUT_KEYS[wi];
+        if (raw.windInput[wk] !== undefined) windInput[wk] = raw.windInput[wk];
+      }
+    } else if (sourceKind === 'notification_calculation') {
+      throw new Error('sourceKind "notification_calculation" requires windInput');
+    }
+
     // 圧力（符号は強制しないが、有限かつ絶対値が上限内であること）
-    var positivePressure = requireFiniteNumber(raw.positivePressure, 'positivePressure');
-    var negativePressure = requireFiniteNumber(raw.negativePressure, 'negativePressure');
+    // windInputがある場合は算定値を正とし、payload側の主張値を読まない。
+    var positivePressure = windTrace
+      ? windTrace.positive.pressure
+      : requireFiniteNumber(raw.positivePressure, 'positivePressure');
+    var negativePressure = windTrace
+      ? windTrace.negative.pressure
+      : requireFiniteNumber(raw.negativePressure, 'negativePressure');
     if (Math.abs(positivePressure) > MAX_PRESSURE || Math.abs(negativePressure) > MAX_PRESSURE) {
       throw new Error('pressure magnitude exceeds the allowed maximum (' + MAX_PRESSURE + ')');
     }
@@ -323,7 +403,8 @@
         publicLabel: publicLabel,
         verificationStatus: verificationStatus,
         note: note
-      }
+      },
+      windInput: windInput
     };
   }
 
@@ -412,9 +493,66 @@
   // ------------------------------------------------------------
 
   /** deterministic serialization（キー順固定・2space indent）。 */
+  /**
+   * 告示風圧計算（notification_calculation）から入力packageを組み立てる。
+   *
+   * windInputだけを保持し、正圧・負圧・designPressureは
+   * wind-pressure.js が算定した値で必ず上書きされる（validateAndNormalize内）。
+   *
+   * 式は一次資料で検証済みだが、ユーザーが入力した風条件はunverifiedのままである
+   * （AC-04）。したがってprovenanceは 'unverified' を名乗る。
+   */
+  function fromWindCalculation(input) {
+    if (!input || typeof input !== 'object') {
+      throw new Error('fromWindCalculation(): input is required');
+    }
+    if (!input.windInput || typeof input.windInput !== 'object') {
+      throw new Error('fromWindCalculation(): windInput is required');
+    }
+    return validateAndNormalize({
+      schemaVersion: SCHEMA_VERSION,
+      sourceKind: 'notification_calculation',
+      sourceId: null,
+      widthMm: input.widthMm,
+      heightMm: input.heightMm,
+      // windInputから再計算されるためplaceholder
+      positivePressure: 0,
+      negativePressure: 0,
+      designPressure: 0,
+      glassType: input.glassType,
+      extraFactor: input.extraFactor === undefined ? 1.0 : input.extraFactor,
+      provenance: {
+        publicLabel: NOTIFICATION_PUBLIC_LABEL,
+        verificationStatus: 'unverified',
+        note: NOTIFICATION_NOTE
+      },
+      windInput: input.windInput
+    }, {});
+  }
+
+  /**
+   * packageからWind Pressure Traceを再計算して返す。
+   *
+   * traceはpackageに保存していない（保存すると payloadが主張する中間値を
+   * 信用する経路ができてしまうため）。常にwindInputから導出する。
+   *
+   * windInputを持たないpackageでは null を返す。
+   */
+  function windTraceFor(pkg) {
+    if (!pkg || typeof pkg !== 'object') {
+      throw new Error('windTraceFor(): package is required');
+    }
+    if (!pkg.windInput) return null;
+    return resolveWindPressure().calculateWindPressure(pkg.windInput);
+  }
+
   function serialize(pkg) {
     var normalized = validateAndNormalize(pkg, {});
-    return JSON.stringify(normalized, ALLOWED_TOP_LEVEL_KEYS.concat(ALLOWED_PROVENANCE_KEYS), 2);
+    return JSON.stringify(
+      normalized,
+      ALLOWED_TOP_LEVEL_KEYS.concat(ALLOWED_PROVENANCE_KEYS).concat(WIND_INPUT_KEYS),
+      2
+    );
   }
 
   /** 危険なキーが含まれていないか、深さが許容範囲かを再帰的に確認する。 */
@@ -494,15 +632,20 @@
     SOURCE_KINDS: SOURCE_KINDS,
     VERIFICATION_STATUSES: VERIFICATION_STATUSES,
     ALLOWED_TOP_LEVEL_KEYS: ALLOWED_TOP_LEVEL_KEYS,
+    WIND_INPUT_KEYS: WIND_INPUT_KEYS,
+    WIND_INPUT_SOURCE_KINDS: WIND_INPUT_SOURCE_KINDS,
     MAX_PAYLOAD_BYTES: MAX_PAYLOAD_BYTES,
     MAX_NEST_DEPTH: MAX_NEST_DEPTH,
     MAX_STRING_LENGTH: MAX_STRING_LENGTH,
     IMPORTED_PUBLIC_LABEL: IMPORTED_PUBLIC_LABEL,
+    NOTIFICATION_PUBLIC_LABEL: NOTIFICATION_PUBLIC_LABEL,
     computeDesignPressure: computeDesignPressure,
     createProjectInput: createProjectInput,
     validateProjectInput: function (pkg) { return validateAndNormalize(pkg, {}); },
     fromPreset: fromPreset,
     fromManual: fromManual,
+    fromWindCalculation: fromWindCalculation,
+    windTraceFor: windTraceFor,
     serialize: serialize,
     deserialize: deserialize
   };

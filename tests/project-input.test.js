@@ -99,8 +99,12 @@ test('AC-04: registryは不正なconfig（非object・projectId欠落・publicLa
 
 test('AC-02: 妥当なpackageを受理し、deterministicに正規化する', () => {
   const pkg = ProjectInput.createProjectInput(validPackage());
-  assert.equal(pkg.schemaVersion, 1);
+  // Phase 2Eで正規化後のschemaVersionは2（v1入力もv2へmigrateされる）
+  assert.equal(pkg.schemaVersion, 2);
+  assert.equal(pkg.schemaVersion, ProjectInput.SCHEMA_VERSION);
   assert.equal(pkg.sourceKind, 'manual');
+  // 風圧計算由来でないpackageは windInput を持たない
+  assert.equal(pkg.windInput, null);
   assert.equal(pkg.designPressure, 1400);
   assert.deepEqual(Object.keys(pkg), ProjectInput.ALLOWED_TOP_LEVEL_KEYS);
 });
@@ -116,13 +120,43 @@ test('AC-02: designPressureはpayload値を信用せず常に再計算される'
   assert.equal(pkg2.designPressure, 1200);
 });
 
-test('AC-03: unsupported schemaVersionはreject', () => {
-  for (const bad of [0, 2, 99, '1', null, undefined, {}]) {
+test('AC-03 / AC-09: unsupported schemaVersionはreject（未知の将来versionはfail closed）', () => {
+  // 3以上の未知versionは silent reinterpretation せず必ず拒否する
+  for (const bad of [0, 3, 99, '1', '2', null, undefined, {}, -1, 1.5]) {
     assert.throws(
       () => ProjectInput.createProjectInput(validPackage({ schemaVersion: bad })),
       `schemaVersion=${JSON.stringify(bad)} はrejectされるはず`
     );
   }
+  // サポート範囲は 1（旧形式）と 2（現行）のみ
+  assert.deepEqual(ProjectInput.SUPPORTED_SCHEMA_VERSIONS, [1, 2]);
+});
+
+test('AC-09: v1 packageはv2へ決定的にmigrateされ、挙動が壊れない', () => {
+  // 旧形式（v1）の入力は受理され、windInput: null のv2として正規化される
+  const v1 = ProjectInput.createProjectInput(validPackage({ schemaVersion: 1 }));
+  assert.equal(v1.schemaVersion, 2);
+  assert.equal(v1.windInput, null);
+  assert.equal(v1.designPressure, 1400, 'v1の計算値が変わらないこと');
+
+  // 同じ入力を2回migrateしても同一（決定的）
+  const again = ProjectInput.createProjectInput(validPackage({ schemaVersion: 1 }));
+  assert.deepEqual(v1, again);
+
+  // v1 と v2 を明示した同内容のpackageは同じ正規化結果になる
+  const v2 = ProjectInput.createProjectInput(validPackage({ schemaVersion: 2 }));
+  assert.deepEqual(v1, v2);
+
+  // v1 は windInput を持てない（v2で導入されたフィールドのため）
+  assert.throws(
+    () => ProjectInput.createProjectInput(validPackage({
+      schemaVersion: 1,
+      windInput: { V0: 34, roughnessCategory: 'III', buildingHeightM: 10, eavesHeightM: 10,
+                   evaluationHeightM: 5, buildingType: 'closed', zone: 'general',
+                   basis: 'notification_baseline' }
+    })),
+    /schemaVersion 1 package must not carry windInput/
+  );
 });
 
 test('AC-03 / AC-07: unknown fieldはreject', () => {
@@ -475,4 +509,230 @@ test('AC-05: registry未登録のsourceIdでregistered_presetを名乗れない'
   assert.equal(imported.sourceId, null);
   assert.equal(imported.provenance.verificationStatus, 'unverified');
   assert.notEqual(imported.provenance.publicLabel, '実在しない案件');
+});
+
+/* ============================================================
+   Phase 2E: notification_calculation の Project Input 統合
+   （AC-06 / AC-08 / AC-09 / AC-18）
+============================================================ */
+
+const WindPressure = require('../wind-pressure.js');
+
+function validWindInput(overrides) {
+  return Object.assign({
+    V0: 34,
+    roughnessCategory: 'III',
+    buildingHeightM: 14.2,
+    eavesHeightM: 14.2,
+    evaluationHeightM: 10,
+    buildingType: 'closed',
+    zone: 'general',
+    basis: 'notification_baseline'
+  }, overrides || {});
+}
+
+function windPackage(overrides) {
+  return ProjectInput.fromWindCalculation(Object.assign({
+    widthMm: 1250,
+    heightMm: 2050,
+    glassType: 'fl_single',
+    extraFactor: 1.0,
+    windInput: validWindInput()
+  }, overrides || {}));
+}
+
+test('AC-06: 告示風圧計算はProject Input Package経由でGlassCalcへ渡る', () => {
+  const pkg = windPackage();
+  assert.equal(pkg.schemaVersion, 2);
+  assert.equal(pkg.sourceKind, 'notification_calculation');
+  assert.equal(pkg.sourceId, null);
+
+  // 算定値がpackageのpressureになっている
+  const trace = WindPressure.calculateWindPressure(validWindInput());
+  assert.equal(pkg.positivePressure, trace.positive.pressure);
+  assert.equal(pkg.negativePressure, trace.negative.pressure);
+
+  // GlassCalcが必要とする形が揃っている（特別経路を使わない）
+  assert.equal(pkg.widthMm, 1250);
+  assert.equal(pkg.heightMm, 2050);
+  assert.equal(pkg.glassType, 'fl_single');
+  assert.ok(pkg.designPressure > 0);
+});
+
+test('AC-07: 告示風圧計算でも designPressure = max(|正圧|, |負圧|)', () => {
+  const pkg = windPackage();
+  assert.equal(
+    pkg.designPressure,
+    Math.max(Math.abs(pkg.positivePressure), Math.abs(pkg.negativePressure))
+  );
+
+  // 隅角部では負圧が強くなるが、契約は同じ
+  const corner = windPackage({ windInput: validWindInput({ zone: 'corner' }) });
+  assert.equal(
+    corner.designPressure,
+    Math.max(Math.abs(corner.positivePressure), Math.abs(corner.negativePressure))
+  );
+});
+
+test('AC-18: packageは算定済みtraceを保存せず、windInputだけを保持する', () => {
+  const pkg = windPackage();
+  assert.ok(pkg.windInput, 'windInputは保持する');
+  // 中間値・結果をpackageへ保存しない（改竄経路を作らないため）
+  assert.equal(pkg.trace, undefined);
+  assert.equal(pkg.intermediates, undefined);
+  assert.equal(pkg.normalized, undefined);
+  assert.equal(pkg.positive, undefined);
+  assert.equal(pkg.negative, undefined);
+
+  // traceは必要時にwindInputから再計算する
+  const trace = ProjectInput.windTraceFor(pkg);
+  assert.equal(trace.trace.length, 17);
+  assert.equal(trace.provenance.formulaVerificationStatus, 'verified_primary_source');
+  assert.equal(trace.provenance.inputVerificationStatus, 'user_input_unverified');
+
+  // windInputを持たないpackageではnull
+  assert.equal(ProjectInput.windTraceFor(ProjectInput.createProjectInput(validPackage())), null);
+});
+
+test('AC-18: 改竄されたpressureはwindInputからの再計算で無効化される', () => {
+  const pkg = windPackage();
+  const tampered = JSON.parse(ProjectInput.serialize(pkg));
+  tampered.positivePressure = 999999;
+  tampered.negativePressure = -999999;
+  tampered.designPressure = 999999;
+
+  const imported = ProjectInput.deserialize(JSON.stringify(tampered));
+  assert.equal(imported.positivePressure, pkg.positivePressure, '主張された正圧を採用しない');
+  assert.equal(imported.negativePressure, pkg.negativePressure, '主張された負圧を採用しない');
+  assert.equal(imported.designPressure, pkg.designPressure);
+  assert.notEqual(imported.designPressure, 999999);
+});
+
+test('AC-18: 取り込んだ風圧packageはverified stateを偽装できない', () => {
+  const pkg = windPackage();
+  const spoof = JSON.parse(ProjectInput.serialize(pkg));
+  spoof.sourceKind = 'registered_preset';
+  spoof.sourceId = 'miyoshi';
+  spoof.provenance.verificationStatus = 'verified';
+  spoof.provenance.publicLabel = 'みよし案件プリセット';
+
+  const imported = ProjectInput.deserialize(JSON.stringify(spoof));
+  assert.equal(imported.sourceKind, 'imported_unverified');
+  assert.equal(imported.sourceId, null);
+  assert.equal(imported.provenance.verificationStatus, 'unverified');
+  assert.notEqual(imported.provenance.publicLabel, 'みよし案件プリセット');
+
+  // 式がverifiedであることは入力のverifiedを意味しない（AC-04）
+  const trace = ProjectInput.windTraceFor(imported);
+  assert.equal(trace.provenance.inputVerificationStatus, 'user_input_unverified');
+});
+
+test('AC-08: Export → Import → Recalculate で風圧・ガラス結果が再現される', () => {
+  const original = windPackage({ windInput: validWindInput({ zone: 'corner', basis: 'itakyo_recommended', recurrenceYears: 200 }) });
+  const restored = ProjectInput.deserialize(ProjectInput.serialize(original));
+
+  // 計算に用いる値が一致
+  assert.equal(restored.widthMm, original.widthMm);
+  assert.equal(restored.heightMm, original.heightMm);
+  assert.equal(restored.positivePressure, original.positivePressure);
+  assert.equal(restored.negativePressure, original.negativePressure);
+  assert.equal(restored.designPressure, original.designPressure);
+  assert.equal(restored.glassType, original.glassType);
+  assert.equal(restored.extraFactor, original.extraFactor);
+
+  // windInputが往復し、traceが再現される
+  assert.deepEqual(restored.windInput, original.windInput);
+  const t1 = ProjectInput.windTraceFor(original);
+  const t2 = ProjectInput.windTraceFor(restored);
+  assert.deepEqual(t2, t1, 'traceが完全に再現されること');
+  assert.equal(t2.basis.recurrenceYears, 200);
+
+  // ガラス候補も一致する
+  const area = (restored.widthMm / 1000) * (restored.heightMm / 1000);
+  const before = GlassCalc.splitCandidates(
+    GlassCalc.generateCandidates(original.glassType, area, original.designPressure, original.extraFactor)
+  );
+  const after = GlassCalc.splitCandidates(
+    GlassCalc.generateCandidates(restored.glassType, area, restored.designPressure, restored.extraFactor)
+  );
+  assert.deepEqual(after.okCandidates.map((c) => c.label), before.okCandidates.map((c) => c.label));
+});
+
+test('AC-09 / AC-18: windInputは限られたsourceKindでのみ許可される', () => {
+  // v1 packageは windInput を持てない（v2で導入されたフィールド）
+  assert.throws(
+    () => ProjectInput.createProjectInput(validPackage({ windInput: validWindInput() })),
+    /schemaVersion 1 package must not carry windInput/
+  );
+
+  // v2でも manual / registered_preset は windInput を持てない
+  assert.throws(
+    () => ProjectInput.createProjectInput(
+      validPackage({ schemaVersion: 2, windInput: validWindInput() })
+    ),
+    /windInput is only allowed for sourceKind/
+  );
+
+  // notification_calculation は windInput 必須
+  assert.throws(
+    () => ProjectInput.createProjectInput(validPackage({
+      sourceKind: 'notification_calculation', windInput: undefined
+    })),
+    /requires windInput/
+  );
+});
+
+test('AC-12: windInputの不正値はpackage構築時にfail closedで弾かれる', () => {
+  for (const bad of [
+    { V0: NaN }, { V0: Infinity }, { V0: -34 }, { V0: '34' },
+    { evaluationHeightM: 0 }, { evaluationHeightM: -1 },
+    { roughnessCategory: 'V' }, { buildingType: 'semi' }, { zone: 'edge' },
+    { basis: 'custom' }, { buildingHeightM: 5, eavesHeightM: 9 }
+  ]) {
+    assert.throws(
+      () => windPackage({ windInput: validWindInput(bad) }),
+      `windInput ${JSON.stringify(bad)} はrejectされるはず`
+    );
+  }
+  // 未知フィールドは package 層で先に弾かれる（wind-pressure.js側にも同じ防御がある）
+  assert.throws(
+    () => windPackage({ windInput: validWindInput({ floorKey: '2' }) }),
+    /windInput contains an unknown field/
+  );
+  assert.throws(
+    () => WindPressure.calculateWindPressure(validWindInput({ floorKey: '2' })),
+    /unknown wind input field/
+  );
+  // 型違い
+  assert.throws(() => windPackage({ windInput: [] }), /windInput/);
+  assert.throws(() => windPackage({ windInput: 'x' }), /windInput/);
+});
+
+test('AC-18: windInput経由でprototype pollutionできない', () => {
+  const payload = JSON.parse(ProjectInput.serialize(windPackage()));
+  const raw = JSON.stringify(payload).replace(
+    '"windInput"',
+    '"windInput","__proto__":{"polluted":true},"ignored"'
+  );
+  assert.throws(() => ProjectInput.deserialize(raw), /forbidden key|unknown|JSON/);
+  assert.equal({}.polluted, undefined, 'prototypeが汚染されていないこと');
+});
+
+test('AC-05: 告示風圧計算はregistered presetを名乗れない', () => {
+  const pkg = windPackage();
+  assert.equal(pkg.provenance.verificationStatus, 'unverified');
+  assert.equal(pkg.provenance.publicLabel, ProjectInput.NOTIFICATION_PUBLIC_LABEL);
+
+  // verified を主張すると拒否される
+  assert.throws(
+    () => ProjectInput.createProjectInput({
+      schemaVersion: 2, sourceKind: 'notification_calculation', sourceId: null,
+      widthMm: 1250, heightMm: 2050,
+      positivePressure: 0, negativePressure: 0, designPressure: 0,
+      glassType: 'fl_single', extraFactor: 1.0,
+      provenance: { publicLabel: 'x', verificationStatus: 'verified', note: '' },
+      windInput: validWindInput()
+    }),
+    /must have provenance.verificationStatus "unverified"/
+  );
 });
