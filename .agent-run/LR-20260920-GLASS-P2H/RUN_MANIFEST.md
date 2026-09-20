@@ -43,6 +43,30 @@ expected : >= 342 / 0 fail  → 一致
 | 0 | Fresh Gate / Run Artifact初期化 / Phase 2G closeout / baseline | `ca1fd9f` |
 | 1-3 | Profile module / Package v1 / resolver / Scenario Matrix | `de2787e` |
 | 4 | Profile editor UI / effective preview / Matrix UI / TSV | `3346494` |
-| 4H | Boundary Closure（Required Fix A / B / C）+ artifact sync | `RESOLVE_AT_CHECKPOINT` |
+| 4H | Boundary Closure（Required Fix A / B / C）+ artifact sync | `a329c8ff84cd69956c1910edac5f12081447c314` |
+| 5-6 | 攻撃・mutation campaign / full regression / README | `439c42647b2b7edb15b4afaa4bf07f3944e7b411` |
+| 7 | independent verifier 指摘（F2-F7）の修理 | `5838141954d73e0d5463f21810e62c24df573a82` |
+| 7 | Run Artifact convergence（本ファイルを含む） | 本commit（自己参照のため固定しない） |
 
 自己参照commit SHAは固定しない。過去commitになったwaveは確定値へ置き換える。
+
+**Implementation verification head**: `5838141954d73e0d5463f21810e62c24df573a82`
+実装・test・UI・READMEの最終head。これ以降のcommitはRun Artifactのみで、
+検証結果（398 / 0、browser 130 / 0）はこのheadに対する実測値である。
+
+## 変更ファイル（base e7d3966 → implementation verification head）
+
+```text
+project-profile.js              新規
+tests/project-profile.test.js   新規
+workspace.js                    parseTsvTable抽出 / INVALID_RESULT_SOURCES に scenario_matrix 追加
+index.html                      Profile編集 / effective preview / Scenario Matrix / Scenario TSV / 診断見出し
+project-config/project-input.js assertPaneDimensionMm / assertExtraFactor を抽出しexport（判定内容は不変）
+README.md                       Phase 2H節 / file structure / test table / changelog
+.agent-run/LR-20260920-GLASS-P2H/*  Run Artifact 7ファイル
+```
+
+`calc.js` / `wind-pressure.js` / `project-config/miyoshi.js` /
+`project-config/evidence.js` / `project-config/evidence-ledger.js` は無変更。
+`project-input.js` の変更は既存の判定を関数として括り出してexportしたもので、
+値域・メッセージ・呼び出し結果はいずれも変わっていない（342件の既存testが緑のまま）。

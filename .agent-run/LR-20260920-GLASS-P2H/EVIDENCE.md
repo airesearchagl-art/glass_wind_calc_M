@@ -41,3 +41,28 @@ Evidence が得られるまでこの境界を維持する。
 3. 負圧 918 / 1122 N/m^2 の元計算根拠
 4. 各階評価高さ Z と preset の exact mapping
 ```
+
+## §5 Wave 7 実測（Evidence state 非退行の確認）
+
+実装 verification head `5838141954d73e0d5463f21810e62c24df573a82` で再実測した。
+
+```text
+verifiedCases            : []
+project-specific promotion: NONE
+dimensions               : mode sample_default / status unverified
+  defaultW 1250          : verificationStatus unverified / evidence.level none
+  defaultH 2050          : verificationStatus unverified / evidence.level indirect
+validateAllEvidence()    : []
+isFullyVerified()        : false
+階別正圧                  : 1297 / 1525 / 1695 / 1729（無変更）
+負圧                      : 918 / 1122（無変更）
+V0 / roughness            : 34 / III（無変更）
+Explicit unverified items : 4件のまま（§4）
+```
+
+Phase 2Hは Evidence を1件も昇格させていない。
+Runtime Profile を100 case で使っても `notification_calculation` /
+`unverified` のままであることを攻撃campaignで確認済み（Wave 5）。
+
+Wave 7 の修理はいずれも入力契約・診断表示・gateの判定範囲に関するもので、
+Evidence モデルにも案件factにも触れていない。

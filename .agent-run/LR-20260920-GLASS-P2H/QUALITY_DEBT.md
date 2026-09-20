@@ -1,7 +1,18 @@
 # Quality Debt — LR-20260920-GLASS-P2H
 
 ```text
-none（Wave 0時点）
+none（Wave 7終了時点 / 実測）
+```
+
+Wave 7のindependent verification指摘7件は、すべて本Campaign内で修理済み。
+Quality Debtとして持ち越した項目は無い。
+
+残る既知の制約（Phase 2H起因ではない / debtではない）:
+
+```text
+Profile Package は memory-only。ページを閉じると消える（§24の設計どおり）。
+診断の reason は数値セル値を含みうる（Phase 2Gからの契約。
+  quoted stringは redact される。workspace.js sanitizeReason 参照）。
 ```
 
 ## 規則

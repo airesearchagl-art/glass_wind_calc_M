@@ -4,13 +4,14 @@
 - Mode: LONG_RUN
 - Horizon: 8H
 - LONG_RUN_ENDURANCE: false
-- Current state: RUNNING
+- Current state: COMPLETE_PENDING_FULL_VERIFY
 - Repository: airesearchagl-art/glass_wind_calc_M
 - Working branch: claude/phase2h-project-profile-scenario-matrix
 - Base SHA: e7d396621536acd21934fc92892087be0f47d8d6
-- Current artifact-sync head: `RESOLVE_DYNAMICALLY`
-- Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 4H — Boundary Closure（Required Fix A / B / C 完了）
+- Current artifact-sync head: Wave 7 convergence commit（本ファイルを含む commit。push後のbranch tip）
+- Implementation verification head: `5838141954d73e0d5463f21810e62c24df573a82`
+  （実装・test・UIの最終head。以降のcommitはRun Artifactのみ）
+- Current wave: Wave 7 — convergence 完了 / Human Gate待ち
 - Task Packet ID: LRP-20260920-GLASS-P2H
 - Task Packet revision: 1
 - Task Packet SHA-256: ec2638808e8ff1d67bde9c9619a8bd803bcd3e27083b55f85259281434031c27
@@ -141,9 +142,92 @@ A2（絶対天井の二重チェック削除）は PATCH-MISS。
   発火しないguardを残さない判断に伴うもので、test gapではない。
 ```
 
+## Wave 5 — 攻撃・mutation campaign（§37 / 実測）
+
+```text
+攻撃 33件 / 遮断 33件 / 漏えい 0件
+  Matrix cap        : maxTotal 2000 / Infinity / 1e9 / MAX_SAFE_INTEGER / '2000' / NaN / 1.5 / -1
+                      existingCaseCount -1 / NaN / Infinity / 1.5 / -0.0001 / 1001 / '-500'
+                      1001 scenarios / matrix.add の1001件目
+  Profile結果側spoof : forged verified / registered_preset型 / presetId / Z同伴 / zone同伴 /
+                      Evidence / sourceReference / string型V0
+  Scenario結果側spoof: Z欠落 / zone欠落 / floor同伴 / verificationStatus同伴 / V0同伴 /
+                      evidence同伴 / string型Z
+  TSV重複           : 既存matrixとの重複 / 同一paste内の重複
+  Profile JSON import: prototype pollution / constructor.prototype / 巨大payload / 深いnest
+  Evidence分離       : 100回使用しても notification_calculation のまま / presetは不変
+```
+
+## Wave 6 — full regression（実測）
+
+```text
+npm test                 : 398 pass / 0 fail（Wave 5時点 389 → 修理で +9）
+Phase 2G subset          : 342 / 0（非退行）
+browser                  : 130 checks / 0 fail / pageError 0 / consoleError 0
+                           内訳 p2h 29 + p2g 84 + 修理検証 17
+TSV行番号parity          : Workspace TSV と Scenario TSV が同じ物理行を指す
+profile経路 vs direct    : PIPがJSON bit-equal
+Er / qBar                : 0.8516557589672942 / 503.08024004410464（bit-equal / suiteで固定）
+FL6 1250x2050 / 1500x2050: 1756.09756097561 / 1463.4146341463415（bit-equal / suiteで固定）
+Manual designP           : 1400
+PIP schema               : 2（v1→v2 migrationは imported_unverified へ）
+Evidence                 : verifiedCases [] / dimensions sample_default・unverified /
+                           validateAllEvidence() [] / promotion NONE
+```
+
+## Wave 7 — independent verification と修理
+
+verdict: **PASS WITH FINDINGS**。correctness break / security break /
+hidden default / Z・zoneの継承経路 / cap突破 / forged profile の到達 /
+重複によるabortや上書き / 演算のずれ、いずれも無し。
+
+指摘7件はすべて本Campaign内で修理した（in scope / Hard Gate該当なし）。
+
+```text
+F1  MEDIUM  READMEがRun Artifact上PENDINGの検証結果を断定していた        FIXED（本convergence）
+F2  MEDIUM  Scenario Matrixの追加失敗が「JSON取り込みエラー」と表示       FIXED
+F3a LOW-MED matrix.add自身の絶対上限にtestが無い（mutant SURVIVED）       FIXED（test追加）
+F3b LOW-MED Scenario TSVの余剰セル検査にtestが無い（mutant SURVIVED）     FIXED（test追加）
+F4a LOW     nest深さcapにtestが無い（mutant SURVIVED）                    FIXED（test追加）
+F4b LOW     危険キー事前走査が値まで拒否する偽陽性                        FIXED
+F5  LOW     寸法・extraFactorの契約違反がMatrixに並び、遅れて落ちる       FIXED
+F6  LOW     Z / zone拒否がown propertyのみで、継承で通過できた            FIXED
+F7  INFO    「既定値を置かない」メッセージにtestが無い                    FIXED（test追加）
+```
+
+### verifierの前提を1点訂正
+
+F4a を「発火しないguard」としていたが、実測では**発火する**。
+深いnestは field の型検査より前に
+`profile payload is nested too deeply (max 6)` で落ちる
+（再帰そのものを浅く保つためのguardであり、到達不能ではない）。
+正しい性質は「到達可能だがtestが無い」であり、F3と同じ分類。
+したがって削除ではなくtestで固定した。
+
+### Wave 7 mutation（修理後 / 9件）
+
+```text
+KILLED 8 / SURVIVED 1
+  V1 matrix.add の絶対上限削除          KILLED（F3a test）
+  V2 Scenario TSV 余剰セル検査削除      KILLED（F3b test）
+  V3 nest深さcap削除                    KILLED（F4a test）
+  V4 危険キー事前走査削除               KILLED（F4b test / parse前に動くことを固定）
+  V5 SCENARIO_REQUIRED ループ削除       KILLED（F7 test）
+  V6 寸法契約の呼び出し削除             KILLED（F5 test）
+  V7 extraFactor契約の呼び出し削除      KILLED（F5 test）
+  V8 継承判定（assertOrdinaryObject）削除 KILLED（F6 test）
+  V9 `in` → hasOwnProperty へ戻す       SURVIVED
+```
+
+V9 は「別のguardが拾ったための生存」である。
+継承keyの判定を `in` と `assertOrdinaryObject` の2か所に書いた結果、
+前段が生きている限り後段は発火しない — D-006 で退けたのと同じ形になっていた。
+coverageを主張せず、**判定を1か所へ戻した**（`assertOrdinaryObject` のみ）。
+以後 V9 は「同じコード」であり、mutantとして成立しない。
+
 ## Quality Debt
 
-現時点でなし（QUALITY_DEBT.md参照）。
+QUALITY_DEBT.md 参照。
 
 ## Known failures
 
@@ -154,14 +238,16 @@ none
 ## Remaining tasks
 
 ```text
-Wave 5-7（TASK_QUEUE.md参照）
+Human Gate のみ（Ready化 / merge / Production authorization）。
+本Campaignのscope内に残作業なし。
 ```
 
 ## Next action
 
-Wave 5: §37 の攻撃・mutation campaign（Matrix cap / Profile結果側spoof /
-Scenario結果側spoof / TSV重複）。その後 Wave 6（full regression / browser /
-independent verifier）、Wave 7（README / convergence / Draft PR）。
+```text
+Human Gate待ち。Draft PRのReady化・merge・Production昇格は
+本CampaignのNext Actionに含めない（§44）。
+```
 
 ## Stop conditions status
 
@@ -184,6 +270,6 @@ repair_strategies     : 0 / 3
 3. git fetch origin claude/phase2h-project-profile-scenario-matrix で現在headを確認
 4. EVIDENCE.md を読む（Phase 2HはEvidence stateを変更しない）
 5. QUALITY_DEBT.md を読む
-6. npm test でsmoke check
-7. 上記 Next action から再開する
+6. npm test でsmoke check（398 / 0）
+7. 状態は COMPLETE_PENDING_FULL_VERIFY。次の判断は Human Gate に属する。
 ```
