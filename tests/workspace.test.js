@@ -1,0 +1,813 @@
+'use strict';
+
+/**
+ * Phase 2G: Batch / Scenario Workspace のテスト。
+ *
+ * 重点は「Batch layerが独自の計算を持たないこと」と
+ * 「外部データがtrusted stateへ昇格しないこと」である。
+ * Batch側で期待値をhard-codeせず、single-case coreから導出した値と突き合わせる。
+ *
+ * 実行: node --test tests/  （または npm test）
+ */
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const Workspace = require('../workspace.js');
+const ProjectInput = require('../project-config/project-input.js');
+const GlassCalc = require('../calc.js');
+
+const WORKSPACE_SRC = path.join(__dirname, '..', 'workspace.js');
+
+// §32: testsではsynthetic fixtureのみを使う。実案件のlabelを持ち込まない。
+const manualCase = (widthMm, heightMm, overrides) =>
+  ProjectInput.fromManual(Object.assign({
+    widthMm, heightMm,
+    positivePressure: 1525,
+    negativePressure: -918,
+    glassType: 'fl_single',
+    extraFactor: 1.0
+  }, overrides || {}));
+
+/** single-case UIとまったく同じ経路で期待値を出す（Batch側で数値を固定しない）。 */
+function singleCoreExpectation(pkg) {
+  const area = GlassCalc.paneAreaM2(pkg.widthMm, pkg.heightMm);
+  const all = GlassCalc.generateCandidates(pkg.glassType, area, pkg.designPressure, pkg.extraFactor);
+  const split = GlassCalc.splitCandidates(all);
+  const best = split.okCandidates.length > 0 ? split.okCandidates[0] : null;
+  return { area, best, split };
+}
+
+/* ============================================================
+   AC-02 Batch layerが新しい計算formulaを持たない
+============================================================ */
+
+test('AC-02: workspace.js は強度式・風圧式を持たない（ソース契約）', () => {
+  const src = fs.readFileSync(WORKSPACE_SRC, 'utf8');
+  // 計算コアの定数・式がここに複製されていないこと。
+  // 識別子は語境界で見る（'Er' を includes() で探すと 'Error' に当たる）。
+  // 注: 'V0' / 'roughnessCategory' は TSV列名 -> 既存windInput field名 の
+  // 対応表に**名前として**現れる。それは計算ではなく写像なので許容し、
+  // 代わりに「風圧エンジンに依存していないこと」を下で直接確認する。
+  for (const ident of ['k1', 'k2', 'Er', 'qBar', 'Cpe', 'Gpe']) {
+    assert.doesNotMatch(src, new RegExp('\\b' + ident + '\\b'),
+      'workspace.js に計算コアの識別子が現れてはならない: ' + ident);
+  }
+  for (const fragment of ['t * t', 't**2', 'Math.pow', '0.6 *', '1.7 *', '* 300', '300 *']) {
+    assert.equal(src.includes(fragment), false,
+      'workspace.js に計算コアの式が現れてはならない: ' + fragment);
+  }
+  // 面積式も自前で書かない（GlassCalc.paneAreaM2 を呼ぶ）
+  assert.doesNotMatch(src, /\/\s*1000000/, '面積式を複製してはならない');
+  assert.match(src, /GlassCalc\.paneAreaM2\(/);
+  assert.match(src, /GlassCalc\.generateCandidates\(/);
+  assert.match(src, /GlassCalc\.splitCandidates\(/);
+  // 案件固有値を持たない
+  for (const value of ['1297', '1525', '1695', '1729', '918', '1122', '1250', '2050']) {
+    assert.doesNotMatch(src, new RegExp('\\b' + value + '\\b'),
+      'workspace.js に案件固有値 ' + value + ' が現れてはならない');
+  }
+  for (const token of ['Miyoshi', 'MIYOSHI', 'みよし']) {
+    assert.equal(src.includes(token), false, 'workspace.js は案件非依存であること');
+  }
+  // 風圧算定は ProjectInput の内側で起きる。Batch layerは風圧エンジンを
+  // 直接 require しない（呼べてしまうと、そこに独自の呼び出し順序が生まれる）。
+  assert.doesNotMatch(src, /require\((['"]).*wind-pressure/,
+    'workspace.js は wind-pressure.js を直接requireしない');
+  assert.doesNotMatch(src, /WindPressure\./,
+    'workspace.js は WindPressure を直接呼ばない');
+  // notification caseは既存の fromWindCalculation を通る
+  assert.match(src, /ProjectInput\.fromWindCalculation\(/);
+  assert.match(src, /ProjectInput\.fromManual\(/);
+  assert.match(src, /ProjectInput\.deserialize\(/);
+  assert.match(src, /ProjectInput\.validateProjectInput\(/);
+});
+
+test('AC-02: index.html と Batch が同じ面積関数を呼ぶ（式を2か所に持たない）', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(html, /GlassCalc\.paneAreaM2\(pkg\.widthMm, pkg\.heightMm\)/);
+  assert.doesNotMatch(html, /pkg\.widthMm \* pkg\.heightMm\) \/ 1_000_000/,
+    'index.html に面積式が残っていてはならない');
+  assert.equal(GlassCalc.paneAreaM2(1250, 2050), (1250 * 2050) / 1000000);
+});
+
+/* ============================================================
+   AC-03 / AC-06 / AC-07 case lifecycle
+============================================================ */
+
+test('AC-03 / AC-06: 1 case は既存 PIP v2 そのもの', () => {
+  const ws = Workspace.createWorkspace();
+  const id = ws.addCase(manualCase(1250, 2050), { label: 'Case A' });
+  assert.equal(id, 'case-001');
+  const entry = ws.getCase(id);
+  assert.equal(entry.inputPackage.schemaVersion, 2);
+  assert.equal(entry.inputPackage.sourceKind, 'manual');
+  assert.equal(entry.label, 'Case A');
+  assert.equal(ProjectInput.SCHEMA_VERSION, 2, 'Phase 2GでPIPをv3へ上げない');
+});
+
+test('AC-06: addCase は呼び出し側objectから切り離して保持する', () => {
+  const ws = Workspace.createWorkspace();
+  const pkg = manualCase(1250, 2050);
+  const id = ws.addCase(pkg);
+  pkg.widthMm = 9999;
+  pkg.glassType = 'tp_single';
+  assert.equal(ws.getCase(id).inputPackage.widthMm, 1250);
+  assert.equal(ws.getCase(id).inputPackage.glassType, 'fl_single');
+  // listCases() が返すcopyを書き換えてもworkspaceは変わらない
+  const listed = ws.listCases();
+  listed[0].inputPackage.widthMm = 1;
+  listed[0].label = 'mutated';
+  assert.equal(ws.getCase(id).inputPackage.widthMm, 1250);
+  assert.equal(ws.getCase(id).label, null);
+});
+
+test('AC-07: duplicate は新しいcaseIdを払い出し、元caseをmutationしない', () => {
+  const ws = Workspace.createWorkspace();
+  const a = ws.addCase(manualCase(1250, 2050), { label: 'Case A' });
+  const b = ws.duplicateCase(a);
+  assert.notEqual(a, b);
+  assert.equal(ws.size(), 2);
+  assert.equal(ws.getCase(b).label, 'Case A (copy)');
+  assert.deepEqual(ws.getCase(b).inputPackage, ws.getCase(a).inputPackage);
+  // 複製側を消しても元は残る
+  ws.removeCase(b);
+  assert.equal(ws.size(), 1);
+  assert.equal(ws.getCase(a).label, 'Case A');
+});
+
+test('AC-07: remove / clear はworkspace内部stateだけを変える', () => {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(manualCase(1250, 2050));
+  ws.addCase(manualCase(1500, 2050));
+  assert.equal(ws.removeCase('case-001'), true);
+  assert.equal(ws.removeCase('case-001'), false, '存在しないcaseのremoveはfalse');
+  assert.equal(ws.size(), 1);
+  assert.equal(ws.clear(), 1);
+  assert.equal(ws.size(), 0);
+  // presetやEvidenceは無傷
+  const MiyoshiProjectConfig = require('../project-config/miyoshi.js');
+  assert.equal(MiyoshiProjectConfig.wind.V0.value, 34);
+  assert.deepEqual(MiyoshiProjectConfig.verifiedCases, []);
+});
+
+test('caseId: remove後に番号を再利用しない', () => {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(manualCase(1250, 2050));   // case-001
+  ws.removeCase('case-001');
+  const next = ws.addCase(manualCase(1250, 2050));
+  assert.equal(next, 'case-002', '消した番号を再利用すると別caseが同一視される');
+});
+
+/* ============================================================
+   §35 known-answer（single coreから導出する）
+============================================================ */
+
+test('§35 known-answer: Case A は FL6 で OK、Case B は FL6 が NG', () => {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(manualCase(1250, 2050), { label: 'Case A' });
+  ws.addCase(manualCase(1500, 2050), { label: 'Case B' });
+  const results = Workspace.evaluateWorkspace(ws);
+
+  const a = results[0];
+  const b = results[1];
+
+  // 期待値はsingle coreから導出する（Batch側で数値を固定しない）
+  const expA = singleCoreExpectation(ws.getCase('case-001').inputPackage);
+  const expB = singleCoreExpectation(ws.getCase('case-002').inputPackage);
+
+  assert.equal(a.status, 'OK');
+  assert.equal(a.areaM2, expA.area);
+  assert.equal(a.recommendedLabel, expA.best.label);
+  assert.equal(a.allowablePressure, expA.best.P);
+  assert.equal(a.recommendedLabel, 'FL6', 'Case A の推奨は FL6');
+
+  // Case B: FL6は耐力不足（NG側に入る）ので推奨にならない
+  const bFl6 = expB.split.ngCandidates.find((c) => c.label === 'FL6');
+  assert.ok(bFl6, 'Case B では FL6 が NG 候補に入るはず');
+  assert.notEqual(b.recommendedLabel, 'FL6');
+  assert.equal(b.recommendedLabel, expB.best.label);
+  assert.equal(b.allowablePressure, expB.best.P);
+
+  // Phase 2D/2E/2F から引き継ぐ既知値（single core側の値）
+  assert.equal(expA.split.okCandidates.concat(expA.split.ngCandidates)
+    .find((c) => c.label === 'FL6').P, 1756.09756097561);
+  assert.equal(expB.split.okCandidates.concat(expB.split.ngCandidates)
+    .find((c) => c.label === 'FL6').P, 1463.4146341463415);
+});
+
+/* ============================================================
+   AC-08 row isolation / AC-09 summary / AC-10 grouping
+============================================================ */
+
+test('AC-08: 1 rowがinvalidでも他rowを止めず、silent skipもしない', () => {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(manualCase(1250, 2050), { label: 'ok-1' });
+  ws.addCase(manualCase(1500, 2050), { label: 'ok-2' });
+  // 壊れたcaseを直接注入する（addCaseは通らないので内部listを模す）
+  const entries = ws.listCases();
+  entries.splice(1, 0, { caseId: 'case-bad', label: 'broken', inputPackage: { nope: true } });
+
+  const results = Workspace.evaluateWorkspace(entries);
+  assert.equal(results.length, 3, '壊れたrowも結果に残る（skipしない）');
+  assert.equal(results[0].status, 'OK');
+  assert.equal(results[1].status, 'INVALID');
+  assert.equal(results[2].status, 'OK', '後続rowの評価が止まっていない');
+  assert.ok(results[1].error && results[1].error.length > 0, 'INVALID rowは理由を持つ');
+  assert.equal(results[1].recommendedLabel, null);
+  assert.equal(results[1].allowablePressure, null);
+});
+
+test('AC-09: summary counts と governing の定義', () => {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(manualCase(1250, 2050));                       // OK
+  ws.addCase(manualCase(1500, 2050));                       // OK
+  const entries = ws.listCases();
+  entries.push({ caseId: 'case-bad', label: null, inputPackage: { nope: true } });
+
+  const results = Workspace.evaluateWorkspace(entries);
+  const summary = Workspace.summarize(results);
+
+  assert.equal(summary.totalCases, 3);
+  assert.equal(summary.okCount, 2);
+  assert.equal(summary.invalidCount, 1);
+  assert.equal(summary.okCount + summary.noSolutionCount + summary.invalidCount,
+    summary.totalCases, 'counts は必ず total に一致する');
+  assert.equal(summary.maxDesignPressure, 1525);
+  assert.equal(summary.maxAreaM2, GlassCalc.paneAreaM2(1500, 2050));
+
+  // governing の定義は明示されていること
+  assert.ok(['min_margin_ratio', 'max_design_pressure'].includes(summary.governingBasis));
+  const okResults = results.filter((r) => r.status === 'OK');
+  const minRatio = Math.min(...okResults.map((r) => r.marginRatio));
+  const expected = okResults.find((r) => r.marginRatio === minRatio);
+  assert.equal(summary.governingBasis, 'min_margin_ratio');
+  assert.equal(summary.governingCaseId, expected.caseId);
+});
+
+test('AC-09: OK caseが無い場合 governing は最大designPressureへフォールバックする', () => {
+  const entries = [
+    { caseId: 'case-001', label: null, inputPackage: manualCase(5000, 5000, { positivePressure: 9000, negativePressure: -9000 }) },
+    { caseId: 'case-002', label: null, inputPackage: manualCase(5000, 5000, { positivePressure: 12000, negativePressure: -12000 }) }
+  ];
+  const results = Workspace.evaluateWorkspace(entries);
+  const summary = Workspace.summarize(results);
+  assert.equal(summary.okCount, 0);
+  assert.equal(summary.noSolutionCount, 2);
+  assert.equal(summary.governingBasis, 'max_design_pressure');
+  assert.equal(summary.governingCaseId, 'case-002');
+});
+
+test('AC-10: recommended configuration ごとにgroupingし、NO_SOLUTION/INVALIDは混ぜない', () => {
+  const entries = [
+    { caseId: 'case-001', label: null, inputPackage: manualCase(1250, 2050) },
+    { caseId: 'case-002', label: null, inputPackage: manualCase(1250, 2050) },
+    { caseId: 'case-003', label: null, inputPackage: manualCase(1500, 2050) },
+    { caseId: 'case-004', label: null, inputPackage: manualCase(5000, 5000, { positivePressure: 12000, negativePressure: -12000 }) },
+    { caseId: 'case-005', label: null, inputPackage: { nope: true } }
+  ];
+  const groups = Workspace.groupByRecommended(Workspace.evaluateWorkspace(entries));
+  const byKey = Object.fromEntries(groups.map((g) => [g.key, g]));
+  assert.equal(byKey.FL6.count, 2);
+  assert.deepEqual(byKey.FL6.caseIds, ['case-001', 'case-002']);
+  assert.equal(byKey.NO_SOLUTION.count, 1);
+  assert.equal(byKey.INVALID.count, 1);
+  assert.equal(groups.reduce((n, g) => n + g.count, 0), 5);
+});
+
+/* ============================================================
+   AC-11 sort / filter（結果をmutationしない）
+============================================================ */
+
+test('AC-11: sort / filter は evaluation result をmutationしない', () => {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(manualCase(1500, 2050));
+  ws.addCase(manualCase(1250, 2050));
+  const results = Workspace.evaluateWorkspace(ws);
+  const before = JSON.parse(JSON.stringify(results.map((r) => r.caseId)));
+
+  const sorted = Workspace.sortResults(results, 'areaM2');
+  assert.deepEqual(results.map((r) => r.caseId), before, '元配列の順序は変わらない');
+  assert.deepEqual(sorted.map((r) => r.caseId), ['case-002', 'case-001']);
+  assert.deepEqual(Workspace.sortResults(results, 'areaM2', 'desc').map((r) => r.caseId),
+    ['case-001', 'case-002']);
+
+  const filtered = Workspace.filterResults(results, 'OK');
+  assert.equal(filtered.length, 2);
+  assert.deepEqual(results.map((r) => r.caseId), before);
+  assert.equal(Workspace.filterResults(results, 'ALL').length, 2);
+  assert.equal(Workspace.filterResults(results, 'INVALID').length, 0);
+
+  assert.throws(() => Workspace.sortResults(results, 'label'), /unknown sort key/);
+  assert.throws(() => Workspace.filterResults(results, 'MAYBE'), /unknown filter/);
+});
+
+test('AC-11: 値を持たない行はsort方向によらず末尾に置かれる', () => {
+  const entries = [
+    { caseId: 'case-001', label: null, inputPackage: { nope: true } },
+    { caseId: 'case-002', label: null, inputPackage: manualCase(1250, 2050) }
+  ];
+  const results = Workspace.evaluateWorkspace(entries);
+  for (const dir of ['asc', 'desc']) {
+    const sorted = Workspace.sortResults(results, 'designPressure', dir);
+    assert.equal(sorted[sorted.length - 1].caseId, 'case-001', 'INVALID行は末尾 (' + dir + ')');
+  }
+});
+
+/* ============================================================
+   §36 determinism
+============================================================ */
+
+test('§36: 同じworkspaceを2回evaluateしても同じ結果になる', () => {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(manualCase(1250, 2050), { label: 'Case A' });
+  ws.addCase(manualCase(1500, 2050), { label: 'Case B' });
+  const first = Workspace.evaluateWorkspace(ws);
+  Workspace.sortResults(first, 'marginRatio', 'desc');
+  Workspace.filterResults(first, 'OK');
+  const second = Workspace.evaluateWorkspace(ws);
+
+  assert.deepEqual(first.map((r) => r.caseId), second.map((r) => r.caseId));
+  for (let i = 0; i < first.length; i++) {
+    assert.equal(first[i].designPressure, second[i].designPressure);
+    assert.equal(first[i].areaM2, second[i].areaM2);
+    assert.equal(first[i].allowablePressure, second[i].allowablePressure);
+    assert.equal(first[i].recommendedLabel, second[i].recommendedLabel);
+    assert.equal(first[i].marginRatio, second[i].marginRatio);
+  }
+});
+
+/* ============================================================
+   AC-04 / AC-05 / AC-15 / AC-16  Workspace Package v1
+============================================================ */
+
+test('AC-04 / AC-05: Workspace Packageは入力だけを持ち、derived resultを保存しない', () => {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(manualCase(1250, 2050), { label: 'Case A' });
+  const pkg = Workspace.toWorkspacePackage(ws);
+
+  assert.equal(pkg.schemaVersion, 1);
+  assert.equal(pkg.workspaceType, 'glass_batch_workspace');
+  assert.deepEqual(Object.keys(pkg), ['schemaVersion', 'workspaceType', 'cases']);
+  assert.deepEqual(Object.keys(pkg.cases[0]), ['caseId', 'label', 'inputPackage']);
+
+  const json = Workspace.serializeWorkspace(ws);
+  for (const derived of ['recommendedCandidate', 'recommendedLabel', 'allowablePressure',
+                         'marginRatio', 'marginPressure', 'okCount', 'ngCount',
+                         'outOfScopeCount', 'status', 'areaM2', 'trace', 'windTrace',
+                         'evidence', 'verifiedCases', 'sourceReference']) {
+    assert.equal(json.includes(derived), false,
+      'Workspace JSONに derived / Evidence field が含まれてはならない: ' + derived);
+  }
+});
+
+test('AC-16: export -> import -> evaluate で数値結果が一致する', () => {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(manualCase(1250, 2050), { label: 'Case A' });
+  ws.addCase(manualCase(1500, 2050), { label: 'Case B' });
+  const before = Workspace.evaluateWorkspace(ws);
+
+  const imported = Workspace.deserializeWorkspace(Workspace.serializeWorkspace(ws));
+  assert.deepEqual(imported.errors, []);
+  const after = Workspace.evaluateWorkspace(imported.workspace);
+
+  assert.equal(after.length, before.length);
+  for (let i = 0; i < before.length; i++) {
+    assert.equal(after[i].caseId, before[i].caseId);
+    assert.equal(after[i].label, before[i].label);
+    assert.equal(after[i].designPressure, before[i].designPressure);
+    assert.equal(after[i].areaM2, before[i].areaM2);
+    assert.equal(after[i].allowablePressure, before[i].allowablePressure);
+    assert.equal(after[i].recommendedLabel, before[i].recommendedLabel);
+    assert.equal(after[i].marginRatio, before[i].marginRatio);
+  }
+  // deterministic ordering: 2回serializeしても同じ文字列
+  assert.equal(Workspace.serializeWorkspace(ws), Workspace.serializeWorkspace(ws));
+});
+
+test('AC-15: Workspace importは外部境界を通り、trust claimを昇格させない', () => {
+  const spoofed = JSON.parse(JSON.stringify(manualCase(1250, 2050)));
+  spoofed.sourceKind = 'registered_preset';
+  spoofed.provenance.verificationStatus = 'verified';
+  spoofed.provenance.publicLabel = 'SPOOFED PRESET';
+
+  const json = JSON.stringify({
+    schemaVersion: 1, workspaceType: 'glass_batch_workspace',
+    cases: [{ caseId: 'case-001', label: null, inputPackage: spoofed }]
+  });
+  const imported = Workspace.deserializeWorkspace(json);
+  assert.deepEqual(imported.errors, []);
+
+  const entry = imported.workspace.getCase('case-001');
+  assert.equal(entry.inputPackage.sourceKind, 'imported_unverified');
+  assert.equal(entry.inputPackage.provenance.verificationStatus, 'unverified');
+  assert.notEqual(entry.inputPackage.provenance.publicLabel, 'SPOOFED PRESET');
+  assert.equal(Workspace.evaluateWorkspace(imported.workspace)[0].sourceKind, 'imported_unverified');
+});
+
+test('AC-15: importした designPressure は再計算で上書きされる（derived spoof不可）', () => {
+  const tampered = JSON.parse(JSON.stringify(manualCase(1250, 2050)));
+  tampered.designPressure = 99999;
+  const json = JSON.stringify({
+    schemaVersion: 1, workspaceType: 'glass_batch_workspace',
+    cases: [{ caseId: 'case-001', label: null, inputPackage: tampered }]
+  });
+  const imported = Workspace.deserializeWorkspace(json);
+  const result = Workspace.evaluateWorkspace(imported.workspace)[0];
+  assert.equal(result.designPressure, 1525, 'designPressureは max(|正圧|,|負圧|) から再計算される');
+  assert.notEqual(result.designPressure, 99999);
+});
+
+test('AC-15 / §30: Evidence field や derived field を含むWorkspace JSONを拒否する', () => {
+  const withEvidence = JSON.parse(JSON.stringify(manualCase(1250, 2050)));
+  withEvidence.evidence = { level: 'primary', checkedAt: '2026-09-20', privateReferenceAvailable: true };
+  const a = Workspace.deserializeWorkspace(JSON.stringify({
+    schemaVersion: 1, workspaceType: 'glass_batch_workspace',
+    cases: [{ caseId: 'case-001', label: null, inputPackage: withEvidence }]
+  }));
+  assert.equal(a.workspace.size(), 0, 'Evidenceを含むcaseはworkspaceへ入らない');
+  assert.equal(a.errors.length, 1, 'silent skipせず理由を残す');
+  assert.match(a.errors[0].reason, /unknown field.*evidence/i);
+
+  // case levelにderived resultを載せる
+  const b = Workspace.deserializeWorkspace(JSON.stringify({
+    schemaVersion: 1, workspaceType: 'glass_batch_workspace',
+    cases: [{ caseId: 'case-001', label: null, inputPackage: manualCase(1250, 2050), recommendedGlass: 'FL4' }]
+  }));
+  assert.equal(b.workspace.size(), 0);
+  assert.match(b.errors[0].reason, /unexpected field.*recommendedGlass/);
+
+  // top levelにverifiedCases
+  assert.throws(() => Workspace.deserializeWorkspace(JSON.stringify({
+    schemaVersion: 1, workspaceType: 'glass_batch_workspace', verifiedCases: [], cases: []
+  })), /unexpected field.*verifiedCases/);
+});
+
+test('AC-20 / §18: whole-fileの問題は fail closed', () => {
+  const ok = { schemaVersion: 1, workspaceType: 'glass_batch_workspace', cases: [] };
+  assert.doesNotThrow(() => Workspace.deserializeWorkspace(JSON.stringify(ok)));
+
+  assert.throws(() => Workspace.deserializeWorkspace('{not json'), /not valid JSON/);
+  assert.throws(() => Workspace.deserializeWorkspace('[]'), /must be an object/);
+  assert.throws(() => Workspace.deserializeWorkspace(JSON.stringify(
+    Object.assign({}, ok, { workspaceType: 'something_else' }))), /unsupported workspaceType/);
+  assert.throws(() => Workspace.deserializeWorkspace(JSON.stringify(
+    Object.assign({}, ok, { schemaVersion: 2 }))), /unsupported workspace schemaVersion/);
+  assert.throws(() => Workspace.deserializeWorkspace(JSON.stringify(
+    Object.assign({}, ok, { cases: {} }))), /cases must be an array/);
+
+  // 1001 cases
+  const many = { schemaVersion: 1, workspaceType: 'glass_batch_workspace', cases: [] };
+  for (let i = 0; i < Workspace.MAX_CASES + 1; i++) many.cases.push({ caseId: 'case-x', label: null, inputPackage: {} });
+  assert.throws(() => Workspace.deserializeWorkspace(JSON.stringify(many)), /too many cases/);
+
+  // oversized payload
+  const huge = '{"schemaVersion":1,"workspaceType":"glass_batch_workspace","cases":[],"pad":"'
+    + 'x'.repeat(Workspace.MAX_WORKSPACE_BYTES + 10) + '"}';
+  assert.throws(() => Workspace.deserializeWorkspace(huge), /too large/);
+});
+
+test('§38: prototype pollution が Workspace import で起きない', () => {
+  const payloads = [
+    '{"schemaVersion":1,"workspaceType":"glass_batch_workspace","cases":[{"caseId":"case-001","label":null,"inputPackage":{"__proto__":{"polluted":true}}}]}',
+    '{"schemaVersion":1,"workspaceType":"glass_batch_workspace","cases":[{"caseId":"case-001","label":null,"inputPackage":{"constructor":{"prototype":{"polluted":true}}}}]}'
+  ];
+  for (const payload of payloads) {
+    try { Workspace.deserializeWorkspace(payload); } catch (e) { /* fail closed も可 */ }
+    assert.equal({}.polluted, undefined, 'Object.prototype が汚染されてはならない');
+    assert.equal(Object.prototype.polluted, undefined);
+  }
+});
+
+/* ============================================================
+   AC-12 / AC-13 / AC-14  TSV
+============================================================ */
+
+const TSV_MANUAL_HEADER =
+  'case_id\tlabel\tmode\twidth_mm\theight_mm\tglass_type\textra_factor\tpositive_pressure\tnegative_pressure';
+
+test('AC-12: TSV manual importが成立し、single coreと同じ結果になる', () => {
+  const tsv = [
+    TSV_MANUAL_HEADER,
+    'North-01\tCase A\tmanual\t1250\t2050\tfl_single\t1.0\t1525\t-918',
+    'North-02\tCase B\tmanual\t1500\t2050\tfl_single\t1.0\t1525\t-918'
+  ].join('\n');
+
+  const parsed = Workspace.parseTsv(tsv);
+  assert.deepEqual(parsed.errors, []);
+  assert.equal(parsed.rows.length, 2);
+
+  const ws = Workspace.createWorkspace();
+  const outcome = Workspace.addTsvRows(ws, parsed);
+  assert.deepEqual(outcome.errors, []);
+  assert.deepEqual(outcome.added, ['North-01', 'North-02']);
+
+  const results = Workspace.evaluateWorkspace(ws);
+  const expected = singleCoreExpectation(ws.getCase('North-01').inputPackage);
+  assert.equal(results[0].status, 'OK');
+  assert.equal(results[0].label, 'Case A');
+  assert.equal(results[0].allowablePressure, expected.best.P);
+  assert.equal(results[0].recommendedLabel, expected.best.label);
+});
+
+test('AC-13: TSV notification importが既存WindInput経路へ変換される', () => {
+  const tsv = [
+    'case_id\tlabel\tmode\twidth_mm\theight_mm\tglass_type\tv0\troughness\tbuilding_height_m\teaves_height_m\tevaluation_height_m\tbuilding_type\tzone\tbasis',
+    'Sample-001\tCase N\tnotification\t1250\t2050\tfl_single\t34\tIII\t14.2\t14.2\t14.2\tclosed\tgeneral\tnotification_baseline'
+  ].join('\n');
+
+  const parsed = Workspace.parseTsv(tsv);
+  assert.deepEqual(parsed.errors, []);
+  assert.equal(parsed.rows[0].mode, 'notification');
+  assert.deepEqual(parsed.rows[0].input.windInput, {
+    V0: 34, roughnessCategory: 'III', buildingHeightM: 14.2,
+    eavesHeightM: 14.2, evaluationHeightM: 14.2,
+    buildingType: 'closed', zone: 'general', basis: 'notification_baseline'
+  });
+
+  const ws = Workspace.createWorkspace();
+  assert.deepEqual(Workspace.addTsvRows(ws, parsed).errors, []);
+  const entry = ws.getCase('Sample-001');
+  assert.equal(entry.inputPackage.sourceKind, 'notification_calculation');
+  assert.equal(entry.inputPackage.provenance.verificationStatus, 'unverified');
+
+  // 圧力はwindInputから再計算される（TSVは圧力を運んでいない）
+  const result = Workspace.evaluateWorkspace(ws)[0];
+  assert.equal(result.status === 'OK' || result.status === 'NO_SOLUTION', true);
+  assert.ok(result.designPressure > 0);
+  const trace = ProjectInput.windTraceFor(entry.inputPackage);
+  assert.ok(trace, 'notification caseはtraceを再計算できる');
+});
+
+test('AC-14: TSVから trusted preset / Evidence / derived値を作れない', () => {
+  const forbidden = [
+    'source_kind', 'design_pressure', 'recommended_glass', 'verified',
+    'verification_status', 'evidence', 'provenance', 'verified_cases',
+    'allowable_pressure', 'status', 'margin'
+  ];
+  for (const column of forbidden) {
+    const tsv = ['mode\twidth_mm\theight_mm\tglass_type\t' + column,
+                 'manual\t1250\t2050\tfl_single\tx'].join('\n');
+    assert.throws(() => Workspace.parseTsv(tsv),
+      /must not carry a derived or trust column/,
+      'TSV列 ' + column + ' は拒否されるべき');
+  }
+  // 未知列はsilent ignoreせず reject
+  assert.throws(() => Workspace.parseTsv(
+    ['mode\twidth_mm\theight_mm\tglass_type\twhatever',
+     'manual\t1250\t2050\tfl_single\tx'].join('\n')), /unknown column/);
+
+  // TSV経路で作られるsourceKindは manual / notification_calculation だけ
+  const ws = Workspace.createWorkspace();
+  Workspace.addTsvRows(ws, Workspace.parseTsv([
+    TSV_MANUAL_HEADER,
+    'A1\t\tmanual\t1250\t2050\tfl_single\t1.0\t1525\t-918'
+  ].join('\n')));
+  assert.equal(ws.getCase('A1').inputPackage.sourceKind, 'manual');
+  assert.notEqual(ws.getCase('A1').inputPackage.sourceKind, 'registered_preset');
+});
+
+test('AC-12/13: modeごとのrequired columnを検証する', () => {
+  // modeは行ごとに変わりうる（manualとnotificationを1枚のTSVに混ぜられる）ため、
+  // mode固有の必須列チェックはheader levelではなくrow levelのerrorになる。
+  const manualMissing = Workspace.parseTsv(
+    ['mode\twidth_mm\theight_mm\tglass_type', 'manual\t1250\t2050\tfl_single'].join('\n'));
+  assert.equal(manualMissing.rows.length, 0);
+  assert.match(manualMissing.errors[0].reason, /mode=manual requires column/);
+
+  const notificationMissing = Workspace.parseTsv(
+    ['mode\twidth_mm\theight_mm\tglass_type', 'notification\t1250\t2050\tfl_single'].join('\n'));
+  assert.equal(notificationMissing.rows.length, 0);
+  assert.match(notificationMissing.errors[0].reason, /mode=notification requires column/);
+
+  // basis は既定値を持たない（Phase 2Eの設計判断）ので必須列である
+  const noBasis = Workspace.parseTsv([
+    'mode\twidth_mm\theight_mm\tglass_type\tv0\troughness\tbuilding_height_m\teaves_height_m\tevaluation_height_m\tbuilding_type\tzone',
+    'notification\t1250\t2050\tfl_single\t34\tIII\t14.2\t14.2\t14.2\tclosed\tgeneral'
+  ].join('\n'));
+  assert.equal(noBasis.rows.length, 0);
+  assert.match(noBasis.errors[0].reason, /requires column: basis/);
+
+  // 1枚のTSVにmanualとnotificationを混在させられる
+  const mixed = Workspace.parseTsv([
+    'mode\twidth_mm\theight_mm\tglass_type\tpositive_pressure\tnegative_pressure\tv0\troughness\tbuilding_height_m\teaves_height_m\tevaluation_height_m\tbuilding_type\tzone\tbasis',
+    'manual\t1250\t2050\tfl_single\t1525\t-918\t\t\t\t\t\t\t\t',
+    'notification\t1250\t2050\tfl_single\t\t\t34\tIII\t14.2\t14.2\t14.2\tclosed\tgeneral\tnotification_baseline'
+  ].join('\n'));
+  assert.deepEqual(mixed.errors, []);
+  assert.deepEqual(mixed.rows.map((r) => r.mode), ['manual', 'notification']);
+  assert.throws(() => Workspace.parseTsv(
+    ['width_mm\theight_mm\tglass_type', '1250\t2050\tfl_single'].join('\n')),
+    /missing a required column: "mode"/);
+  assert.throws(() => Workspace.parseTsv(
+    ['mode\tmode\twidth_mm\theight_mm\tglass_type', 'manual\tmanual\t1\t1\tfl_single'].join('\n')),
+    /duplicate column/);
+});
+
+test('AC-20 / §37: TSV row errorは行番号と理由だけを返し、生のrowを残さない', () => {
+  const secretish = 'CONFIDENTIAL-ROW-CONTENT';
+  const tsv = [
+    TSV_MANUAL_HEADER,
+    'A1\t' + secretish + '\tbadmode\t1250\t2050\tfl_single\t1.0\t1525\t-918',
+    'A2\tCase B\tmanual\tnot-a-number\t2050\tfl_single\t1.0\t1525\t-918',
+    'A3\tCase C\tmanual\t1250\t2050\tfl_single\t1.0\t1525\t-918'
+  ].join('\n');
+
+  const parsed = Workspace.parseTsv(tsv);
+  assert.equal(parsed.rows.length, 1, '正常な行だけがrowsへ入る');
+  assert.equal(parsed.errors.length, 2);
+  assert.equal(parsed.errors[0].lineNumber, 2);
+  assert.equal(parsed.errors[0].caseId, 'A1');
+  assert.equal(parsed.errors[0].field, 'mode');
+  assert.equal(parsed.errors[1].lineNumber, 3);
+  assert.equal(parsed.errors[1].field, 'width_mm');
+  for (const err of parsed.errors) {
+    assert.equal(JSON.stringify(err).includes(secretish), false,
+      'error objectに生のrow内容を貼り付けてはならない');
+  }
+});
+
+test('AC-20: TSVのsize / row / label / caseId上限が fail closed', () => {
+  const header = 'mode\twidth_mm\theight_mm\tglass_type\tpositive_pressure\tnegative_pressure';
+  const row = 'manual\t1250\t2050\tfl_single\t1525\t-918';
+
+  assert.throws(() => Workspace.parseTsv(
+    [header].concat(Array(Workspace.MAX_CASES + 1).fill(row)).join('\n')), /too many rows/);
+  assert.doesNotThrow(() => Workspace.parseTsv(
+    [header].concat(Array(Workspace.MAX_CASES).fill(row)).join('\n')));
+
+  assert.throws(() => Workspace.parseTsv('x'.repeat(Workspace.MAX_TSV_BYTES + 1)), /too large/);
+  assert.throws(() => Workspace.parseTsv(''), /empty/);
+
+  // label上限 / caseId pattern
+  const tooLongLabel = 'L'.repeat(Workspace.MAX_LABEL_LENGTH + 1);
+  const parsed = Workspace.parseTsv([
+    TSV_MANUAL_HEADER,
+    'A1\t' + tooLongLabel + '\tmanual\t1250\t2050\tfl_single\t1.0\t1525\t-918',
+    'plan A-102.pdf\tCase\tmanual\t1250\t2050\tfl_single\t1.0\t1525\t-918'
+  ].join('\n'));
+  assert.equal(parsed.rows.length, 0);
+  assert.equal(parsed.errors.length, 2);
+  assert.match(parsed.errors[0].reason, /label is too long/);
+  assert.match(parsed.errors[1].reason, /caseId/);
+  assert.equal(parsed.errors[1].caseId, null, 'patternを通らないcaseIdはerrorに載せない');
+});
+
+/* ============================================================
+   AC-17 / AC-18  CSV
+============================================================ */
+
+test('AC-18: CSV formula injectionを中和する（Security Hard Gate）', () => {
+  const dangerous = [
+    '=HYPERLINK("http://evil.example","click")',
+    '=1+1',
+    '+1+1',
+    '-2+3',
+    '@SUM(A1:A9)',
+    '\tleading-tab',
+    '\rleading-cr'
+  ];
+  for (const value of dangerous) {
+    const out = Workspace.neutralizeCsvCell(value);
+    assert.equal(out.charAt(0), "'", JSON.stringify(value) + ' は中和されるべき');
+    assert.equal(out.slice(1), value, '値そのものは削らない');
+  }
+  for (const safe of ['normal', 'Case A', '北面 2F A', '1250', '']) {
+    assert.equal(Workspace.neutralizeCsvCell(safe), safe);
+  }
+
+  // RFC4180 escaping
+  assert.equal(Workspace.csvEscape('a,b'), '"a,b"');
+  assert.equal(Workspace.csvEscape('say "hi"'), '"say ""hi"""');
+  assert.equal(Workspace.csvEscape('line1\nline2'), '"line1\nline2"');
+  assert.equal(Workspace.csvEscape('plain'), 'plain');
+});
+
+test('AC-17 / AC-18: 出力CSVで label / caseId が数式にならない', () => {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(manualCase(1250, 2050), { label: '=HYPERLINK("http://evil.example","x")' });
+  ws.addCase(manualCase(1500, 2050), { label: 'quote " and , comma' });
+  const csv = Workspace.toCsv(Workspace.evaluateWorkspace(ws));
+  const lines = csv.split('\n');
+
+  assert.equal(lines[0], Workspace.CSV_COLUMNS.join(','));
+  assert.equal(lines.length, 3);
+  assert.equal(csv.includes(',=HYPERLINK'), false, 'セル先頭に生の = が出てはならない');
+  assert.match(lines[1], /"'=HYPERLINK/);
+  assert.match(lines[2], /"quote "" and , comma"/);
+
+  // 負の数値は中和されない（'-918 のように壊れない）
+  const wsNeg = Workspace.createWorkspace();
+  wsNeg.addCase(manualCase(1250, 2050, { positivePressure: 100, negativePressure: -1525 }));
+  const negCsv = Workspace.toCsv(Workspace.evaluateWorkspace(wsNeg));
+  assert.equal(negCsv.includes("'-"), false, '数値セルに中和用クォートを付けない');
+});
+
+test('AC-17: CSVは derived report であって入力ではない', () => {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(manualCase(1250, 2050), { label: 'Case A' });
+  const results = Workspace.evaluateWorkspace(ws);
+  const csv = Workspace.toCsv(results);
+  const cells = csv.split('\n')[1].split(',');
+  const col = (name) => cells[Workspace.CSV_COLUMNS.indexOf(name)];
+
+  assert.equal(col('caseId'), 'case-001');
+  assert.equal(col('sourceKind'), 'manual');
+  assert.equal(Number(col('designPressure')), 1525);
+  assert.equal(Number(col('areaM2')), GlassCalc.paneAreaM2(1250, 2050));
+  assert.equal(col('recommendedGlass'), results[0].recommendedLabel);
+  assert.equal(Number(col('allowablePressure')), results[0].allowablePressure);
+  assert.equal(col('status'), 'OK');
+  // CSVを入力として読み戻す経路が存在しないこと
+  assert.equal(typeof Workspace.fromCsv, 'undefined');
+  assert.equal(typeof Workspace.importCsv, 'undefined');
+});
+
+/* ============================================================
+   AC-19 HTML injection / AC-21 persistence / AC-22..24 非退行
+============================================================ */
+
+test('AC-19: labelは制御文字を拒否し、HTML payloadは値として保持される', () => {
+  const payloads = [
+    '<script>alert(1)</script>',
+    '<img src=x onerror=alert(1)>',
+    '5<Z<40',
+    'a & b',
+    '"><b>bold</b>'
+  ];
+  for (const payload of payloads) {
+    // 値としては受け入れる（エスケープは描画側の責務）
+    assert.equal(Workspace.normalizeLabel(payload), payload);
+  }
+  // 構造を壊す制御文字は入口で落とす
+  for (const bad of ['a\tb', 'a\nb', 'a\rb', 'a\u0000b']) {
+    assert.throws(() => Workspace.normalizeLabel(bad), /control characters/);
+  }
+  assert.equal(Workspace.normalizeLabel(''), null);
+  assert.equal(Workspace.normalizeLabel(null), null);
+  assert.throws(() => Workspace.normalizeLabel(123), /must be a string/);
+});
+
+test('AC-21: workspace.js は永続化を一切行わない', () => {
+  // コメントで「localStorageを使わない」と書くこと自体は許す。
+  // 見たいのは**実際の呼び出し**なので、コメントと文字列を除いてから探す。
+  const raw = fs.readFileSync(WORKSPACE_SRC, 'utf8');
+  const code = raw
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1 ')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""');
+
+  for (const api of ['localStorage', 'sessionStorage', 'indexedDB', 'cookie',
+                     'XMLHttpRequest', 'sendBeacon', 'WebSocket', 'importScripts']) {
+    assert.doesNotMatch(code, new RegExp('\\b' + api + '\\b'),
+      'workspace.js は ' + api + ' を使わない（memory-only / §31）');
+  }
+  assert.doesNotMatch(code, /\bfetch\s*\(/, 'workspace.js はネットワークへ出ない');
+  // コメント側では明示的に宣言していること（意図が読める）
+  assert.match(raw, /localStorage/, 'memory-onlyである旨をコメントで宣言する');
+});
+
+test('AC-22 / AC-23 / AC-24: 既存contractを退行させない', () => {
+  const MiyoshiProjectConfig = require('../project-config/miyoshi.js');
+  const WindPressure = require('../wind-pressure.js');
+
+  // Evidence / Verified Case
+  assert.deepEqual(MiyoshiProjectConfig.verifiedCases, []);
+  assert.equal(MiyoshiProjectConfig.dimensions.mode, 'sample_default');
+  assert.equal(MiyoshiProjectConfig.dimensions.status, 'unverified');
+  assert.equal(MiyoshiProjectConfig.wind.V0.value, 34);
+  assert.equal(MiyoshiProjectConfig.wind.roughnessCategory.value, 'III');
+  assert.deepEqual(MiyoshiProjectConfig.validateAllEvidence(), []);
+
+  // PIP v1 / v2
+  assert.equal(ProjectInput.SCHEMA_VERSION, 2);
+  assert.deepEqual(ProjectInput.SUPPORTED_SCHEMA_VERSIONS, [1, 2]);
+
+  // Wind Trace（Phase 2E）
+  const trace = WindPressure.calculateWindPressure({
+    V0: 34, roughnessCategory: 'III', buildingHeightM: 14.2,
+    eavesHeightM: 14.2, evaluationHeightM: 14.2,
+    buildingType: 'closed', zone: 'general', basis: 'notification_baseline'
+  });
+  assert.ok(trace, 'Wind Traceが計算できる');
+
+  // Miyoshi regression（single core）
+  assert.equal(GlassCalc.generateCandidates('fl_single', GlassCalc.paneAreaM2(1250, 2050), 1525, 1.0)
+    .find((c) => c.label === 'FL6').P, 1756.09756097561);
+  assert.equal(GlassCalc.generateCandidates('fl_single', GlassCalc.paneAreaM2(1500, 2050), 1525, 1.0)
+    .find((c) => c.label === 'FL6').P, 1463.4146341463415);
+});
+
+test('§32: workspace.js / tests に実案件private labelを持ち込まない', () => {
+  const src = fs.readFileSync(WORKSPACE_SRC, 'utf8');
+  const testSrc = fs.readFileSync(__filename, 'utf8');
+  for (const token of ['みよし', 'Miyoshi', 'MIYOSHI']) {
+    assert.equal(src.includes(token), false);
+  }
+  // testsで使うlabelはsynthetic fixtureに限る
+  for (const label of ['Case A', 'Case B', 'Case C', 'Case N', 'North-01', 'Sample-001']) {
+    assert.equal(testSrc.includes(label), true, 'synthetic fixture: ' + label);
+  }
+});

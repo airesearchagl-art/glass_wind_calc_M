@@ -1534,7 +1534,8 @@ function runCalc() {
   }
 
   // 面積計算（m²）：W・Hはガラス見付寸法
-  const area = (pkg.widthMm * pkg.heightMm) / 1_000_000;
+  // Phase 2G: Batch layerと同じ関数を呼ぶ（式を2か所に持たない）
+  const area = GlassCalc.paneAreaM2(pkg.widthMm, pkg.heightMm);
 
   // 表示用にposP/negPは正圧・負圧それぞれの絶対値として揃える
   // （モード間で renderResults() の表示ロジックを共用するため）。

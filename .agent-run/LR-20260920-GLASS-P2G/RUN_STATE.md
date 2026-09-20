@@ -10,7 +10,7 @@
 - Base SHA: ace00edfe4325570e8c31cde9cf56b2c708c458d
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY` — `git rev-parse HEAD` またはPRの現在headで解決する（自己参照回避contract）
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 0 — Fresh Gate / Run Artifact / Phase 2F closeout / baseline
+- Current wave: Wave 2 — Workspace Package v1 / case lifecycle / evaluation orchestration / summary
 - Task Packet ID: LRP-20260920-GLASS-P2G
 - Task Packet revision: 1
 - Task Packet snapshot path: .agent-run/LR-20260920-GLASS-P2G/TASK_PACKET_SNAPSHOT.md
@@ -90,6 +90,13 @@ Fresh Gate                     : PASS（base SHA一致、working tree clean）
 baseline npm test              : PASS（270 pass / 0 fail）
 Phase 2F merged確認             : PASS（693226f が origin/main の祖先。merge commit ace00ed）
 architecture inventory          : PASS（§6の全symbolを実測。複製実装しない方針を確定）
+workspace.js（Wave 1-2）        : PASS（case lifecycle / evaluation / summary / grouping /
+                                 sort-filter / Workspace Package v1 / TSV / CSV）
+npm test (Wave 2)              : PASS（305 pass / 0 fail。baseline 270 → 305）
+§35 known-answer                : PASS（Case A FL6 OK / Case B FL6 NG。single coreから導出）
+§36 determinism                 : PASS（2回evaluateで同一。sort/filterは結果をmutationしない）
+AC-02 no duplicated formula     : PASS（面積式をGlassCalc.paneAreaM2へ一本化。
+                                 index.htmlとBatchが同じ関数を呼ぶ）
 ```
 
 ## Hard Checks（Quality Debt化禁止 / §41）
@@ -127,8 +134,8 @@ Wave 1-7（TASK_QUEUE.md参照）
 
 ## Next action
 
-Wave 1: Workspace contract design。既存関数のorchestrationに徹する境界を決め、
-新しい計算formulaを持たないことを構造的に保証する形を選ぶ。
+Wave 3: Batch UI（Single/Batch切替 / Add Current / Duplicate / Remove / Clear /
+sort・filter / grouping表示）。Single viewをdefaultのまま壊さないこと。
 
 ## Stop conditions status
 
