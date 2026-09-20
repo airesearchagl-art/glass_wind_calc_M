@@ -4,11 +4,12 @@
 
 | Wave | 内容 | 状態 |
 |---|---|---|
-| 0 | Fresh Gate / Run Artifact / Phase 2G closeout / baseline | IN_PROGRESS |
-| 1 | architecture inventory / Profile contract / Scenario contract | PENDING |
-| 2 | Profile module / Profile Package v1 / effective resolver | PENDING |
-| 3 | Scenario Matrix model / generator / Scenario → Workspace | PENDING |
-| 4 | UI（Profile editor / effective preview / Matrix / TSV / export-import） | PENDING |
+| 0 | Fresh Gate / Run Artifact / Phase 2G closeout / baseline | DONE |
+| 1 | architecture inventory / Profile contract / Scenario contract | DONE |
+| 2 | Profile module / Profile Package v1 / effective resolver | DONE |
+| 3 | Scenario Matrix model / generator / Scenario → Workspace | DONE |
+| 4 | UI（Profile editor / effective preview / Matrix / TSV / export-import） | DONE |
+| 4H | Boundary Closure（Required Fix A / B / C） | DONE |
 | 5 | security / privacy / mutation / limits | PENDING |
 | 6 | full regression / browser / independent verifier / repair | PENDING |
 | 7 | README / Run Artifact convergence / Draft PR / Completion Report | PENDING |
@@ -46,7 +47,7 @@
 ## Next Action
 
 ```text
-Wave 2: project-profile.js（Profile / Profile Package v1 / effective resolver）
+Wave 5: §37 attack / mutation campaign → Wave 6 → Wave 7
 ```
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管 / §44）。

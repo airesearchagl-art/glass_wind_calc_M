@@ -10,7 +10,7 @@
 - Base SHA: e7d396621536acd21934fc92892087be0f47d8d6
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 0 — Fresh Gate / Run Artifact / Phase 2G closeout / baseline
+- Current wave: Wave 4H — Boundary Closure（Required Fix A / B / C 完了）
 - Task Packet ID: LRP-20260920-GLASS-P2H
 - Task Packet revision: 1
 - Task Packet SHA-256: ec2638808e8ff1d67bde9c9619a8bd803bcd3e27083b55f85259281434031c27
@@ -99,21 +99,46 @@ architecture inventory : PASS（既存関数を実測。新しい計算経路を
 
 ## Hard Checks（Quality Debt化禁止 / §42）
 
+Wave 4Hまでの実測で置き換えた。事前にPASSと書かない。
+
 ```text
-wrong calculation                : 未評価（Wave 2以降）
-implicit Z                       : 未評価
-implicit zone                    : 未評価
-implicit basis                   : 未評価
-floor→Z inference                : 未評価
-trusted Profile promotion        : 未評価
-Evidence spoof                   : 未評価
-registered preset spoof          : 未評価
-prototype pollution              : 未評価
-private data leak                : 未評価
-Single regression                : 未評価（Wave 6）
-Batch regression                 : 未評価（Wave 6）
-snapshot mutation                : 未評価
-unbounded matrix generation      : 未評価
+wrong calculation            : PASS（Profile経由のPIPがdirect pathとdeepEqual。trace含め一致）
+implicit Z                   : PASS（Profile schemaに場所が無く、canonical gateも欠落を拒否）
+implicit zone                : PASS（同上）
+implicit basis               : PASS（既定値なし。UI実測でも windDefaults.basis is required）
+floor→Z inference            : PASS（floor/storey/level 列を専用メッセージで拒否。
+                                mapping表をソースに持たないことをtestで固定）
+trusted Profile promotion    : PASS（結果側gate。手で組んだverifiedはどの消費経路にも入れない）
+Evidence spoof               : PASS（Profile/Scenario schemaがEvidence fieldを受け付けない）
+registered preset spoof      : PASS（profileTypeはruntime_wind_profileのみ。20回使っても
+                                sourceKindはnotification_calculationのまま）
+prototype pollution          : PASS（__proto__ / constructor.prototype いずれもObject.prototype無傷）
+private data leak            : PASS（診断は位置と理由のみ。生のTSV行・生JSONを載せない）
+Single regression            : PASS（実機で往復後もbyte一致。Wave 6で再測）
+Batch regression             : PASS（Phase 2Gの342 testsすべて維持）
+snapshot mutation            : PASS（V0 34→40で既存case不変、新規caseのみ変更後の値）
+unbounded matrix generation  : PASS（MAX_SCENARIOS 1000が絶対。optionは狭めるのみ。
+                                existingCaseCountは -1/NaN/Infinity/1.5/1001 を拒否）
+```
+
+### Wave 4H で閉じた3件（Required Fix）
+
+```text
+RF-A  Matrix hard cap を呼び出し側が広げられた（maxTotal / 負のexistingCaseCount）  FIXED
+RF-B  TSVのrow isolationが格納段階で切れていた（重複IDで後続行が試されない）        FIXED
+RF-C  gateが構築時のみで、手で組んだobjectが結果側へ到達できた                      FIXED
+```
+
+いずれもコードに触る前に再現を確認した。詳細は DECISIONS.md D-005 / D-006 / D-007。
+
+### Wave 4H mutation
+
+```text
+選定 15件 / 実mutant 14件すべてkill
+A2（絶対天井の二重チェック削除）は PATCH-MISS。
+  SURVIVEDではなく、**対象コードを意図的に削除したため**である
+  （A と A2 は同じ判定で、どちらを消しても他方が拾うため両方SURVIVEDになっていた）。
+  発火しないguardを残さない判断に伴うもので、test gapではない。
 ```
 
 ## Quality Debt
@@ -129,14 +154,14 @@ none
 ## Remaining tasks
 
 ```text
-Wave 1-7（TASK_QUEUE.md参照）
+Wave 5-7（TASK_QUEUE.md参照）
 ```
 
 ## Next action
 
-Wave 2: `project-profile.js`。Profile / Profile Package v1 / effective resolver を、
-既存の `ProjectInput.fromWindCalculation()` へ渡す形だけで実装する
-（新しい pressure calculation を書かない）。
+Wave 5: §37 の攻撃・mutation campaign（Matrix cap / Profile結果側spoof /
+Scenario結果側spoof / TSV重複）。その後 Wave 6（full regression / browser /
+independent verifier）、Wave 7（README / convergence / Draft PR）。
 
 ## Stop conditions status
 

@@ -40,6 +40,9 @@ expected : >= 342 / 0 fail  → 一致
 
 | Wave | Goal | Commit（full SHA） |
 |---|---|---|
-| 0 | Fresh Gate / Run Artifact初期化 / Phase 2G closeout / baseline | `RESOLVE_AT_CHECKPOINT` |
+| 0 | Fresh Gate / Run Artifact初期化 / Phase 2G closeout / baseline | `ca1fd9f` |
+| 1-3 | Profile module / Package v1 / resolver / Scenario Matrix | `de2787e` |
+| 4 | Profile editor UI / effective preview / Matrix UI / TSV | `3346494` |
+| 4H | Boundary Closure（Required Fix A / B / C）+ artifact sync | `RESOLVE_AT_CHECKPOINT` |
 
 自己参照commit SHAは固定しない。過去commitになったwaveは確定値へ置き換える。

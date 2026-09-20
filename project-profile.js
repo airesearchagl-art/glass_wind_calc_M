@@ -227,9 +227,7 @@
 
   /** Profile Package v1（入力のみ。計算結果・検証主張を含まない / §7）。 */
   function serializeProfile(profile) {
-    if (!isPlainObject(profile) || profile.profileType !== PROFILE_TYPE) {
-      throw new Error('serializeProfile(): a runtime profile is required');
-    }
+    assertRuntimeProfile(profile, 'serializeProfile(): profile');
     var windDefaults = {};
     PROFILE_WIND_FIELDS.forEach(function (field) {
       if (profile.windDefaults[field] !== undefined) windDefaults[field] = profile.windDefaults[field];
@@ -323,6 +321,156 @@
     });
   }
 
+
+  // ============================================================
+  // Canonical result-side gates（Required Fix C）
+  // ============================================================
+  //
+  // createProfile() / createScenario() は厳格だが、それだけでは
+  // 「その関数を通ったこと」を後段が確かめられない。
+  // 手で組んだobjectが profileType と verificationStatus:'verified' を名乗れば、
+  // resolver / preview / PIP生成へ到達できてしまっていた。
+  //
+  // Phase 2F D-013 と同じ構図である:
+  //   「構築時にだけ成立するgateは、実質advisoryである」
+  //
+  // したがって**結果objectそのもの**を検査するgateを置き、
+  // 消費側（serialize / resolve / describe / PIP生成 / matrix格納）が必ず通る。
+
+  var PROFILE_RESULT_KEYS = ['schemaVersion', 'profileType', 'label', 'verificationStatus', 'windDefaults'];
+
+  function assertLabelValue(label, where) {
+    if (label === null || label === undefined) return null;
+    if (typeof label !== 'string') throw new Error(where + ' label must be a string or null');
+    // normalizeLabel と同じ規則（長さ・制御文字）を通す
+    return WorkspaceCore.normalizeLabel(label);
+  }
+
+  /**
+   * 「これは createProfile() が作りうる object か」を検査する。
+   *
+   * 手で組んだobjectでも、createProfile()の出力と構造的に区別がつかなければ通す。
+   * 区別がつく（verifiedを名乗る / Zやzoneを持つ / trust fieldがある）なら拒否する。
+   */
+  function assertRuntimeProfile(profile, where) {
+    where = where || 'profile';
+    if (!isPlainObject(profile)) {
+      throw new Error(where + ' must be a runtime profile object');
+    }
+    assertAllowedKeys(profile, PROFILE_RESULT_KEYS, where);
+    PROFILE_RESULT_KEYS.forEach(function (key) {
+      if (!Object.prototype.hasOwnProperty.call(profile, key)) {
+        throw new Error(where + ' is missing ' + key);
+      }
+    });
+    if (profile.schemaVersion !== PROFILE_SCHEMA_VERSION) {
+      throw new Error(where + ' has an unsupported schemaVersion: ' + JSON.stringify(profile.schemaVersion));
+    }
+    if (profile.profileType !== PROFILE_TYPE) {
+      throw new Error(where + ' has an unsupported profileType: ' + JSON.stringify(profile.profileType));
+    }
+    // ここが要点: runtime profile が名乗れる検証状況は1つしかない
+    if (profile.verificationStatus !== PROFILE_STATUS) {
+      throw new Error(
+        where + ' must be ' + PROFILE_STATUS + '; a runtime profile never carries ' +
+          JSON.stringify(profile.verificationStatus)
+      );
+    }
+    assertLabelValue(profile.label, where);
+
+    var windDefaults = profile.windDefaults;
+    if (!isPlainObject(windDefaults)) {
+      throw new Error(where + ' windDefaults must be an object');
+    }
+    PROFILE_PER_SCENARIO_FIELDS.forEach(function (field) {
+      if (Object.prototype.hasOwnProperty.call(windDefaults, field)) {
+        throw new Error(where + ' must not carry ' + field + ': it belongs to each scenario');
+      }
+    });
+    PROFILE_TRUST_FIELDS.forEach(function (field) {
+      if (Object.prototype.hasOwnProperty.call(windDefaults, field)) {
+        throw new Error(where + ' must not carry ' + field);
+      }
+    });
+    assertAllowedKeys(windDefaults, PROFILE_WIND_FIELDS, where + ' windDefaults');
+    PROFILE_WIND_REQUIRED.forEach(function (field) {
+      var value = windDefaults[field];
+      if (value === undefined || value === null || value === '') {
+        throw new Error(where + ' windDefaults.' + field + ' is required (no default is assumed)');
+      }
+      if (PROFILE_WIND_NUMERIC.indexOf(field) !== -1) {
+        if (typeof value !== 'number' || !isFinite(value)) {
+          throw new Error(where + ' windDefaults.' + field + ' must be a finite number');
+        }
+      } else if (typeof value !== 'string' || value.trim() === '') {
+        throw new Error(where + ' windDefaults.' + field + ' must be a non-empty string');
+      }
+    });
+    ['recurrenceYears', 'buildingShortSideM'].forEach(function (field) {
+      if (windDefaults[field] === undefined) return;
+      if (typeof windDefaults[field] !== 'number' || !isFinite(windDefaults[field])) {
+        throw new Error(where + ' windDefaults.' + field + ' must be a finite number when present');
+      }
+    });
+    return profile;
+  }
+
+  /** 「これは createScenario() が作りうる object か」を検査する。 */
+  function assertCanonicalScenario(scenario, where) {
+    where = where || 'scenario';
+    if (!isPlainObject(scenario)) {
+      throw new Error(where + ' must be an object');
+    }
+    assertAllowedKeys(scenario, SCENARIO_FIELDS, where);
+    // 必須値の欠落を先に見る。canonical shapeの検査順でたまたま label が先に出ると、
+    // 実際に足りないのが評価高さでも「label が無い」と言われて分かりにくい。
+    SCENARIO_REQUIRED.forEach(function (field) {
+      if (!Object.prototype.hasOwnProperty.call(scenario, field)) {
+        if (PROFILE_PER_SCENARIO_FIELDS.indexOf(field) !== -1) {
+          throw new Error(
+            where + ' is missing ' + field +
+              '; it is never inherited from the profile and has no default'
+          );
+        }
+        throw new Error(where + ' is missing ' + field + ' (no default is assumed)');
+      }
+    });
+    SCENARIO_FIELDS.forEach(function (field) {
+      if (!Object.prototype.hasOwnProperty.call(scenario, field)) {
+        // この2つは「既定値が無い」だけでなく「Profileから来ない」ことが要点なので、
+        // 一般の欠落メッセージで済ませずその旨を言う。
+        if (PROFILE_PER_SCENARIO_FIELDS.indexOf(field) !== -1) {
+          throw new Error(
+            where + ' is missing ' + field +
+              '; it is never inherited from the profile and has no default'
+          );
+        }
+        throw new Error(where + ' is missing ' + field + ' (no default is assumed)');
+      }
+    });
+
+    if (scenario.scenarioId !== null) {
+      if (typeof scenario.scenarioId !== 'string' ||
+          scenario.scenarioId.length > MAX_SCENARIO_ID_LENGTH ||
+          !SCENARIO_ID_PATTERN.test(scenario.scenarioId)) {
+        throw new Error(where + ' scenarioId must be null or a safe runtime id');
+      }
+    }
+    assertLabelValue(scenario.label, where);
+
+    SCENARIO_NUMERIC.forEach(function (field) {
+      if (typeof scenario[field] !== 'number' || !isFinite(scenario[field])) {
+        throw new Error(where + ' ' + field + ' must be an explicit finite number');
+      }
+    });
+    ['zone', 'glassType'].forEach(function (field) {
+      if (typeof scenario[field] !== 'string' || scenario[field].trim() === '') {
+        throw new Error(where + ' ' + field + ' must be an explicit non-empty string');
+      }
+    });
+    return scenario;
+  }
+
   // ============================================================
   // Effective input resolver（§11 / §12）
   // ============================================================
@@ -338,12 +486,9 @@
    * どれも「それらしい値」が入るため、間違っていても気づけない。
    */
   function resolveEffectiveWindInput(profile, scenario) {
-    if (!isPlainObject(profile) || profile.profileType !== PROFILE_TYPE) {
-      throw new Error('resolveEffectiveWindInput(): a runtime profile is required');
-    }
-    if (!isPlainObject(scenario)) {
-      throw new Error('resolveEffectiveWindInput(): a scenario is required');
-    }
+    // 構築経路を信用せず、渡された**結果object**を検査する（Required Fix C）
+    assertRuntimeProfile(profile, 'resolveEffectiveWindInput(): profile');
+    assertCanonicalScenario(scenario, 'resolveEffectiveWindInput(): scenario');
 
     var windInput = {};
     PROFILE_WIND_REQUIRED.forEach(function (field) {
@@ -358,12 +503,9 @@
     });
 
     // pane / location 固有。Profileからは絶対に来ない。
-    if (scenario.evaluationHeightM === undefined || scenario.evaluationHeightM === null) {
-      throw new Error('scenario evaluationHeightM is missing; it is never inherited from the profile');
-    }
-    if (scenario.zone === undefined || scenario.zone === null || scenario.zone === '') {
-      throw new Error('scenario zone is missing; it is never inherited from the profile');
-    }
+    // 欠落そのものは上の assertCanonicalScenario が「Profileから継承しない」と
+    // 明示して落とす。ここで同じ判定を重ねると、実際には到達しないコードが
+    // guardの形で残り、守られているように見えてしまう。
     windInput.evaluationHeightM = scenario.evaluationHeightM;
     windInput.zone = scenario.zone;
 
@@ -376,6 +518,10 @@
    * 「Profileから継承」とだけ書いて隠さず、**最終的なeffective値**を返す。
    */
   function describeEffectiveInput(profile, scenario) {
+    // resolve側でも検査するが、profileStatus をそのまま表示に出す関数なので
+    // ここでも明示的に通す（表示だけを別経路にしない）。
+    assertRuntimeProfile(profile, 'describeEffectiveInput(): profile');
+    assertCanonicalScenario(scenario, 'describeEffectiveInput(): scenario');
     var windInput = resolveEffectiveWindInput(profile, scenario);
     var fromProfile = [];
     var fromScenario = [];
@@ -409,6 +555,8 @@
    * Profile file が無くても Workspace JSON だけで再計算できる。
    */
   function scenarioToProjectInput(profile, scenario) {
+    assertRuntimeProfile(profile, 'scenarioToProjectInput(): profile');
+    assertCanonicalScenario(scenario, 'scenarioToProjectInput(): scenario');
     return ProjectInput.fromWindCalculation({
       widthMm: scenario.widthMm,
       heightMm: scenario.heightMm,
@@ -531,6 +679,42 @@
     return { rows: rows, errors: errors };
   }
 
+
+  /**
+   * 既存件数optionを検証する（Required Fix A）。
+   *
+   * 黙って丸めない。-1 / NaN / 1.5 / Infinity / 1001 はいずれも
+   * 「呼び出し側が上限計算を歪められる入力」なので拒否する。
+   */
+  function assertExistingCaseCount(value) {
+    if (value === undefined || value === null) return 0;
+    if (typeof value !== 'number' || !isFinite(value)) {
+      throw new Error('existingCaseCount must be a finite number');
+    }
+    if (Math.floor(value) !== value) {
+      throw new Error('existingCaseCount must be an integer');
+    }
+    if (value < 0) {
+      throw new Error('existingCaseCount must not be negative');
+    }
+    if (value > MAX_SCENARIOS) {
+      throw new Error('existingCaseCount must not exceed ' + MAX_SCENARIOS);
+    }
+    return value;
+  }
+
+  /** 呼び出し側の上限指定。狭めることしかできない。 */
+  function assertRequestedCap(value) {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== 'number' || !isFinite(value) || Math.floor(value) !== value) {
+      throw new Error('maxTotal must be an integer when provided');
+    }
+    if (value < 0) {
+      throw new Error('maxTotal must not be negative');
+    }
+    return value;
+  }
+
   /**
    * 明示された値リストから scenario を直積生成する（§19）。
    *
@@ -556,16 +740,27 @@
 
     var count = axes.reduce(function (n, axis) { return n * lists[axis].length; }, 1);
 
-    // §20: 既存Workspace件数を含めて判定する。
-    // 生成だけで上限内でも、既にcaseがあれば合計で超えうる。
-    var existing = typeof options.existingCaseCount === 'number' ? options.existingCaseCount : 0;
-    var cap = typeof options.maxTotal === 'number' ? options.maxTotal : MAX_SCENARIOS;
-    if (existing + count > cap) {
+    // Required Fix A: MAX_SCENARIOS は**絶対の天井**である。
+    //
+    // 以前は cap を options.maxTotal でそのまま置き換えていたため、
+    // 呼び出し側が maxTotal: 2000 を渡すだけで上限を広げられた。
+    // existingCaseCount に負値を渡しても同じことができた（-500 + 1400 <= 1000）。
+    // 上限は「呼び出し側が指定する値」ではなく「このmoduleが決める値」である。
+    // optionは**狭める方向にしか効かない**。
+    var existing = assertExistingCaseCount(options.existingCaseCount);
+    var requestedCap = assertRequestedCap(options.maxTotal);
+    var effectiveCap = requestedCap === null ? MAX_SCENARIOS : Math.min(MAX_SCENARIOS, requestedCap);
+
+    if (existing + count > effectiveCap) {
       throw new Error(
         'matrix would produce ' + count + ' scenarios; with ' + existing +
-          ' existing case(s) that exceeds the limit of ' + cap
+          ' existing case(s) that exceeds the limit of ' + effectiveCap
       );
     }
+    // ここで二重にチェックしない。
+    // effectiveCap は必ず MAX_SCENARIOS 以下なので、同じ判定をもう一度書いても
+    // 片方は決して発火しない。発火しないguardは「守られている」ように見えるだけで、
+    // 実際には mutation で消しても誰も気づかない（Wave 4H のmutationでそうなった）。
 
     var scenarios = [];
     lists.widths.forEach(function (w) {
@@ -623,6 +818,10 @@
       if (scenarios.length >= MAX_SCENARIOS) {
         throw new Error('scenario matrix is full (max ' + MAX_SCENARIOS + ')');
       }
+      // 生のobjectをMatrix stateへ入れない（Required Fix C）。
+      // ここを緩めると、Z欠落やverificationStatus付きのrowが保存され、
+      // 「Matrixにあるのだから妥当なはず」という前提が崩れる。
+      assertCanonicalScenario(scenario, 'scenario matrix entry');
       var id = scenario.scenarioId;
       if (id === null || id === undefined) id = nextId();
       else if (indexOf(id) !== -1) throw new Error('duplicate scenarioId: ' + JSON.stringify(id));
@@ -653,6 +852,48 @@
       get: function (scenarioId) { var i = indexOf(scenarioId); return i === -1 ? null : scenarios[i]; },
       size: function () { return scenarios.length; }
     };
+  }
+
+
+  /**
+   * parseScenarioTsv() の結果を Matrix へ格納する（Required Fix B）。
+   *
+   * parse段階のrow isolationは、格納段階まで続かなければ意味がない。
+   * 以前はUI側が
+   *     parsed.rows.forEach(function (row) { matrix.add(row.scenario); })
+   * を1つのtry/catchで囲んでいたため、途中の重複IDで例外が出ると
+   * **残りの行が試されず**、Matrixは部分的に変更されたまま
+   * 「取り込み全体が失敗」と表示されていた。
+   *
+   * 1行ずつ try/catch し、失敗した行だけを診断にする。
+   * 診断に載せるのは位置と理由だけで、生の行は持たない。
+   */
+  function addParsedScenarios(matrix, parsed) {
+    if (!matrix || typeof matrix.add !== 'function') {
+      throw new Error('addParsedScenarios(): a scenario matrix is required');
+    }
+    var rows = Array.isArray(parsed) ? parsed : (parsed && parsed.rows);
+    if (!Array.isArray(rows)) {
+      throw new Error('addParsedScenarios(): parsed rows are required');
+    }
+    // parse段階で既に落ちた行の診断は、そのまま引き継ぐ
+    var errors = (parsed && Array.isArray(parsed.errors)) ? parsed.errors.slice() : [];
+    var added = [];
+
+    rows.forEach(function (row) {
+      try {
+        added.push({ lineNumber: row.lineNumber, scenarioId: matrix.add(row.scenario) });
+      } catch (e) {
+        errors.push({
+          lineNumber: row.lineNumber,
+          caseId: row.scenario && row.scenario.scenarioId ? row.scenario.scenarioId : null,
+          label: row.scenario && row.scenario.label ? row.scenario.label : null,
+          field: null,
+          reason: WorkspaceCore.sanitizeReason(e && e.message ? e.message : String(e))
+        });
+      }
+    });
+    return { added: added, errors: errors };
   }
 
   /**
@@ -717,6 +958,9 @@
     SCENARIO_TSV_REQUIRED: Object.freeze(SCENARIO_TSV_REQUIRED),
     SCENARIO_TSV_FORBIDDEN: Object.freeze(SCENARIO_TSV_FORBIDDEN),
     parseScenarioTsv: parseScenarioTsv,
+    addParsedScenarios: addParsedScenarios,
+    assertRuntimeProfile: assertRuntimeProfile,
+    assertCanonicalScenario: assertCanonicalScenario,
     generateScenarioMatrix: generateScenarioMatrix,
     countScenarioMatrix: countScenarioMatrix,
     createScenarioMatrix: createScenarioMatrix,

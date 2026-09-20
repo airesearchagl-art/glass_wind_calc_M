@@ -2182,14 +2182,17 @@ function insertScenarioTsvTemplate() {
 function importScenarioTsv() {
   try {
     var parsed = ProjectProfile.parseScenarioTsv(document.getElementById('sc-tsv').value);
-    parsed.rows.forEach(function (row) { scenarioMatrix.add(row.scenario); });
+    // 格納段階のrow isolationは module 側のcanonical helperが持つ。
+    // ここでforEachを1つのtry/catchで囲むと、途中の重複IDで残りの行が
+    // 試されないまま「全体失敗」と表示される（Required Fix B）。
+    var outcome = ProjectProfile.addParsedScenarios(scenarioMatrix, parsed);
     renderScenarioTable();
-    var message = parsed.rows.length + ' 件を取り込みました。';
-    if (parsed.errors.length > 0) {
-      message += '\n取り込めなかった行（' + parsed.errors.length + '件）:\n'
-        + batchFormatErrors(parsed.errors);
+    var message = outcome.added.length + ' 件を取り込みました。';
+    if (outcome.errors.length > 0) {
+      message += '\n取り込めなかった行（' + outcome.errors.length + '件）:\n'
+        + batchFormatErrors(outcome.errors);
     }
-    batchSetStatus('sc-tsv-status', message, parsed.errors.length > 0);
+    batchSetStatus('sc-tsv-status', message, outcome.errors.length > 0);
   } catch (e) {
     batchSetStatus('sc-tsv-status', '取り込めません: ' + e.message, true);
   }

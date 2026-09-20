@@ -119,14 +119,17 @@ test('§12: 欠けた値を黙って埋めない（fail closed）', () => {
                     eavesHeightM: 14.2, buildingType: 'closed' }
   }), /basis is required \(no default is assumed\)/);
 
-  // resolver側でも、Z/zone を建物高さや general で代用しない
+  // resolver側でも、Z/zone を建物高さや general で代用しない。
+  // canonical gate が「Profileから継承しない」と明示して落とす。
   const profile = makeProfile();
   assert.throws(() => Profile.resolveEffectiveWindInput(profile,
-    { widthMm: 1250, heightMm: 2050, zone: 'general', glassType: 'fl_single', extraFactor: 1.0 }),
-    /never inherited from the profile/);
+    { scenarioId: null, label: null, widthMm: 1250, heightMm: 2050,
+      zone: 'general', glassType: 'fl_single', extraFactor: 1.0 }),
+    /evaluationHeightM; it is never inherited from the profile/);
   assert.throws(() => Profile.resolveEffectiveWindInput(profile,
-    { widthMm: 1250, heightMm: 2050, evaluationHeightM: 14.2, glassType: 'fl_single', extraFactor: 1.0 }),
-    /never inherited from the profile/);
+    { scenarioId: null, label: null, widthMm: 1250, heightMm: 2050,
+      evaluationHeightM: 14.2, glassType: 'fl_single', extraFactor: 1.0 }),
+    /zone; it is never inherited from the profile/);
 });
 
 /* ============================================================
@@ -434,7 +437,7 @@ test('AC-14: Scenario → Workspace は既存 addCase を通り、行単位で�
   assert.equal(outcome.added.length, 2, '壊れた1件が他を止めない');
   assert.equal(outcome.errors.length, 1);
   assert.equal(outcome.errors[0].index, 1);
-  assert.match(outcome.errors[0].reason, /never inherited from the profile/);
+  assert.match(outcome.errors[0].reason, /never inherited from the profile|is missing/);
   assert.equal(ws.size(), 2);
 
   const results = Workspace.evaluateWorkspace(ws);
@@ -679,4 +682,276 @@ test('project-profile.js は project-input.js / workspace.js の後に読み込�
     .map((f) => src.indexOf('<script src="' + f + '"></script>'));
   assert.ok(order.every((i) => i !== -1));
   assert.ok(order[0] < order[2] && order[1] < order[2]);
+});
+
+/* ============================================================
+   Required Fix A — Matrix hard cap は絶対（§2）
+============================================================ */
+
+const CAP_LISTS = (n) => ({
+  widths: Array.from({ length: n }, (_, i) => 1000 + i),
+  heights: [2050], evaluationHeights: [4.2], zones: ['general'], glassTypes: ['fl_single']
+});
+
+test('RF-A: 呼び出し側は上限を広げられない', () => {
+  // 以前は options.maxTotal が cap をそのまま置き換えていたため、
+  // maxTotal: 2000 を渡すだけで Phase 2H の上限を超えられた。
+  assert.throws(() => Profile.generateScenarioMatrix(CAP_LISTS(1400), { maxTotal: 2000 }),
+    /exceeds the limit|capped at/);
+  assert.throws(() => Profile.generateScenarioMatrix(CAP_LISTS(1001), { maxTotal: 99999 }),
+    /exceeds the limit|capped at/);
+
+  // 狭める方向には効く
+  assert.throws(() => Profile.generateScenarioMatrix(CAP_LISTS(3), { maxTotal: 2 }),
+    /exceeds the limit/);
+  assert.equal(Profile.generateScenarioMatrix(CAP_LISTS(2), { maxTotal: 2 }).length, 2);
+});
+
+test('RF-A: 1000は通り、1001は拒否する', () => {
+  assert.equal(Profile.generateScenarioMatrix(CAP_LISTS(1000)).length, 1000);
+  assert.throws(() => Profile.generateScenarioMatrix(CAP_LISTS(1001)), /exceeds the limit|capped at/);
+  // 既存件数と合計で超える場合も拒否
+  assert.throws(() => Profile.generateScenarioMatrix(CAP_LISTS(1000), { existingCaseCount: 1 }),
+    /exceeds the limit|capped at/);
+  assert.equal(Profile.generateScenarioMatrix(CAP_LISTS(999), { existingCaseCount: 1 }).length, 999);
+});
+
+test('RF-A: existingCaseCount を黙って丸めない', () => {
+  const small = CAP_LISTS(1);
+  for (const [value, pattern] of [
+    [-1, /must not be negative/],
+    [-500, /must not be negative/],
+    [NaN, /must be a finite number/],
+    [Infinity, /must be a finite number/],
+    [-Infinity, /must be a finite number/],
+    [1.5, /must be an integer/],
+    [Profile.MAX_SCENARIOS + 1, /must not exceed/],
+    ['10', /must be a finite number/]
+  ]) {
+    assert.throws(() => Profile.generateScenarioMatrix(small, { existingCaseCount: value }),
+      pattern, String(value));
+  }
+  // 負値で上限を水増しできない（-500 + 1400 <= 1000 という算術を通さない）
+  assert.throws(() => Profile.generateScenarioMatrix(CAP_LISTS(1400), { existingCaseCount: -500 }),
+    /must not be negative/);
+
+  assert.equal(Profile.generateScenarioMatrix(small, { existingCaseCount: 0 }).length, 1);
+  assert.equal(Profile.generateScenarioMatrix(small, {}).length, 1);
+});
+
+/* ============================================================
+   Required Fix B — TSV row isolation は格納段階まで続く（§3）
+============================================================ */
+
+const SCENARIO_TSV_HEADER =
+  'scenario_id\tlabel\twidth_mm\theight_mm\tevaluation_height_m\tzone\tglass_type';
+
+test('RF-B: 既存IDと重複しても、後続の正常な行は取り込まれる', () => {
+  const matrix = Profile.createScenarioMatrix();
+  matrix.add(Profile.createScenario({
+    scenarioId: 'S1', label: 'pre-existing', widthMm: 1250, heightMm: 2050,
+    evaluationHeightM: 4.2, zone: 'general', glassType: 'fl_single'
+  }));
+
+  const parsed = Profile.parseScenarioTsv([
+    SCENARIO_TSV_HEADER,
+    'S2\tCase B\t1250\t2050\t4.2\tgeneral\tfl_single',
+    'S1\tCase dup\t1500\t2050\t8.4\tcorner\tfl_single',
+    'S3\tCase C\t1500\t2050\t8.4\tcorner\tfl_single'
+  ].join('\n'));
+  const outcome = Profile.addParsedScenarios(matrix, parsed);
+
+  assert.deepEqual(outcome.added.map((a) => a.scenarioId), ['S2', 'S3'],
+    '重複の後の行も試される');
+  assert.deepEqual(outcome.added.map((a) => a.lineNumber), [2, 4]);
+  assert.equal(outcome.errors.length, 1);
+  assert.equal(outcome.errors[0].lineNumber, 3, '重複行の物理行番号');
+  assert.equal(outcome.errors[0].caseId, 'S1');
+  assert.match(outcome.errors[0].reason, /duplicate scenarioId/);
+
+  // 既存S1は上書きされない
+  assert.deepEqual(matrix.list().map((s) => s.scenarioId), ['S1', 'S2', 'S3']);
+  assert.equal(matrix.get('S1').label, 'pre-existing');
+  assert.equal(matrix.get('S1').widthMm, 1250);
+  // 正常行のrollbackも無い
+  assert.equal(matrix.size(), 3);
+});
+
+test('RF-B: 同じ貼り付け内の重複も行単位で隔離する', () => {
+  const matrix = Profile.createScenarioMatrix();
+  const parsed = Profile.parseScenarioTsv([
+    SCENARIO_TSV_HEADER,
+    'S1\tA\t1250\t2050\t4.2\tgeneral\tfl_single',
+    'S1\tB\t1500\t2050\t8.4\tcorner\tfl_single',
+    'S2\tC\t1500\t2050\t8.4\tcorner\tfl_single'
+  ].join('\n'));
+  const outcome = Profile.addParsedScenarios(matrix, parsed);
+
+  assert.deepEqual(outcome.added.map((a) => a.scenarioId), ['S1', 'S2']);
+  assert.equal(outcome.errors.length, 1);
+  assert.equal(outcome.errors[0].lineNumber, 3);
+  assert.equal(matrix.get('S1').label, 'A', '最初のS1が残る（後勝ちにしない）');
+  assert.equal(matrix.size(), 2);
+});
+
+test('RF-B: parse段階の診断も引き継ぎ、生の行を残さない', () => {
+  const matrix = Profile.createScenarioMatrix();
+  const parsed = Profile.parseScenarioTsv([
+    SCENARIO_TSV_HEADER,
+    'S1\tA\t1250\t2050\t4.2\tgeneral\tfl_single',
+    'S2\tB\t1250\t2050\tNOT-A-NUMBER\tgeneral\tfl_single'
+  ].join('\n'));
+  const outcome = Profile.addParsedScenarios(matrix, parsed);
+
+  assert.equal(outcome.added.length, 1);
+  assert.equal(outcome.errors.length, 1, 'parse段階のエラーも結果に含む');
+  assert.equal(outcome.errors[0].lineNumber, 3);
+  assert.equal(JSON.stringify(outcome.errors).includes('\t'), false);
+  assert.equal(JSON.stringify(outcome.errors).includes('NOT-A-NUMBER'), false);
+});
+
+test('RF-B: UIは canonical helper を使う（forEachを自前で囲まない）', () => {
+  const script = profileScript();
+  assert.match(script, /ProjectProfile\.addParsedScenarios\(scenarioMatrix, parsed\)/);
+  assert.doesNotMatch(script, /parsed\.rows\.forEach\([\s\S]{0,120}scenarioMatrix\.add/,
+    'UI側でforEach + 単一try/catchの形に戻さない');
+});
+
+/* ============================================================
+   Required Fix C — 結果側のcanonical gate（§4-§8）
+============================================================ */
+
+const FORGED_PROFILE = {
+  schemaVersion: 1, profileType: 'runtime_wind_profile',
+  verificationStatus: 'verified', label: 'Sample Profile',
+  windDefaults: Object.assign({}, WIND_DEFAULTS)
+};
+
+test('RF-C / §7: 手で組んだ verified Profile はどの消費経路にも入れない', () => {
+  const scenario = makeScenario();
+  for (const [name, call] of [
+    ['describeEffectiveInput', () => Profile.describeEffectiveInput(FORGED_PROFILE, scenario)],
+    ['resolveEffectiveWindInput', () => Profile.resolveEffectiveWindInput(FORGED_PROFILE, scenario)],
+    ['scenarioToProjectInput', () => Profile.scenarioToProjectInput(FORGED_PROFILE, scenario)],
+    ['serializeProfile', () => Profile.serializeProfile(FORGED_PROFILE)]
+  ]) {
+    assert.throws(call, /must be user_input_unverified/, name);
+  }
+  // 正規のProfileは通る
+  assert.equal(Profile.describeEffectiveInput(makeProfile(), scenario).profileStatus,
+    'user_input_unverified');
+});
+
+test('RF-C: assertRuntimeProfile は結果objectそのものを検査する', () => {
+  assert.doesNotThrow(() => Profile.assertRuntimeProfile(makeProfile()));
+
+  const valid = makeProfile();
+  const mutate = (patch) => Object.assign({}, valid, patch);
+  assert.throws(() => Profile.assertRuntimeProfile(mutate({ verificationStatus: 'verified' })),
+    /must be user_input_unverified/);
+  assert.throws(() => Profile.assertRuntimeProfile(mutate({ profileType: 'registered_preset' })),
+    /unsupported profileType/);
+  assert.throws(() => Profile.assertRuntimeProfile(mutate({ schemaVersion: 2 })),
+    /unsupported schemaVersion/);
+  assert.throws(() => Profile.assertRuntimeProfile(mutate({ presetId: 'x' })), /unexpected field/);
+  assert.throws(() => Profile.assertRuntimeProfile({ schemaVersion: 1, profileType: 'runtime_wind_profile',
+    verificationStatus: 'user_input_unverified', label: null }), /missing windDefaults/);
+
+  for (const field of ['evaluationHeightM', 'zone']) {
+    assert.throws(() => Profile.assertRuntimeProfile(mutate({
+      windDefaults: Object.assign({}, WIND_DEFAULTS, { [field]: field === 'zone' ? 'general' : 14.2 })
+    })), /must not carry/, field);
+  }
+  for (const field of ['evidence', 'sourceReference', 'sourceKind', 'privateReferenceAvailable']) {
+    assert.throws(() => Profile.assertRuntimeProfile(mutate({
+      windDefaults: Object.assign({}, WIND_DEFAULTS, { [field]: 'x' })
+    })), /must not carry/, field);
+  }
+  // 値の型も見る（文字列の V0 を通さない）
+  assert.throws(() => Profile.assertRuntimeProfile(mutate({
+    windDefaults: Object.assign({}, WIND_DEFAULTS, { V0: '34' })
+  })), /must be a finite number/);
+});
+
+test('RF-C / §8: 生のScenarioはMatrix stateへ入れない', () => {
+  const matrix = Profile.createScenarioMatrix();
+
+  assert.throws(() => matrix.add({
+    scenarioId: 'S1', widthMm: 1250, heightMm: 2050, zone: 'general', glassType: 'fl_single'
+  }), /missing evaluationHeightM; it is never inherited from the profile/);
+
+  assert.throws(() => matrix.add({
+    scenarioId: 'S2', label: null, widthMm: 1250, heightMm: 2050, evaluationHeightM: 14.2,
+    zone: 'general', glassType: 'fl_single', extraFactor: 1.0, verificationStatus: 'verified'
+  }), /unexpected field/);
+
+  for (const field of ['floor', 'storey', 'level', 'V0', 'basis', 'evidence', 'sourceKind']) {
+    assert.throws(() => matrix.add(Object.assign({}, makeScenario(), { [field]: 'x' })),
+      /unexpected field/, field);
+  }
+
+  assert.equal(matrix.size(), 0, '拒否された行はstateに残らない');
+  assert.match(matrix.add(makeScenario()), /^sc-\d{3}$/);
+  assert.equal(matrix.size(), 1);
+});
+
+test('RF-C: assertCanonicalScenario は明示値だけを受け取る', () => {
+  assert.doesNotThrow(() => Profile.assertCanonicalScenario(makeScenario()));
+  const valid = makeScenario();
+
+  for (const field of Profile.SCENARIO_REQUIRED) {
+    const broken = Object.assign({}, valid);
+    delete broken[field];
+    assert.throws(() => Profile.assertCanonicalScenario(broken), /is missing/, field);
+  }
+  assert.throws(() => Profile.assertCanonicalScenario(
+    Object.assign({}, valid, { widthMm: '1250' })), /must be an explicit finite number/);
+  assert.throws(() => Profile.assertCanonicalScenario(
+    Object.assign({}, valid, { zone: '' })), /must be an explicit non-empty string/);
+  assert.throws(() => Profile.assertCanonicalScenario(
+    Object.assign({}, valid, { scenarioId: '1bad' })), /safe runtime id/);
+  assert.throws(() => Profile.assertCanonicalScenario(
+    Object.assign({}, valid, { label: 'a\u0000b' })), /control characters/);
+  // scenarioId は null を許す（Matrixが採番する前の形）
+  assert.doesNotThrow(() => Profile.assertCanonicalScenario(
+    Object.assign({}, valid, { scenarioId: null })));
+});
+
+
+/* ============================================================
+   §9: 「別のguardがたまたま拾った」で済ませないための固定
+============================================================ */
+
+test('§9: 各消費関数が自分でcanonical gateを呼ぶ（推移的な呼び出しに頼らない）', () => {
+  // describeEffectiveInput / scenarioToProjectInput は内部で
+  // resolveEffectiveWindInput を呼ぶので、自分のgateを外しても
+  // 振る舞いは変わらない（mutationが生き残る）。
+  // だが「resolveがgateしているから」に依存すると、resolveの実装を変えた瞬間に
+  // 黙って無防備になる。各関数が自分で通すことをソース契約として固定する。
+  const src = fs.readFileSync(PROFILE_SRC, 'utf8');
+
+  function bodyOf(name) {
+    const start = src.indexOf('function ' + name + '(');
+    assert.notEqual(start, -1, name + ' が見つかるはず');
+    return src.slice(start, src.indexOf('\n  }', start));
+  }
+
+  for (const fn of ['describeEffectiveInput', 'scenarioToProjectInput', 'resolveEffectiveWindInput']) {
+    const body = bodyOf(fn);
+    assert.match(body, /assertRuntimeProfile\(profile,/, fn + ' は profile gate を自分で呼ぶ');
+    assert.match(body, /assertCanonicalScenario\(scenario,/, fn + ' は scenario gate を自分で呼ぶ');
+  }
+  assert.match(bodyOf('serializeProfile'), /assertRuntimeProfile\(profile,/);
+  assert.match(bodyOf('add'), /assertCanonicalScenario\(scenario,/);
+});
+
+test('§9: 上限判定は1か所だけ（発火しないguardを残さない）', () => {
+  const src = fs.readFileSync(PROFILE_SRC, 'utf8');
+  const start = src.indexOf('function generateScenarioMatrix(');
+  const body = src.slice(start, src.indexOf('\n  }', start));
+
+  // effectiveCap は必ず MAX_SCENARIOS 以下。同じ判定を二重に書くと片方が死ぬ。
+  assert.match(body, /Math\.min\(MAX_SCENARIOS, requestedCap\)/);
+  assert.equal((body.match(/existing \+ count >/g) || []).length, 1,
+    '合計件数の判定は1か所だけにする');
 });
