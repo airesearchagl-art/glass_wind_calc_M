@@ -59,10 +59,19 @@ checkpoint_push: true
 
 | Wave | Goal | Commit（full SHA） |
 |---|---|---|
-| 0 | Fresh Gate / Run Artifact初期化 / Phase 2F closeout / baseline | `RESOLVE_AT_CHECKPOINT` |
+| 0 | Fresh Gate / Run Artifact初期化 / Phase 2F closeout / baseline | `7b28a3084c9581cabf5d0daca3b36b1752d2560f` |
+| 1 / 2 | workspace.js / Workspace Package v1 / evaluation orchestration | `620310c970b3e1f0ef6767fc1e2f562705970f0f` |
+| 3 / 4 | Batch UI / TSV paste / Workspace JSON / CSV export | `8d21997bc50fc21089be3fac8689c78f33e621fb` |
+| 4H | Batch Error Contract Closure（Required Fix 1 / 2） | `8f496e4c61571f21924841cc90addea37be4b4d2` |
+| 5 | security / privacy / mutation | `1bc978c52ba3448e070fb4799bfd0db17e081386` |
+| 6 / 7 | verifier findings repair / README / artifact convergence | `6a4728e32178220efb7d10e2bed6ea55f02eaa34` |
+| — | Final Artifact Reconciliation | `current_artifact_sync_head = RESOLVE_DYNAMICALLY`（このcommit自身を含むため固定値を書かない） |
 
-自己参照commit SHAは固定しない（commit自身を含むwaveは `RESOLVE_AT_CHECKPOINT`
-のままにし、後続waveで確定値へ置き換える）。
+自己参照commit SHAは固定しない。過去のcommitになったwaveは確定値へ置き換える。
+
+**Implementation verification head**: `6a4728e32178220efb7d10e2bed6ea55f02eaa34`
+source / tests / UI の確定head。以降のcommitはRun Artifactの同期のみで、
+implementationを変更していない。
 
 ## Notes
 

@@ -9,8 +9,12 @@
 - Working branch: claude/phase2g-batch-scenario-workspace
 - Base SHA: ace00edfe4325570e8c31cde9cf56b2c708c458d
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY` — `git rev-parse HEAD` またはPRの現在headで解決する（自己参照回避contract）
-- Implementation verification head: `RESOLVE_AT_CHECKPOINT`（Wave 7 convergence commitで確定）
-- Current wave: Wave 7 — README / Run Artifact convergence / Draft PR（Wave 0-6 完了）
+- Implementation verification head: `6a4728e32178220efb7d10e2bed6ea55f02eaa34`
+  （source / tests / UI の確定head。verifier findings F1-F4の修復・README・
+  342 pass / 0 fail・browser 84 checks はすべてこのheadに対して成立する。
+  以降のcommitはRun Artifactの同期のみ）
+- Current wave: Final Run Artifact Reconciliation / Independent Verification Closure
+  （**新規Implementation Waveではない**。Wave 0-7はすべて完了）
 - Task Packet ID: LRP-20260920-GLASS-P2G
 - Task Packet revision: 1
 - Task Packet snapshot path: .agent-run/LR-20260920-GLASS-P2G/TASK_PACKET_SNAPSHOT.md
@@ -92,8 +96,16 @@ Phase 2F merged確認             : PASS（693226f が origin/main の祖先。m
 architecture inventory          : PASS（§6の全symbolを実測。複製実装しない方針を確定）
 workspace.js（Wave 1-2）        : PASS（case lifecycle / evaluation / summary / grouping /
                                  sort-filter / Workspace Package v1 / TSV / CSV）
-npm test (Wave 7 実測)          : PASS（342 pass / 0 fail。
-                                 baseline 270 → 305 → 316 → 332 → 334 → 342）
+npm test (最終実測)             : PASS（342 pass / 0 fail）
+
+  baseline (Wave 0)   : 270 pass / 0 fail
+  Wave 1-2            : 305
+  Wave 3-4            : 316
+  Wave 4H             : 332
+  Wave 5              : 334
+  Wave 6-7（最終）     : 342
+
+browser（最終実測 / §18 A-L）  : PASS（84 checks / 0 fail。page error 0 / console error 0）
 Required Fix 1 物理行番号        : PASS（A-E の5ケース。空header は fail closed）
 Required Fix 2 INVALID到達性     : PASS（§12の10項目すべて。診断は隔離層）
 §9 field contract               : PASS（二段階目の失敗は field: "project_input"）
@@ -137,6 +149,26 @@ F6  LOW       commit message / artifact の2つの記述が実装より強かっ
 
 誇張を黙って書き換えず、訂正として残す。
 数値や状態を良く見せる方向の誤りは、それ自体がHard Checkの対象である。
+
+### 最終browser実測で自分のprobeが出した誤警報（4件）
+
+最終の §18 フル実行で4件の失敗が出たが、**いずれも製品ではなくprobe側の誤り**だった。
+記録しておく。「テストが落ちた＝実装が悪い」と短絡すると、正しい実装を壊しにいく。
+
+```text
+1. 行の「削除」をクリックしたつもりが「✕ すべて削除」に当たっていた
+   （toolbarのClear Allも「削除」を含み、表より前にある）
+   → 表へscopeし直したら 2→1、case-001が消えてcase-002が残ることを確認
+2. caseIdのsortで「INVALIDは常に末尾」と assert していた
+   → caseId sortは辞書順そのもの。末尾固定は**数値キー**（値がnull）の話であり、
+     IDでの並びは方向どおりで正しい
+3. CSVに <script> がそのまま入っていることを失敗扱いにしていた
+   → CSVの中和対象は表計算ソフトが実行する**数式**であって HTML ではない。
+     CSV中の <script> は単なる文字列。HTML injectionはDOM側で別に確認している
+4. (3)と同じ混同による重複
+```
+
+修正後の最終実測は **84 checks / 0 fail**。
 
 ### 自分のテストが漏れを避けて書かれていた件（F1に付随）
 
@@ -225,6 +257,36 @@ README.md                           Phase 2G節 + 変更履歴 + ファイル構
 tests/workspace.test.js             (新規)
 tests/batch-ui.test.js              (新規)
 .agent-run/LR-20260920-GLASS-P2G/*  (新規7ファイル)
+```
+
+## Acceptance Criteria（最終実測）
+
+```text
+AC-01 Single Calculator regressionなし          : PASS（4モード実測。#result-area がbatch往復後もbyte一致）
+AC-02 Batch layerが新しい計算formulaを持たない   : PASS（ソース契約testで固定。paneAreaM2は定義1・呼出2）
+AC-03 1 case = existing PIP v2                  : PASS（Workspaceのauthoritative入力は妥当なPIP v2のみ）
+AC-04 Workspace Package v1成立                   : PASS
+AC-05 derived resultをauthoritativeに保存しない   : PASS（export に recommended/allowable/margin/trace なし）
+AC-06 Add Current Case成立                       : PASS（内部normalized PIP経由。表示丸め値を使わない）
+AC-07 Duplicate / Remove / Clear成立              : PASS（実機で 1→2→1→0。番号再利用なし）
+AC-08 Batch evaluationがrow-isolated             : PASS（壊れた行も結果に残る。silent skipなし）
+AC-09 Summary counts正しい                       : PASS（総数=OK+解なし+入力エラー。INVALIDのnullはmaxへ混ざらない）
+AC-10 recommended configuration grouping成立      : PASS（NO_SOLUTION / INVALID は独立group）
+AC-11 sort / filter成立                          : PASS（4キー×2方向・4filter。結果配列をmutationしない）
+AC-12 TSV Manual import成立                      : PASS
+AC-13 TSV Notification import成立                : PASS（basis必須）
+AC-14 TSVからtrusted preset / Evidence生成不可     : PASS（mode allowlist + 禁止列 + 未知列reject）
+AC-15 Workspace JSON importはuntrusted boundary   : PASS（ProjectInput.deserialize経由で強制降格）
+AC-16 round-tripでcalculation結果再現             : PASS（実機でnumerics byte一致）
+AC-17 CSV result export成立                      : PASS（INVALID行も出る）
+AC-18 CSV formula injection防止                   : PASS（= + - @ TAB CR を中和。数値は中和しない）
+AC-19 HTML injection防止                         : PASS（textContent/createElementのみ。実機でpayload不発）
+AC-20 size / row limit fail closed                : PASS（1000 / 1MB / 1MB / 200 / 64）
+AC-21 no localStorage / backend persistence       : PASS（実機で ls=0 / ss=0 / cookie空 / IndexedDB 0）
+AC-22 existing Evidence / Verified Case非退行      : PASS（verifiedCases [] / validateAllEvidence() []）
+AC-23 Phase 2E Wind Trace非退行                   : PASS（Er / qBar bit-equal）
+AC-24 PIP v1/v2非退行                            : PASS（schemaVersion 2 / v1 import は v2 へ migration）
+AC-25 README / Run Artifact sync                  : PASS
 ```
 
 ## Quality Debt
