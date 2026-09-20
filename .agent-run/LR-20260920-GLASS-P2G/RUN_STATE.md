@@ -10,7 +10,7 @@
 - Base SHA: ace00edfe4325570e8c31cde9cf56b2c708c458d
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY` — `git rev-parse HEAD` またはPRの現在headで解決する（自己参照回避contract）
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 2 — Workspace Package v1 / case lifecycle / evaluation orchestration / summary
+- Current wave: Wave 4 — TSV paste / Workspace JSON export-import / CSV result export（Wave 3完了）
 - Task Packet ID: LRP-20260920-GLASS-P2G
 - Task Packet revision: 1
 - Task Packet snapshot path: .agent-run/LR-20260920-GLASS-P2G/TASK_PACKET_SNAPSHOT.md
@@ -92,12 +92,26 @@ Phase 2F merged確認             : PASS（693226f が origin/main の祖先。m
 architecture inventory          : PASS（§6の全symbolを実測。複製実装しない方針を確定）
 workspace.js（Wave 1-2）        : PASS（case lifecycle / evaluation / summary / grouping /
                                  sort-filter / Workspace Package v1 / TSV / CSV）
-npm test (Wave 2)              : PASS（305 pass / 0 fail。baseline 270 → 305）
+npm test (Wave 4)              : PASS（316 pass / 0 fail。baseline 270 → 305 → 316）
 §35 known-answer                : PASS（Case A FL6 OK / Case B FL6 NG。single coreから導出）
 §36 determinism                 : PASS（2回evaluateで同一。sort/filterは結果をmutationしない）
 AC-02 no duplicated formula     : PASS（面積式をGlassCalc.paneAreaM2へ一本化。
                                  index.htmlとBatchが同じ関数を呼ぶ）
+Batch UI（Wave 3-4）            : PASS（Single既定 / 切替 / Add Current / Duplicate /
+                                 Remove / Clear / sort・filter / grouping / TSV /
+                                 Workspace JSON / CSV）
+browser（Wave 3-4実測）         : PASS（page error 0 / console error 0。
+                                 XSS payloadはtextとして描画。CSV数式は中和。
+                                 round-trip後は imported_unverified へ降格。
+                                 localStorage / sessionStorage entries = 0）
 ```
+
+### Wave 3 で見つけて直した実バグ
+
+`.main-wrap` / `.batch-wrap` は `display: grid` を持つため、`[hidden]` の既定
+`display: none` に勝ってしまい、**初期表示でSingleとBatchが同時に描画されていた**
+（Single既定というAC-01の前提が崩れていた）。`.main-wrap[hidden]` /
+`.batch-wrap[hidden]` を明示して修正し、回帰テストで固定した。
 
 ## Hard Checks（Quality Debt化禁止 / §41）
 
