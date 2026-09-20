@@ -10,7 +10,7 @@
 - Base SHA: 6a5232f65d02e2a8bfa8c2c87049b5865c584855
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 2H — evidenceSummary genericity fix 完了
+- Current wave: Wave 3 — exporters（JSON / Markdown）完了
 - Task Packet ID: LRP-20260920-GLASS-P2I
 - Task Packet revision: 1
 - Task Packet SHA-256: 901afdc2317e0b38ca90dcb69ba1fb8d8b271b1e073acd40e20d0e784c8f229e
@@ -194,6 +194,47 @@ mutation（4件 / すべてKILLED / SURVIVED 0 / PATCH-MISS 0）
   H4 bySourceKind 計算を削除                    KILLED
 ```
 
+## Wave 3 — exporters（実測）
+
+```text
+npm test : 457 pass / 0 fail（Wave 2H 439 → +18）
+追加     : canonical exporter gate（WeakSet）/ serializeReviewPackage / toMarkdown
+実測     : 1000 case + detail 50 → JSON 1.02 MiB / Markdown 0.17 MiB
+           build 71 ms / export 27 ms
+```
+
+### mutation（15件 / §24）
+
+```text
+KILLED 12 → 14 / SURVIVED 3 → 1 / PATCH-MISS 0
+
+初回 SURVIVED 3件の内訳と対処:
+  M4  toExportModel を通さず JSON.stringify(review) でも同じ出力
+      → 今は enumerable key が EXPORT_KEY_ORDER と一致しているため。
+        source contractで「reviewを直接stringifyしない」を固定 → KILLED
+  M14 診断 error の型検査に test が無かった
+      → 生の Error / object / 数値を拒否する test を追加 → KILLED
+  M15 export size cap
+      → core自身の上限（1000 case / detail 50 / label 200）の下では到達しない。
+        §19がcore-sideの上限を要求するため残す。SURVIVED のまま記録し、
+        「最大構成 < 上限の半分」という関係をtestで固定した（D-009）。
+```
+
+### Wave 3で自分のtestが見つけた欠陥2件
+
+```text
+1. runtime文字列が Markdown の構造を作れた
+   note が "- item" や "===" で始まると、箇条書き / setext見出しになった。
+   改行は正規化済みだったが、行頭文字そのものは塞いでいなかった。
+   → escape集合に - と = を追加（D-010）。
+
+2. 自分のtest markerが escape で姿を変え、不在チェックが無意味になりかけた
+   'TITLE-MARKER-7' は Markdown では 'TITLE\-MARKER\-7' になるため、
+   生の形での includes() は**漏れていても false** を返す。
+   → markerを英数字のみに変更。Phase 2G で一度やった
+     「漏れを迂回するtest」と同じ轍だったため、経緯ごと残す。
+```
+
 ## Quality Debt
 
 QUALITY_DEBT.md 参照（Wave 0時点で none）。
@@ -212,8 +253,8 @@ Wave 1-7（TASK_QUEUE.md参照）
 
 ## Next action
 
-Wave 3: comparison の仕上げ、Markdown export、Review JSON export、
-trust / Evidence presentation model。
+Wave 4: Review UI、print preview、@media print、
+redacted toggle、stale warning と再生成。
 
 ## Stop conditions status
 

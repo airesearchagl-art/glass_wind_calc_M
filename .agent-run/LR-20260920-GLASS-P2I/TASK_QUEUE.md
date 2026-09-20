@@ -7,7 +7,7 @@
 | 0 | Fresh Gate / Run Artifact / Phase 2H closeout / baseline | DONE |
 | 1 | architecture inventory / Review Package contract / privacy contract | PENDING |
 | 2 | review-package.js / snapshot / summary / case table / detail selection | DONE |
-| 3 | comparison / Evidence・trust display / Markdown / JSON | PENDING |
+| 3 | comparison / Evidence・trust display / Markdown / JSON | DONE |
 | 4 | Review UI / print view / print CSS / redacted mode / stale warning | PENDING |
 | 5 | security / privacy / injection / mutation / size limits | PENDING |
 | 6 | full regression / browser / independent verifier / repair | PENDING |
@@ -30,24 +30,24 @@
 | AC-11 | Notification trace再利用 | PASS | notification detail の trace が windTraceFor() と deepEqual（Er / qBar 一致） |
 | AC-12 | formula/input verification分離 | PASS | formulaVerificationStatus と inputVerificationStatus を別々に保持。統合badgeを作らない |
 | AC-13 | Evidence status非退行 | PENDING | |
-| AC-14 | two-case factual comparison成立 | PENDING | |
+| AC-14 | two-case factual comparison成立 | PASS | 2ケースの事実差分のみ。delta = B - A。winner/better/safer を model / JSON / Markdown のどこにも持たない |
 | AC-15 | print preview成立 | PENDING | |
 | AC-16 | print CSS成立 | PENDING | |
-| AC-17 | Markdown export成立 | PENDING | |
-| AC-18 | Review JSON export成立 | PENDING | |
-| AC-19 | Redacted mode成立 | PENDING | |
+| AC-17 | Markdown export成立 | PASS | toMarkdown() 成立。table / heading / code fence / link / script / 改行 いずれの注入も不活性 |
+| AC-18 | Review JSON export成立 | PASS | serializeReviewPackage() 成立。key順固定・決定的・sourceSnapshot非出力 |
+| AC-19 | Redacted mode成立 | PASS | redacted は model 側で伏せ、JSON と Markdown の両方で marker が出ないことを実測 |
 | AC-20 | stale detection成立 | PENDING | |
-| AC-21 | diagnostic privacy成立 | PENDING | |
-| AC-22 | HTML/Markdown injection防止 | PENDING | |
-| AC-23 | no storage/network | PENDING | |
+| AC-21 | diagnostic privacy成立 | PASS | Phase 2G が伏せた秘密らしき値は JSON / Markdown のどちらにも出ない |
+| AC-22 | HTML/Markdown injection防止 | PASS | escapeは出所で分岐しない。内部traceの 5<Z<40 も同じ扱い |
+| AC-23 | no storage/network | PASS | network / storage API を1つも持たない（source contract） |
 | AC-24 | Evidence/verifiedCases不変 | PENDING | |
 | AC-25 | README / Run Artifact actual sync | PENDING | |
 
 ## Next Action
 
 ```text
-Wave 3: comparison仕上げ / Markdown export / Review JSON export /
-trust・Evidence presentation model
+Wave 4: Review UI / print preview / @media print /
+redacted toggle / stale warning / regeneration
 ```
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管 / §47）。

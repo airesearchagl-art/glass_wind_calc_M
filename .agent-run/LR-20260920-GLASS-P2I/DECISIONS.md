@@ -111,3 +111,54 @@ Phase 2D〜2Hと同一。Resume時に再計算して一致を確認する。
 - testは**exportされたobject**を見る。ソースgrepは
   `explicitUnresolvedItemCount` 等の識別子に絞り、説明コメントに当たらないよう
   コメント除去後のコードだけを対象にする。
+
+## D-008 — exporterは「builderが作ったobject」しか受け取らない（§7）
+
+- 形だけ合わせたobjectを exporter へ渡せると、
+  `serializeReviewPackage({ reportType:'glass_design_review', summary:{好きな数字} })`
+  が本ツール名義のreportとして出てしまう。
+- **決定**: module-privateな `WeakSet` に build 結果を登録し、
+  `serializeReviewPackage` / `toMarkdown` / `isReviewStale` が印を要求する。
+  reportは一方向なので、作り直したobjectを受け取る理由が無い。
+  parseして戻したJSONも当然通らない（printした資料を再export用の入力に使わせない）。
+- WeakSetなのでreportを捨てれば印も消える。保持も漏洩もしない。
+
+## D-009 — export size cap の値と、その根拠（§19）
+
+- 実測（1000 case / detail 50 / label 200字 / note 2000字）:
+  ```text
+  Review JSON : 1.02 MiB
+  Markdown    : 0.17 MiB
+  build       : 71 ms / export 27 ms
+  ```
+- **決定**: JSON / Markdown ともに上限 **8 MiB**。
+  正当な最大reportに対して約8倍の余裕があり、
+  「valid な1000-case reportを止めない」という §19 の条件を満たす。
+- **正直な但し書き**: core自身が 1000 case / detail 50 / label 200 を
+  既に縛っているため、**この上限は現状では到達しない**。
+  mutationでcapを外してもtestは落ちない（M15 SURVIVED）。
+  §19 が core-side の上限を要求しているので残すが、
+  「今効いているguard」ではなく「将来の肥大に対する外枠」である。
+  代わりに *最大構成 < 上限の半分* という関係をtestで固定した。
+  余裕が消えたらtestが落ち、その時点で値を見直す。
+
+## D-010 — Markdown escapeは出所で分岐しない（§11 / §12）
+
+- traceの中に既に `5<Z<40 (linear interpolation)` がある。
+  「ユーザー入力だけescape」にすると、内部文字列の変更1回で前提が崩れる。
+- **決定**: report本文へ出る文字列は、出所に関係なく同じ関数を通す。
+- escape集合に `-` と `=` も入れた。**理由**: subtitle / note は行頭に置かれるため、
+  `- item` や `===` がそのまま箇条書き・setext見出しになる（実測で確認）。
+  改行は ` ⏎ ` へ正規化するので、それ以外の行頭文字は発生しない。
+- ユーザー文字列から Markdown link を作らない。`[x](javascript:...)` は
+  角括弧と丸括弧をescapeするため、linkにならずただの文字として残る。
+
+## D-011 — source contractは「実行コード」だけを見る（§23）
+
+- Markdown exporterには `'- Er / qBar: '` のような**見出し文字列**があり、
+  traceからは `t.positive.Er` を**読み出す**。どちらも再実装ではない。
+- **決定**: scanの前に (1) string literal と (2) property access を除去し、
+  残った裸の識別子だけを「自前の計算」とみなす。
+  加えて `Math.pow(` / `Math.sqrt(` / `Math.log(` / `Math.exp(` の不在も確認する。
+- 実際に `recomputeEr()` を仕込んで、この narrowed scan が落ちることを確認してから
+  採用した（広すぎず、狭すぎないことを実測した）。

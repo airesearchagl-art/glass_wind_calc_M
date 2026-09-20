@@ -81,6 +81,29 @@
   var DEFAULT_TITLE = 'ガラス設計レビュー';
   var REDACTED_PLACEHOLDER = '（非表示）';
 
+  /**
+   * buildReviewPackage() が作ったobjectだけを覚えておく（§7）。
+   *
+   * exporterはこの印を要求する。印が無ければ、
+   * 「reportTypeとsummaryを自分で書いたobject」を渡しても
+   * 本ツール名義のreportにはならない。
+   * WeakSetなので、reportを捨てれば印も消える（漏れない・溜まらない）。
+   */
+  var BUILT_REVIEWS = new WeakSet();
+
+  // export出力の上限。1000caseのreportが通る大きさで、
+  // 暴走だけを止める（実測値と根拠は DECISIONS.md D-009）。
+  var MAX_EXPORT_JSON_BYTES = 8 * 1024 * 1024;
+  var MAX_EXPORT_MARKDOWN_BYTES = 8 * 1024 * 1024;
+
+  // export objectのkey順（§8）。JSON.stringify(review) をそのまま出さない。
+  // 内部fieldがenumerableになった日に、黙ってexport契約へ混ざるのを防ぐ。
+  var EXPORT_KEY_ORDER = [
+    'schemaVersion', 'reportType', 'metadata', 'privacyMode', 'interpretation',
+    'sourceSummary', 'summary', 'groups', 'cases', 'governingCase',
+    'selectedDetails', 'comparison', 'evidenceSummary'
+  ];
+
   var BUILD_OPTION_KEYS = [
     'workspace', 'diagnostics', 'metadata',
     'detailCaseIds', 'comparisonCaseIds', 'privacyMode'
@@ -582,9 +605,7 @@
    * 手元で別物に変わる。それを避けるためにsnapshotにしてある。
    */
   function isReviewStale(review, workspace, diagnostics) {
-    if (!isPlainObject(review) || !isPlainObject(review.sourceSnapshot)) {
-      throw new Error('isReviewStale(): a review package is required');
-    }
+    assertBuiltReview(review, 'isReviewStale()');
     var current = buildSourceSnapshot(workspace, assertDiagnostics(diagnostics || []));
     return current.workspace !== review.sourceSnapshot.workspace ||
            current.diagnostics !== review.sourceSnapshot.diagnostics;
@@ -694,7 +715,293 @@
     });
 
     // 生成後にWorkspaceやmetadataが変わっても、この資料は変わらない。
-    return deepFreeze(review);
+    deepFreeze(review);
+    BUILT_REVIEWS.add(review);
+    return review;
+  }
+
+  // ============================================================
+  // Exporter gate（§7）
+  // ============================================================
+
+  /**
+   * exporterは「buildReviewPackage()が作ったobject」しか受け取らない。
+   *
+   * 形が合っているだけのobjectを通すと、
+   *   serializeReviewPackage({ reportType: 'glass_design_review',
+   *                            summary: { ...好きな数字... } })
+   * が本ツール名義のreportとして出てしまう。
+   * reportは一方向なので、作り直したobjectを受け付ける理由が無い。
+   */
+  function assertBuiltReview(review, where) {
+    if (!isPlainObject(review) || !BUILT_REVIEWS.has(review)) {
+      throw new Error(
+        where + ' requires a Review Package created by buildReviewPackage()');
+    }
+    return review;
+  }
+
+  function byteLengthOf(text) {
+    if (typeof TextEncoder === 'function') return new TextEncoder().encode(text).length;
+    return Buffer.byteLength(text, 'utf8');
+  }
+
+  function assertExportSize(text, max, what) {
+    var size = byteLengthOf(text);
+    if (size > max) {
+      throw new Error(what + ' exceeds the maximum size (' + max + ' bytes, got ' + size + ')');
+    }
+    return text;
+  }
+
+  // ============================================================
+  // Review JSON export（§8）
+  // ============================================================
+
+  /**
+   * 明示したkeyだけを、明示した順で出す。
+   * sourceSnapshot も内部の印も出さない。
+   */
+  function toExportModel(review) {
+    assertBuiltReview(review, 'serializeReviewPackage()');
+    var out = {};
+    EXPORT_KEY_ORDER.forEach(function (key) {
+      out[key] = review[key] === undefined ? null : detach(review[key]);
+    });
+    return out;
+  }
+
+  function serializeReviewPackage(review) {
+    var json = JSON.stringify(toExportModel(review), null, 2);
+    return assertExportSize(json, MAX_EXPORT_JSON_BYTES, 'review JSON');
+  }
+
+  // ============================================================
+  // Markdown export（§10 - §13）
+  // ============================================================
+
+  /**
+   * report本文に出る文字列を、**出所で区別せず**同じ関数で無害化する（§11）。
+   *
+   * ユーザー入力だけを対象にする作りにしない。
+   * traceの中には既に `5<Z<40 (linear interpolation)` のような文字列があり、
+   * 「内部由来だから安全」という前提は内部文字列の変更1回で崩れる。
+   */
+  function escapeMarkdown(value) {
+    if (value === null || value === undefined) return '—';
+    var text = String(value);
+    // 改行・タブは構造を作らせない。行頭に立てなければ、
+    // - や # や ``` が新しい見出し・箇条書き・コードフェンスにならない（§12）。
+    text = text.replace(/\r\n|\r|\n/g, ' ⏎ ').replace(/\t/g, ' ');
+    // 先に backslash、そのあと構造文字
+    text = text.replace(/\\/g, '\\\\');
+    // - と = も落とす。行頭に来ると箇条書き / setext見出しになり、
+    // runtime文字列がreportの構造を決めてしまう（noteやsubtitleは行頭に置かれる）。
+    text = text.replace(/([`*_{}\[\]()#+!|<>~=-])/g, '\\$1');
+    return text;
+  }
+
+  function fmt(value, digits) {
+    if (typeof value !== 'number' || !isFinite(value)) return '—';
+    return value.toFixed(digits === undefined ? 2 : digits);
+  }
+
+  function mdRow(cells) { return '| ' + cells.join(' | ') + ' |'; }
+
+  function markdownCaseTable(cases) {
+    var lines = [];
+    lines.push(mdRow([
+      'ケースID', 'ラベル', '出所', '検証状況', 'W (mm)', 'H (mm)', '面積 (m²)',
+      '設計風圧 (N/m²)', 'ガラス種別', '推奨構成', '許容耐力 (N/m²)',
+      '余裕率', '余裕圧 (N/m²)', '判定'
+    ]));
+    lines.push(mdRow([
+      '---', '---', '---', '---', '---:', '---:', '---:', '---:',
+      '---', '---', '---:', '---:', '---:', '---'
+    ]));
+    cases.forEach(function (c) {
+      lines.push(mdRow([
+        escapeMarkdown(c.caseId),
+        escapeMarkdown(c.label),
+        escapeMarkdown(c.isDiagnostic ? '（取り込みエラー）' : c.sourceKind),
+        escapeMarkdown(c.isDiagnostic ? '—' : c.verificationStatus),
+        fmt(c.widthMm, 0), fmt(c.heightMm, 0), fmt(c.areaM2, 4),
+        fmt(c.designPressure, 2),
+        escapeMarkdown(c.glassType),
+        escapeMarkdown(c.recommendedLabel),
+        fmt(c.allowablePressure, 2), fmt(c.marginRatio, 4), fmt(c.marginPressure, 2),
+        escapeMarkdown(c.status)
+      ]));
+    });
+    return lines;
+  }
+
+  function markdownDetail(detail) {
+    var lines = [];
+    lines.push('### ' + escapeMarkdown(detail.caseId) + ' — ' + escapeMarkdown(detail.label));
+    lines.push('');
+    lines.push('- 出所: ' + escapeMarkdown(detail.input.sourceKind) +
+               ' / 検証状況: ' + escapeMarkdown(detail.input.verificationStatus));
+    if (detail.input.publicLabel) {
+      lines.push('- 表示名: ' + escapeMarkdown(detail.input.publicLabel));
+    }
+    lines.push('- W × H: ' + fmt(detail.input.widthMm, 0) + ' × ' + fmt(detail.input.heightMm, 0) +
+               ' mm / ガラス種別: ' + escapeMarkdown(detail.input.glassType) +
+               ' / 追加係数: ' + fmt(detail.input.extraFactor, 3));
+    lines.push('- 正圧 / 負圧 / 設計風圧: ' + fmt(detail.input.positivePressure, 2) + ' / ' +
+               fmt(detail.input.negativePressure, 2) + ' / ' +
+               fmt(detail.input.designPressure, 2) + ' N/m²');
+    lines.push('');
+
+    if (!detail.traceAvailable) {
+      // 無いものを埋めない。
+      lines.push('- 風条件の内訳: ' + escapeMarkdown(detail.traceUnavailableReason));
+    } else {
+      var t = detail.windTrace;
+      lines.push('- 風条件の内訳:');
+      lines.push('    - V0 / 粗度区分: ' + fmt(t.inputs.V0, 1) + ' m/s / ' +
+                 escapeMarkdown(t.inputs.inputRoughnessCategory));
+      lines.push('    - 建物高さ / 軒高 / 評価高さ Z: ' + fmt(t.inputs.buildingHeightM, 2) + ' / ' +
+                 fmt(t.inputs.eavesHeightM, 2) + ' / ' + fmt(t.inputs.evaluationHeightM, 2) + ' m');
+      lines.push('    - 建物タイプ / 部位: ' + escapeMarkdown(t.inputs.buildingType) + ' / ' +
+                 escapeMarkdown(t.inputs.zone));
+      lines.push('    - 算定基準: ' + escapeMarkdown(t.basis.type));
+      lines.push('    - Er / qBar: ' + t.positive.Er + ' / ' + t.positive.qBar);
+      lines.push('    - Gpe分岐: ' + escapeMarkdown(t.positive.GpeBranch));
+      lines.push('    - 正圧 / 負圧: ' + fmt(t.positive.pressure, 2) + ' / ' +
+                 fmt(t.negative.pressure, 2) + ' N/m²');
+      lines.push('');
+      // 式の検証と入力の検証は別物。1つのbadgeへ潰さない（§15）。
+      lines.push('- 式の検証: ' + escapeMarkdown(t.provenance.formulaVerificationStatus));
+      lines.push('- 入力の検証: ' + escapeMarkdown(t.provenance.inputVerificationStatus));
+    }
+    lines.push('');
+    lines.push('- 推奨構成: ' + escapeMarkdown(detail.result.recommendedLabel) +
+               ' / 許容耐力: ' + fmt(detail.result.allowablePressure, 2) + ' N/m²');
+    lines.push('- 余裕率 / 余裕圧: ' + fmt(detail.result.marginRatio, 4) + ' / ' +
+               fmt(detail.result.marginPressure, 2) + ' N/m²');
+    lines.push('- 判定: ' + escapeMarkdown(detail.result.status));
+    lines.push('');
+    return lines;
+  }
+
+  function toMarkdown(review) {
+    assertBuiltReview(review, 'toMarkdown()');
+    var lines = [];
+
+    lines.push('# ' + escapeMarkdown(review.metadata.title));
+    lines.push('');
+    if (review.metadata.subtitle) {
+      lines.push(escapeMarkdown(review.metadata.subtitle));
+      lines.push('');
+    }
+
+    // 固定の解釈注意書き。runtime metadataで消せない。
+    lines.push('> **この資料の読み方**');
+    lines.push('> ');
+    lines.push('> - ' + escapeMarkdown(review.interpretation.okMeaning));
+    lines.push('> - ' + escapeMarkdown(review.interpretation.notApproval));
+    lines.push('> - ' + escapeMarkdown(review.interpretation.notVerified));
+    lines.push('> - ' + escapeMarkdown(review.interpretation.unverifiedInputNote));
+    lines.push('');
+
+    if (review.metadata.note) {
+      lines.push('## 備考');
+      lines.push('');
+      lines.push(escapeMarkdown(review.metadata.note));
+      lines.push('');
+    }
+
+    var s = review.summary;
+    lines.push('## 集計');
+    lines.push('');
+    lines.push('- 総ケース数: ' + fmt(s.totalCases, 0));
+    lines.push('- OK / 候補なし / 入力エラー: ' + fmt(s.okCount, 0) + ' / ' +
+               fmt(s.noSolutionCount, 0) + ' / ' + fmt(s.invalidCount, 0));
+    lines.push('- 適用範囲外を含むケース: ' + fmt(s.outOfScopePresentCount, 0));
+    lines.push('- 最大設計風圧: ' + fmt(s.maxDesignPressure, 2) + ' N/m²');
+    lines.push('- 最大見付面積: ' + fmt(s.maxAreaM2, 4) + ' m²');
+    lines.push('');
+
+    lines.push('## 推奨構成ごとの件数');
+    lines.push('');
+    lines.push(mdRow(['推奨構成', '件数']));
+    lines.push(mdRow(['---', '---:']));
+    review.groups.forEach(function (g) {
+      lines.push(mdRow([escapeMarkdown(g.key), fmt(g.count, 0)]));
+    });
+    lines.push('');
+
+    lines.push('## ケース一覧');
+    lines.push('');
+    markdownCaseTable(review.cases).forEach(function (l) { lines.push(l); });
+    lines.push('');
+
+    lines.push('## 支配ケース');
+    lines.push('');
+    if (review.governingCase === null) {
+      lines.push('- 支配ケースなし（計算できたケースがない）');
+    } else {
+      lines.push('- ケースID: ' + escapeMarkdown(review.governingCase.caseId));
+      lines.push('- 選定根拠: ' + escapeMarkdown(review.governingCase.basis));
+    }
+    lines.push('');
+
+    if (review.selectedDetails.length > 0) {
+      lines.push('## 選択ケースの詳細');
+      lines.push('');
+      review.selectedDetails.forEach(function (d) {
+        markdownDetail(d).forEach(function (l) { lines.push(l); });
+      });
+    }
+
+    if (review.comparison !== null) {
+      var c = review.comparison;
+      lines.push('## 2ケース比較');
+      lines.push('');
+      lines.push('- A: ' + escapeMarkdown(c.aCaseId) + ' — ' + escapeMarkdown(c.aLabel));
+      lines.push('- B: ' + escapeMarkdown(c.bCaseId) + ' — ' + escapeMarkdown(c.bLabel));
+      lines.push('');
+      lines.push(mdRow(['項目', 'A', 'B', '差分 (B - A)']));
+      lines.push(mdRow(['---', '---', '---', '---']));
+      c.fields.forEach(function (f) {
+        var isNumeric = typeof f.a === 'number' || typeof f.b === 'number';
+        lines.push(mdRow([
+          escapeMarkdown(f.field),
+          isNumeric ? fmt(f.a, 4) : escapeMarkdown(f.a),
+          isNumeric ? fmt(f.b, 4) : escapeMarkdown(f.b),
+          f.delta === null ? '—' : fmt(f.delta, 4)
+        ]));
+      });
+      lines.push('');
+      lines.push('※ 差分は事実の差であり、優劣の判定ではない。');
+      lines.push('');
+    }
+
+    lines.push('## 出所と検証状況');
+    lines.push('');
+    lines.push(mdRow(['出所', '件数']));
+    lines.push(mdRow(['---', '---:']));
+    Object.keys(review.evidenceSummary.bySourceKind).forEach(function (k) {
+      lines.push(mdRow([escapeMarkdown(k), fmt(review.evidenceSummary.bySourceKind[k], 0)]));
+    });
+    lines.push('');
+    lines.push(mdRow(['検証状況', '件数']));
+    lines.push(mdRow(['---', '---:']));
+    Object.keys(review.evidenceSummary.byVerificationStatus).forEach(function (k) {
+      lines.push(mdRow([
+        escapeMarkdown(k), fmt(review.evidenceSummary.byVerificationStatus[k], 0)]));
+    });
+    lines.push('');
+    lines.push('- ' + escapeMarkdown(review.evidenceSummary.note));
+    lines.push('');
+    lines.push('---');
+    lines.push('');
+    lines.push('表示は丸めた値である。full precisionは Review JSON を参照。');
+    lines.push('privacy mode: ' + escapeMarkdown(review.privacyMode));
+
+    var text = lines.join('\n');
+    return assertExportSize(text, MAX_EXPORT_MARKDOWN_BYTES, 'review Markdown');
   }
 
   return {
@@ -711,8 +1018,13 @@
     REDACTED_PLACEHOLDER: REDACTED_PLACEHOLDER,
     REVIEW_CASE_KEYS: Object.freeze(REVIEW_CASE_KEYS.slice()),
     INTERPRETATION: deepFreeze(detach(INTERPRETATION)),
+    MAX_EXPORT_JSON_BYTES: MAX_EXPORT_JSON_BYTES,
+    MAX_EXPORT_MARKDOWN_BYTES: MAX_EXPORT_MARKDOWN_BYTES,
+    EXPORT_KEY_ORDER: Object.freeze(EXPORT_KEY_ORDER.slice()),
     buildReviewPackage: buildReviewPackage,
-    isReviewStale: isReviewStale
+    isReviewStale: isReviewStale,
+    serializeReviewPackage: serializeReviewPackage,
+    toMarkdown: toMarkdown
   };
   // 意図的に置いていないもの:
   //   deserializeReviewPackage / importReviewPackage / loadReviewPackage /

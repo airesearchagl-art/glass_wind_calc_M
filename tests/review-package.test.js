@@ -515,11 +515,23 @@ function stripComments(src) {
 
 test('§25: review-package.js に計算の再実装が無い', () => {
   const code = stripComments(fs.readFileSync(REVIEW_SRC, 'utf8'));
+  // 探すのは「自前の計算」だけ。次の2つは再実装ではないので対象外にする。
+  //   1. traceからの読み出し   t.positive.Er   → property access
+  //   2. report本文のラベル    '- Er / qBar: ' → string literal
+  // ここを広く取りすぎると、report文言そのものが偽陽性になる（§23）。
+  const executable = code
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
+    .replace(/`(?:[^`\\]|\\.)*`/g, '``');
+  const withoutProjections = executable.replace(/\.[A-Za-z_$][\w$]*/g, '');
 
-  // 計算コアの識別子をコード中に持たない（コメントでの言及は別）
   for (const ident of ['k1', 'k2', 'Er', 'qBar', 'Cpe', 'Gpe', 'alpha', 'Zb', 'ZG']) {
-    assert.equal(new RegExp('\\b' + ident + '\\b').test(code), false,
-      ident + ' をコードに持たない');
+    assert.equal(new RegExp('\\b' + ident + '\\b').test(withoutProjections), false,
+      ident + ' を自前の変数・式として持たない');
+  }
+  // 風圧式・強度式で使う演算を持たない
+  for (const op of ['Math.pow(', 'Math.sqrt(', 'Math.log(', 'Math.exp(']) {
+    assert.equal(code.includes(op), false, op + ' を持たない');
   }
   // 計算moduleへ直接依存しない
   assert.equal(/require\(['"][^'"]*wind-pressure/.test(code), false);
@@ -692,4 +704,386 @@ test('Fix-G: Review coreは案件固有のEvidence値を持たない（コード
   // 派生できる事実だけを組み立てている
   assert.match(code, /bySourceKind/);
   assert.match(code, /byVerificationStatus/);
+});
+
+// ============================================================
+// Wave 3: exporters（canonical gate / JSON / Markdown）
+// ============================================================
+
+const MD_ATTACKS = [
+  ['pipe', '| hacked |'],
+  ['heading', '# heading'],
+  ['fence', '```code'],
+  ['script', '<script>alert(1)</script>'],
+  ['img', '<img src=x onerror=alert(1)>'],
+  ['jslink', '[link](javascript:alert(1))'],
+  ['ztrace', '5<Z<40'],
+  ['backslash', 'a\\b'],
+  ['emph', '__bold__ *em*'],
+  ['bullet', '- item'],
+  ['setext', '==='],
+  ['html', '<b>x</b>']
+];
+
+function attackWorkspace() {
+  const ws = Workspace.createWorkspace();
+  MD_ATTACKS.forEach(([id, label], i) => {
+    ws.addCase(manualPkg(), { caseId: 'A' + i, label });
+  });
+  return ws;
+}
+
+/** 行頭のバックスラッシュを除いた「生の」出現数を数える。 */
+function unescapedCount(text, char) {
+  const re = new RegExp('(^|[^\\\\])\\' + char, 'g');
+  return (text.match(re) || []).length;
+}
+
+// 1 / 2
+test('W3-1: exporterは偽装Reviewを受け取らない', () => {
+  const forged = {
+    schemaVersion: 1, reportType: 'glass_design_review',
+    metadata: { title: 'Forged', subtitle: null, note: null },
+    privacyMode: 'full', interpretation: {}, sourceSummary: {},
+    summary: { totalCases: 999, okCount: 999, governingCaseId: 'X', governingBasis: 'x' },
+    groups: [], cases: [], governingCase: null, selectedDetails: [], comparison: null,
+    evidenceSummary: {}
+  };
+  assert.throws(() => Review.serializeReviewPackage(forged),
+    /requires a Review Package created by buildReviewPackage/);
+  assert.throws(() => Review.toMarkdown(forged),
+    /requires a Review Package created by buildReviewPackage/);
+  assert.throws(() => Review.isReviewStale(forged, makeWorkspace(), []),
+    /requires a Review Package created by buildReviewPackage/);
+  for (const bad of [null, undefined, 'x', 42, []]) {
+    assert.throws(() => Review.serializeReviewPackage(bad), /requires a Review Package/);
+  }
+});
+
+test('W3-2: builderが作ったReviewは通る', () => {
+  const rev = Review.buildReviewPackage({ workspace: makeWorkspace() });
+  assert.equal(typeof Review.serializeReviewPackage(rev), 'string');
+  assert.equal(typeof Review.toMarkdown(rev), 'string');
+  assert.equal(Review.isReviewStale(rev, makeWorkspace(), []), false);
+});
+
+// 3 / 4 / 5
+test('W3-3: Review JSON は決定的で、key順も固定', () => {
+  const build = () => Review.buildReviewPackage({
+    workspace: makeWorkspace(), diagnostics: makeDiagnostics('no_such_glass'),
+    metadata: { title: 'Sample', subtitle: 's', note: 'n' },
+    detailCaseIds: ['OK1', 'NOTIF'], comparisonCaseIds: ['OK1', 'NOTIF'] });
+
+  const rev = build();
+  assert.equal(Review.serializeReviewPackage(rev), Review.serializeReviewPackage(rev));
+  // 独立に作った同条件のreviewも一致する
+  assert.equal(Review.serializeReviewPackage(build()), Review.serializeReviewPackage(build()));
+
+  const parsed = JSON.parse(Review.serializeReviewPackage(rev));
+  assert.deepEqual(Object.keys(parsed), Review.EXPORT_KEY_ORDER);
+  assert.equal(Review.serializeReviewPackage(rev).includes('generatedAt'), false);
+});
+
+test('W3-4 / W3-5: exportに sourceSnapshot も inputPackage も出ない', () => {
+  const rev = Review.buildReviewPackage({
+    workspace: makeWorkspace(), detailCaseIds: ['NOTIF'] });
+  for (const text of [Review.serializeReviewPackage(rev), Review.toMarkdown(rev)]) {
+    assert.equal(text.includes('sourceSnapshot'), false);
+    assert.equal(text.includes('inputPackage'), false);
+    assert.equal(text.includes('glass_batch_workspace'), false);
+    assert.equal(text.includes('workspaceType'), false);
+  }
+});
+
+// 6 / 7
+// markerは escape で姿が変わらない文字だけで作る。
+// 'X-MARKER-1' のようにハイフンを入れると Markdown では 'X\-MARKER\-1' になり、
+// 生の形での不在チェックが**漏れていても通ってしまう**。
+test('W3-6: redacted では両方のexporterに marker が出ない', () => {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(manualPkg(), { caseId: 'OK1', label: 'CASELABELMARKERONE' });
+  ws.addCase(notificationPkg(), { caseId: 'NOTIF', label: 'CASELABELMARKERTWO' });
+  const diagnostics = Workspace.errorsToInvalidResults(
+    Workspace.addTsvRows(Workspace.createWorkspace(), Workspace.parseTsv([
+      'case_id\tlabel\tmode\twidth_mm\theight_mm\tglass_type\tpositive_pressure\tnegative_pressure',
+      'BAD1\tDIAGLABEL-MARKER-3\tmanual\t1250\t2050\tno_such_glass\t1400\t-1400'
+    ].join('\n'))).errors, 'tsv');
+
+  const rev = Review.buildReviewPackage({
+    workspace: ws, diagnostics,
+    metadata: { title: 'TITLEMARKERFOUR', subtitle: 'SUBTITLEMARKERFIVE', note: 'NOTEMARKERSIX' },
+    detailCaseIds: ['OK1'], comparisonCaseIds: ['OK1', 'NOTIF'],
+    privacyMode: 'redacted' });
+
+  const json = Review.serializeReviewPackage(rev);
+  const md = Review.toMarkdown(rev);
+  for (const marker of ['CASELABELMARKERONE', 'CASELABELMARKERTWO', 'DIAGLABELMARKERTHREE',
+                        'TITLEMARKERFOUR', 'SUBTITLEMARKERFIVE', 'NOTEMARKERSIX']) {
+    assert.equal(json.includes(marker), false, 'JSON: ' + marker);
+    assert.equal(md.includes(marker), false, 'Markdown: ' + marker);
+  }
+  // 数値・caseId・statusは残る
+  assert.equal(json.includes('"caseId": "OK1"'), true);
+  assert.equal(md.includes('OK1'), true);
+});
+
+test('W3-7: full では label が両方のexporterに出る', () => {
+  const rev = Review.buildReviewPackage({
+    workspace: makeWorkspace(), metadata: { title: 'TITLEMARKERSEVEN' },
+    detailCaseIds: ['OK1'], privacyMode: 'full' });
+  const json = Review.serializeReviewPackage(rev);
+  const md = Review.toMarkdown(rev);
+  assert.equal(json.includes('Sample OK'), true);
+  assert.equal(md.includes('Sample OK'), true);
+  assert.equal(json.includes('TITLEMARKERSEVEN'), true);
+  assert.equal(md.includes('TITLEMARKERSEVEN'), true);
+});
+
+// 8 / 9 / 10
+test('W3-8 / W3-9 / W3-10: Review JSON は入力へ戻れない', () => {
+  const rev = Review.buildReviewPackage({ workspace: makeWorkspace() });
+  const json = Review.serializeReviewPackage(rev);
+
+  assert.throws(() => Workspace.deserializeWorkspace(json));
+  assert.throws(() => ProjectInput.deserialize(json));
+  // parseして戻しても、canonical exporterは受け取らない
+  assert.throws(() => Review.serializeReviewPackage(JSON.parse(json)),
+    /requires a Review Package created by buildReviewPackage/);
+  assert.throws(() => Review.toMarkdown(JSON.parse(json)),
+    /requires a Review Package created by buildReviewPackage/);
+});
+
+// 11-17
+test('W3-11〜17: Markdown injection はすべて不活性になる', () => {
+  const rev = Review.buildReviewPackage({
+    workspace: attackWorkspace(),
+    metadata: { title: '| T # x', subtitle: '```fence', note: '- item\n=== \n# h' } });
+  const md = Review.toMarkdown(rev);
+  const lines = md.split('\n');
+
+  // 構造はexporterが決めた分だけ
+  assert.equal(lines.filter((l) => /^```/.test(l)).length, 0, 'code fenceを作らせない');
+  assert.equal(lines.filter((l) => /^=/.test(l)).length, 0, 'setext見出しを作らせない');
+  for (const l of lines.filter((l) => /^#/.test(l))) {
+    assert.match(l, /^#{1,3} (ガラス設計レビュー|\\\||集計|推奨構成ごとの件数|ケース一覧|支配ケース|選択ケースの詳細|2ケース比較|出所と検証状況|備考|A\d)/,
+      'runtime文字列が見出しを作っていない: ' + l);
+  }
+  // 生のHTML・生のリンク構文が無い
+  assert.equal(unescapedCount(md, '<'), 0, '生の < が無い');
+  assert.equal(/(^|[^\\])\[[^\]]*\]\(/.test(md), false, '生のlink構文が無い');
+  assert.equal(md.includes('javascript:alert'), true, '文字列としては残る');
+  assert.equal(/\]\(javascript:/.test(md), false, 'linkにはならない');
+
+  // 表の列数が攻撃行でも崩れない
+  const tableRows = lines.filter((l) => /^\| A\d+ /.test(l));
+  assert.equal(tableRows.length, MD_ATTACKS.length);
+  const expectedCols = 14;
+  tableRows.forEach((row) => {
+    const cells = row.split(/(?<!\\)\|/).slice(1, -1);
+    assert.equal(cells.length, expectedCols, '列数が崩れない: ' + row.slice(0, 60));
+  });
+
+  // 内部由来の 5<Z<40 も同じ扱いで安全に残る
+  const notifRev = Review.buildReviewPackage({
+    workspace: makeWorkspace(), detailCaseIds: ['NOTIF'] });
+  const notifMd = Review.toMarkdown(notifRev);
+  assert.equal(notifMd.includes('5\\<Z\\<40'), true, '内部traceもescapeされる');
+  assert.equal(unescapedCount(notifMd, '<'), 0);
+
+  // 改行が構造を作らない
+  assert.equal(md.includes(' ⏎ '), true, '改行は可視の区切りへ正規化する');
+});
+
+// 18 / 19
+test('W3-18 / W3-19: 式と入力の検証は分かれたまま、traceは捏造されない', () => {
+  const rev = Review.buildReviewPackage({
+    workspace: makeWorkspace(), detailCaseIds: ['NOTIF', 'OK1', 'PRESET'] });
+  const md = Review.toMarkdown(rev);
+  const json = Review.serializeReviewPackage(rev);
+
+  assert.equal(md.includes('式の検証: verified\\_primary\\_source'), true);
+  assert.equal(md.includes('入力の検証: user\\_input\\_unverified'), true);
+  assert.equal(json.includes('"formulaVerificationStatus": "verified_primary_source"'), true);
+  assert.equal(json.includes('"inputVerificationStatus": "user_input_unverified"'), true);
+  assert.equal(json.includes('"verified": true'), false);
+
+  // manual / preset は trace不在のまま
+  const manual = rev.selectedDetails.find((d) => d.caseId === 'OK1');
+  const preset = rev.selectedDetails.find((d) => d.caseId === 'PRESET');
+  assert.equal(manual.traceAvailable, false);
+  assert.equal(preset.traceAvailable, false);
+  assert.equal(manual.windTrace, null);
+  assert.equal(preset.windTrace, null);
+  assert.equal(md.includes('告示風圧計算の経路を通っていない'), true);
+});
+
+// 20
+test('W3-20: 比較に優劣の語が出ない（model / JSON / Markdown）', () => {
+  const rev = Review.buildReviewPackage({
+    workspace: makeWorkspace(), comparisonCaseIds: ['OK1', 'NOTIF'] });
+  const texts = [JSON.stringify(rev), Review.serializeReviewPackage(rev), Review.toMarkdown(rev)];
+  for (const text of texts) {
+    const lower = text.toLowerCase();
+    for (const w of ['winner', 'better', 'worse', 'safer', 'approved', 'certified']) {
+      assert.equal(lower.includes(w), false, w + ' を出さない');
+    }
+    for (const w of ['優れ', '推奨すべき', '最も危険', '安全率']) {
+      assert.equal(text.includes(w), false, w + ' を出さない');
+    }
+  }
+  assert.equal(Review.toMarkdown(rev).includes('優劣の判定ではない'), true);
+});
+
+// 21 / 22
+test('W3-21 / W3-22: 秘密らしき診断値も private Evidence 参照も出ない', () => {
+  const secret = 'ProjectAlpha-DWG-0007-CONFIDENTIAL';
+  const rev = Review.buildReviewPackage({
+    workspace: makeWorkspace(), diagnostics: makeDiagnostics(secret),
+    detailCaseIds: ['PRESET'], privacyMode: 'full' });
+
+  for (const text of [Review.serializeReviewPackage(rev), Review.toMarkdown(rev)]) {
+    assert.equal(text.includes(secret), false);
+    assert.equal(text.includes('ProjectAlpha'), false);
+    // private Evidence参照を勝手に集めない
+    assert.equal(text.includes('privateReferenceAvailable'), false);
+    assert.equal(text.includes('sourceReference'), false);
+    assert.equal(text.includes('publicDescription'), false);
+    assert.equal(text.includes('drive.google'), false);
+    assert.equal(text.includes('notion.so'), false);
+  }
+});
+
+// 23
+test('W3-23: exportを繰り返しても Evidence state は動かない', () => {
+  const before = JSON.parse(JSON.stringify(MiyoshiProjectConfig.verifiedCases));
+  const rev = Review.buildReviewPackage({
+    workspace: makeWorkspace(), detailCaseIds: ['PRESET'] });
+  for (let i = 0; i < 50; i++) {
+    Review.serializeReviewPackage(rev);
+    Review.toMarkdown(rev);
+  }
+  assert.deepEqual(MiyoshiProjectConfig.verifiedCases, before);
+  assert.deepEqual(MiyoshiProjectConfig.verifiedCases, []);
+  assert.equal(MiyoshiProjectConfig.dimensions.status, 'unverified');
+  assert.deepEqual(MiyoshiProjectConfig.validateAllEvidence(), []);
+});
+
+// 24
+test('W3-24: network / storage APIを持たない', () => {
+  const code = stripComments(fs.readFileSync(REVIEW_SRC, 'utf8'));
+  for (const api of ['fetch(', 'XMLHttpRequest', 'sendBeacon', 'WebSocket',
+                     'localStorage', 'sessionStorage', 'indexedDB', 'document.cookie',
+                     'eval(', 'new Function']) {
+    assert.equal(code.includes(api), false, api + ' を持たない');
+  }
+});
+
+// §21 export immutability
+test('W3: Workspaceを変えても exporter は黙って作り直さない', () => {
+  const ws = makeWorkspace();
+  const rev = Review.buildReviewPackage({ workspace: ws, metadata: { title: 'Sample' } });
+  const jsonBefore = Review.serializeReviewPackage(rev);
+  const mdBefore = Review.toMarkdown(rev);
+
+  ws.addCase(manualPkg(), { caseId: 'LATER', label: 'added later' });
+
+  assert.equal(Review.serializeReviewPackage(rev), jsonBefore, 'JSONは同じ');
+  assert.equal(Review.toMarkdown(rev), mdBefore, 'Markdownは同じ');
+  assert.equal(jsonBefore.includes('LATER'), false);
+  assert.equal(mdBefore.includes('added later'), false);
+  assert.equal(Review.isReviewStale(rev, ws, []), true, 'staleであることは分かる');
+});
+
+// §19 size caps
+test('W3: 1000ケースのreportは通り、上限はcore側にある', () => {
+  const ws = Workspace.createWorkspace();
+  for (let i = 0; i < Workspace.MAX_CASES; i++) {
+    ws.addCase(notificationPkg(), { caseId: 'C' + i, label: 'Case ' + i });
+  }
+  const ids = [];
+  for (let i = 0; i < Review.MAX_DETAIL_CASES; i++) ids.push('C' + i);
+
+  const rev = Review.buildReviewPackage({ workspace: ws, detailCaseIds: ids });
+  const json = Review.serializeReviewPackage(rev);
+  const md = Review.toMarkdown(rev);
+
+  assert.equal(rev.cases.length, 1000);
+  assert.equal(json.length < Review.MAX_EXPORT_JSON_BYTES, true, '正当な最大reportは通る');
+  assert.equal(md.length < Review.MAX_EXPORT_MARKDOWN_BYTES, true);
+  // 上限そのものはUIではなくcoreが持つ
+  assert.equal(typeof Review.MAX_EXPORT_JSON_BYTES, 'number');
+  assert.equal(typeof Review.MAX_EXPORT_MARKDOWN_BYTES, 'number');
+});
+
+// ── mutation survivor の手当て ──────────────────────────────
+//
+// Wave 3 の mutation で 3件が生き残った。原因は3つとも違う。
+//   M4  toExportModel を通さず JSON.stringify(review) にしても同じ出力になる
+//       （今は enumerable key が EXPORT_KEY_ORDER と一致しているため）
+//   M14 診断の error 型検査に test が無かった → ここで塞ぐ
+//   M15 output size cap は core の件数上限（1000 case / detail 50）の下では
+//       そもそも到達しない
+// ────────────────────────────────────────────────────────────
+
+test('§4: 生の例外オブジェクトを reason として受け取らない（M14）', () => {
+  const ws = makeWorkspace();
+  const base = makeDiagnostics('no_such_glass')[0];
+
+  for (const badError of [{ message: 'raw' }, new Error('raw'), ['raw'], 42]) {
+    const tampered = Object.assign({}, base, { error: badError });
+    assert.throws(() => Review.buildReviewPackage({ workspace: ws, diagnostics: [tampered] }),
+      /error must be a sanitized string or null/,
+      JSON.stringify(String(badError)) + ' を受け取らない');
+  }
+  // null と string は通る（Phase 2G境界が作る正規の形）
+  assert.doesNotThrow(() => Review.buildReviewPackage({
+    workspace: ws, diagnostics: [Object.assign({}, base, { error: null })] }));
+  assert.doesNotThrow(() => Review.buildReviewPackage({ workspace: ws, diagnostics: [base] }));
+});
+
+test('§8 / §19: exporterは export model と size 検査を自分で通す（M4 / M15）', () => {
+  const code = stripComments(fs.readFileSync(REVIEW_SRC, 'utf8'));
+
+  function bodyOf(name) {
+    const start = code.indexOf('function ' + name + '(');
+    assert.notEqual(start, -1, name + ' が見つかるはず');
+    return code.slice(start, code.indexOf('\n  }', start));
+  }
+
+  // JSONは review をそのまま stringify しない。
+  // 今は enumerable key が一致するので出力は同じだが、
+  // 内部fieldが1つenumerableになった日に export契約へ黙って混ざる。
+  const jsonBody = bodyOf('serializeReviewPackage');
+  assert.match(jsonBody, /toExportModel\(review\)/);
+  assert.equal(/JSON\.stringify\(review[,)]/.test(jsonBody), false,
+    'review を直接 stringify しない');
+  assert.match(jsonBody, /assertExportSize\(/);
+  assert.match(bodyOf('toMarkdown'), /assertExportSize\(/);
+
+  // 上限はcore側の定数として存在する（UIだけの制限にしない）
+  assert.equal(Number.isFinite(Review.MAX_EXPORT_JSON_BYTES), true);
+  assert.equal(Number.isFinite(Review.MAX_EXPORT_MARKDOWN_BYTES), true);
+});
+
+test('§19: 最大構成のreportと上限の距離を実測で固定する（M15）', () => {
+  const ws = Workspace.createWorkspace();
+  for (let i = 0; i < Workspace.MAX_CASES; i++) {
+    ws.addCase(notificationPkg(), { caseId: 'C' + i, label: 'x'.repeat(Workspace.MAX_LABEL_LENGTH) });
+  }
+  const ids = [];
+  for (let i = 0; i < Review.MAX_DETAIL_CASES; i++) ids.push('C' + i);
+
+  const rev = Review.buildReviewPackage({
+    workspace: ws, detailCaseIds: ids,
+    metadata: { title: 'x'.repeat(200), note: 'y'.repeat(2000) } });
+  const json = Review.serializeReviewPackage(rev);
+  const md = Review.toMarkdown(rev);
+
+  // core自身の上限（1000 case / detail 50 / label 200）の下では、
+  // output size cap には届かない。capは将来の肥大に対する外枠であって、
+  // 現在到達するguardではない——という関係をここで固定する。
+  assert.equal(json.length < Review.MAX_EXPORT_JSON_BYTES, true);
+  assert.equal(md.length < Review.MAX_EXPORT_MARKDOWN_BYTES, true);
+  assert.equal(json.length * 2 < Review.MAX_EXPORT_JSON_BYTES, true,
+    '最大構成でも上限の半分未満であること（余裕が消えたら見直す）');
 });
