@@ -54,3 +54,36 @@ Phase 2D〜2Hと同一。Resume時に再計算して一致を確認する。
   「ユーザー由来かどうか」で分岐させない。reportへ出る文字列は等しく扱う。
   分岐させると、内部由来だから安全という前提が、
   内部文字列の変更1回で崩れる。
+
+## D-005 — source snapshot を成果物へ載せない（実測で見つけたredaction漏れ）
+
+- **実測**: `sourceSnapshot` に `WorkspaceCore.serializeWorkspace()` の出力を
+  そのまま入れて export objectへ載せていたため、redacted modeで
+  model側は `（非表示）` に伏せているのに、Review JSON には
+  **全caseのlabelと入力package一式**が素のまま出ていた。
+  自分のtest Z（redacted）が落ちて気づいた。§44 の Redacted mode leak に当たる。
+- **決定**: snapshotは `Object.defineProperty(..., { enumerable: false })` で持つ。
+  - `isReviewStale()` は今までどおり**厳密比較**を続けられる（弱いhashを作らずに済む）
+  - `JSON.stringify` / Markdown / print のどの出口にも出ない
+  - export側には free text を含まない `sourceSummary`
+    （caseCount / diagnosticCount / schemaVersion）だけを載せる
+- **§7のshapeからの逸脱**: packet §7 は `sourceSnapshot` を package内に描いているが、
+  §9（redactionはmodel側で行う）と §44（Redacted mode leak）が優先する。
+  §7自身も "Exact naming may differ if cleaner" としている。
+- 加えて、reportは derived snapshot であって入力の複製ではない。
+  入力一式を成果物へ同梱すること自体が、この phase の趣旨に反する。
+
+## D-006 — mutation M10（detach(cases)）は survivor のまま残す
+
+- `detach(cases)` を外してもtestは全部通る（SURVIVED）。
+- **理由の実測**: case rowは `pick()` で作った新しいobjectで、
+  現在 `REVIEW_CASE_KEYS` はすべて primitive 値である
+  （nested object-valued field は 0 件と実測）。
+  したがって今のcopyは**観測できる効果を持たない**。
+- **決定**: 消さずに残す。ただし coverage を主張しない。
+  - これは「別のguardが拾った生存」（D-010）ではなく、
+    「構成要素が既に新品なので、copyが今は見えない」種類の生存である
+  - `REVIEW_CASE_KEYS` に nested field が1つ加わった瞬間に load-bearing になる
+  - 外から観測できる不変条件（生成後にsourceを変えてもreportは変わらない）は
+    test U / V / W / X と deepFreeze で既に固定されている
+- survivorを黙って消すことも、testが無いのに「覆われている」と言うこともしない。

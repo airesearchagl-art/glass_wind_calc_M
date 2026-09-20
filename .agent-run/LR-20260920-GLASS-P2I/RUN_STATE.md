@@ -10,7 +10,7 @@
 - Base SHA: 6a5232f65d02e2a8bfa8c2c87049b5865c584855
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 1 — architecture inventory / contract 完了
+- Current wave: Wave 2 — review-package.js core 完了
 - Task Packet ID: LRP-20260920-GLASS-P2I
 - Task Packet revision: 1
 - Task Packet SHA-256: 901afdc2317e0b38ca90dcb69ba1fb8d8b271b1e073acd40e20d0e784c8f229e
@@ -136,6 +136,49 @@ ProjectProfile.describeEffectiveInput(profile, scenario)
   profileLabel / profileStatus / fromProfile / fromScenario / effectiveWindInput
 ```
 
+## Wave 2 — Review Package core（実測）
+
+```text
+npm test : 434 pass / 0 fail（baseline 398 → +36）
+新規     : review-package.js / tests/review-package.test.js
+```
+
+### mutation（12件 / Wave 2のguardを対象）
+
+```text
+KILLED 11 / SURVIVED 1 / PATCH-MISS 0
+
+  M1  summaryを自前計算に差し替え            KILLED（test B）
+  M2  governing basisを固定値に              KILLED（test F）
+  M3  detail cap削除                          KILLED（test L）
+  M4  redactionがlabelを素通し                KILLED（test Z）
+  M5  診断のnull検査削除                      KILLED（test §4）
+  M6  precomputed option guard削除            KILLED（test §3）
+  M7  comparison件数検査削除                  KILLED（test P）
+  M8  source snapshotをenumerableに           KILLED（test §6 / test Z）
+  M9  deepFreeze削除                          KILLED（test U/V）
+  M10 detach(cases)削除                       SURVIVED
+  M11 INVALID診断をdetailに許可               KILLED（test M）
+  M12 trace不在時に0埋めのtraceを捏造         KILLED（test G）
+```
+
+M10 は D-006 に記録した。別のguardが拾ったのではなく、
+case rowが既に新品のprimitiveだけで構成されているため、
+copyの効果が現時点では観測できない、という種類の生存である。
+coverageを主張せず、survivorのまま残した。
+
+### Wave 2で見つけて直した実害1件
+
+```text
+redacted modeで伏せたはずのlabelが Review JSON から素通りしていた。
+原因: sourceSnapshot に serializeWorkspace() の出力を入れ、
+      それを export object へ載せていたため。
+発見: 自分のtest Z が落ちた。
+対処: snapshotを非enumerableにし、exportには free text を含まない
+      sourceSummary だけを載せる（D-005）。
+§44 の Redacted mode leak に当たるため、Quality Debt化せず即修理した。
+```
+
 ## Quality Debt
 
 QUALITY_DEBT.md 参照（Wave 0時点で none）。
@@ -154,9 +197,8 @@ Wave 1-7（TASK_QUEUE.md参照）
 
 ## Next action
 
-Wave 2: review-package.js を新設。
-snapshot（source signature付き）/ summary（WorkspaceCore.summarizeを呼ぶ）/
-case table（projection）/ detail selection（cap付き）を実装する。
+Wave 3: comparison の仕上げ、Markdown export、Review JSON export、
+trust / Evidence presentation model。
 
 ## Stop conditions status
 
