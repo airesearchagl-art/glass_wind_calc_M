@@ -52,3 +52,46 @@ packet §25 は max workspace JSON / max TSV を「1MB程度」とするが、
 決定: workspace側の上限を別に定義し、各caseは従来どおり
 ProjectInputの16KB / depth 8 / string 512 boundaryを通す。
 どちらか一方でも超過したら fail closed。
+
+## D-003 — TSVの行番号は物理行で数える（Required Fix 1）
+
+- **指摘（正当）**: `parseTsv` は空行を**先に捨ててから**番号を振っていた。
+  そのため `header / valid / blank / invalid` というTSVで、invalid行が
+  「3行目」と報告された。ユーザーのExcel上では4行目である。
+  §37は「ユーザーが自分のシート上で行を特定できること」を求めるので、これは違反。
+- **決定**: CRLF/CRをLFへ正規化 → 物理行へ分割 → headerは**必ず物理1行目** →
+  空行はcaseにしないが**番号は物理位置のまま**。
+  `MAX_CASES` は実データ行数で数える（空行でcapを回避できないように）。
+  物理1行目が空ならheaderを後ろへずらさず fail closed。
+- 回帰テスト: A（blank1つ→4行目）/ B（連続blank→6,8行目）/ C（末尾blank→phantomなし）/
+  D（1000行+blank→通る）/ E（1001行→reject）/ 空header→fail closed。
+
+## D-004 — 壊れた行は「隔離した診断レイヤ」として見せる（Required Fix 2）
+
+- **指摘（正当）**: `CASE_STATUSES` / filter / `summary.invalidCount` は INVALID を
+  持っていたが、外部importで弾かれた行はWorkspaceへ入らないため
+  `evaluateWorkspace()` から見えず、**INVALIDが事実上のdead enum**だった。§18違反。
+- **採らなかった案**: 壊れたinputPackageをWorkspaceへ入れてINVALIDを出す。
+  Workspaceがauthoritativeに持つ入力は常に妥当なPIP v2でなければならず（AC-03）、
+  これをやると `serializeWorkspace()` が壊れた入力を書き出してしまう。
+- **決定**: 妥当caseとは**別の層**に、表示専用の診断レコードを持つ。
+  - `errorToInvalidResult(error, source)` / `errorsToInvalidResults()` /
+    `mergeEvaluationResults(valid, invalid)` を workspace.js のcanonical helperとする。
+    index.html側でその場しのぎのINVALID行を組み立てない（§5）。
+  - 診断レコードは計算に属する値を**すべてnull**で持つ。
+    nullなので summary の max値・governing case へ混ざらない。
+  - `ProjectInput` / `GlassCalc` / `WindPressure` / `serializeWorkspace` のいずれにも渡らない。
+  - TSV importはWorkspaceへ**追加**するので診断も追加、
+    Workspace JSON importはWorkspaceを**置き換える**ので診断も置き換える
+    （前回importの診断が今のファイルに無い行として居座らないように）。
+
+## D-005 — 二段階目の失敗には安定したfieldを返す（§9）
+
+`parseTsv` を通った後、既存ProjectInputのvalidationで落ちることがある
+（glass type / 寸法範囲 / extraFactor / 圧力contract / wind contract）。
+
+- 判定ロジックをworkspace.js側へ複製すると契約が二重になり必ずズレる。
+- error textを正規表現で切り分けるのは脆い。
+
+したがって `field: 'project_input'` という**安定した上位field**を返す（§9-A）。
+`field: null` は、fieldに属しようがない構造的失敗のために残す。

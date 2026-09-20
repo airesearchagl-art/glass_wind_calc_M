@@ -605,12 +605,15 @@ test('AC-12/13: modeごとのrequired columnを検証する', () => {
     /duplicate column/);
 });
 
-test('AC-20 / §37: TSV row errorは行番号と理由だけを返し、生のrowを残さない', () => {
-  const secretish = 'CONFIDENTIAL-ROW-CONTENT';
+test('AC-20 / §37: TSV row errorは位置と理由だけを返し、生のrowを残さない', () => {
+  // §8: 診断に載せてよいのは lineNumber / 安全なcaseId / field / reason と、
+  // normalizeLabel を通った label だけ。生の行そのものは載せない。
+  // そこで「載ってはいけない値」はlabel以外のセルに置いて確認する。
+  const secretish = 'CONFIDENTIAL-CELL-CONTENT';
   const tsv = [
     TSV_MANUAL_HEADER,
-    'A1\t' + secretish + '\tbadmode\t1250\t2050\tfl_single\t1.0\t1525\t-918',
-    'A2\tCase B\tmanual\tnot-a-number\t2050\tfl_single\t1.0\t1525\t-918',
+    'A1\tCase A\tbadmode\t1250\t2050\t' + secretish + '\t1.0\t1525\t-918',
+    'A2\tCase B\tmanual\tnot-a-number\t2050\t' + secretish + '\t1.0\t1525\t-918',
     'A3\tCase C\tmanual\t1250\t2050\tfl_single\t1.0\t1525\t-918'
   ].join('\n');
 
@@ -623,9 +626,16 @@ test('AC-20 / §37: TSV row errorは行番号と理由だけを返し、生のro
   assert.equal(parsed.errors[1].lineNumber, 3);
   assert.equal(parsed.errors[1].field, 'width_mm');
   for (const err of parsed.errors) {
-    assert.equal(JSON.stringify(err).includes(secretish), false,
-      'error objectに生のrow内容を貼り付けてはならない');
+    const serialized = JSON.stringify(err);
+    assert.equal(serialized.includes(secretish), false,
+      'error objectに他セルの内容を貼り付けてはならない');
+    assert.equal(serialized.includes('\t'), false, '生のtab区切り行を貼り付けない');
+    // 許可されたkeyだけを持つ
+    assert.deepEqual(Object.keys(err).sort(),
+      ['caseId', 'field', 'label', 'lineNumber', 'reason']);
   }
+  // normalizeLabelを通ったlabelは載せてよい（§8）
+  assert.equal(parsed.errors[0].label, 'Case A');
 });
 
 test('AC-20: TSVのsize / row / label / caseId上限が fail closed', () => {
@@ -638,7 +648,7 @@ test('AC-20: TSVのsize / row / label / caseId上限が fail closed', () => {
     [header].concat(Array(Workspace.MAX_CASES).fill(row)).join('\n')));
 
   assert.throws(() => Workspace.parseTsv('x'.repeat(Workspace.MAX_TSV_BYTES + 1)), /too large/);
-  assert.throws(() => Workspace.parseTsv(''), /empty/);
+  assert.throws(() => Workspace.parseTsv(''), /empty|must be the header row/);
 
   // label上限 / caseId pattern
   const tooLongLabel = 'L'.repeat(Workspace.MAX_LABEL_LENGTH + 1);
@@ -810,4 +820,308 @@ test('§32: workspace.js / tests に実案件private labelを持ち込まない'
   for (const label of ['Case A', 'Case B', 'Case C', 'Case N', 'North-01', 'Sample-001']) {
     assert.equal(testSrc.includes(label), true, 'synthetic fixture: ' + label);
   }
+});
+
+/* ============================================================
+   Required Fix 1 — 物理TSV行番号（§3 / §37）
+============================================================ */
+
+const TSV_MIN_HEADER = 'case_id\tmode\twidth_mm\theight_mm\tglass_type\tpositive_pressure\tnegative_pressure';
+const TSV_OK_ROW = 'manual\t1250\t2050\tfl_single\t1525\t-918';
+const TSV_BAD_ROW = 'manual\tNOT-A-NUMBER\t2050\tfl_single\t1525\t-918';
+
+test('RF1-A: header / valid / blank / invalid で invalid は 4行目として報告される', () => {
+  const parsed = Workspace.parseTsv([
+    TSV_MIN_HEADER,
+    'A1\t' + TSV_OK_ROW,
+    '',
+    'A2\t' + TSV_BAD_ROW
+  ].join('\n'));
+  assert.equal(parsed.rows.length, 1);
+  assert.equal(parsed.errors.length, 1);
+  assert.equal(parsed.errors[0].lineNumber, 4,
+    '空行を捨ててから番号を振ると3になる。ユーザーのシート上の行は4である');
+  assert.equal(parsed.errors[0].caseId, 'A2');
+});
+
+test('RF1-B: 連続した空行があっても後続行の番号がずれない', () => {
+  const parsed = Workspace.parseTsv([
+    TSV_MIN_HEADER,
+    'A1\t' + TSV_OK_ROW,
+    '', '', '',
+    'A2\t' + TSV_BAD_ROW,
+    '',
+    'A3\t' + TSV_BAD_ROW
+  ].join('\n'));
+  assert.deepEqual(parsed.errors.map((e) => e.lineNumber), [6, 8]);
+});
+
+test('RF1-C: 末尾の空行は phantom case を作らない', () => {
+  const parsed = Workspace.parseTsv([
+    TSV_MIN_HEADER, 'A1\t' + TSV_OK_ROW, '', '', '   ', ''
+  ].join('\n'));
+  assert.equal(parsed.rows.length, 1);
+  assert.deepEqual(parsed.errors, []);
+});
+
+test('RF1-D/E: MAX_CASESは空行ではなく実データ行で数える', () => {
+  // case_id列を持たないheaderを使う（caseIdは自動採番されるため一意性を気にしない）
+  const header = 'mode\twidth_mm\theight_mm\tglass_type\tpositive_pressure\tnegative_pressure';
+  const row = 'manual\t1250\t2050\tfl_single\t1525\t-918';
+
+  const withBlanks = [header];
+  for (let i = 0; i < Workspace.MAX_CASES; i++) {
+    withBlanks.push(row);
+    withBlanks.push('');
+  }
+  const parsed = Workspace.parseTsv(withBlanks.join('\n'));
+  assert.deepEqual(parsed.errors, []);
+  assert.equal(parsed.rows.length, Workspace.MAX_CASES, '空行を挟んでも1000行は通る');
+  // 物理行番号は空行の分だけ飛ぶ
+  assert.equal(parsed.rows[0].lineNumber, 2);
+  assert.equal(parsed.rows[1].lineNumber, 4);
+
+  const tooMany = [header];
+  for (let i = 0; i < Workspace.MAX_CASES + 1; i++) tooMany.push(row);
+  assert.throws(() => Workspace.parseTsv(tooMany.join('\n')), /too many rows/);
+});
+
+test('RF1: 物理1行目が空ならheaderを後ろへずらさず fail closed', () => {
+  assert.throws(() => Workspace.parseTsv('\n' + TSV_MIN_HEADER + '\nA1\t' + TSV_OK_ROW),
+    /line 1 must be the header row/);
+  assert.throws(() => Workspace.parseTsv('   \n' + TSV_MIN_HEADER), /line 1 must be the header row/);
+});
+
+test('§9: parseTsv通過後のProjectInput失敗は field: "project_input" を返す', () => {
+  // glass_type は parseTsv では「非空」しか見ない。実際の妥当性は
+  // 既存ProjectInputが判定する。その判定ロジックをここへ複製しない。
+  const parsed = Workspace.parseTsv([
+    TSV_MIN_HEADER,
+    'A1\tmanual\t1250\t2050\tnot_a_real_glass_type\t1525\t-918'
+  ].join('\n'));
+  assert.deepEqual(parsed.errors, [], 'parseTsv段階では通る');
+
+  const ws = Workspace.createWorkspace();
+  const outcome = Workspace.addTsvRows(ws, parsed);
+  assert.equal(ws.size(), 0);
+  assert.equal(outcome.errors.length, 1);
+  assert.equal(outcome.errors[0].field, 'project_input',
+    'fieldはnullにせず、ProjectInput由来であることを示す安定した値を返す');
+  assert.equal(outcome.errors[0].lineNumber, 2);
+  assert.match(outcome.errors[0].reason, /glassType/);
+});
+
+/* ============================================================
+   Required Fix 2 — INVALID が到達可能であること（§12）
+============================================================ */
+
+/** TSVから valid / invalid / valid を取り込み、表示用resultへまとめる。 */
+function importMixedTsv() {
+  const parsed = Workspace.parseTsv([
+    TSV_MIN_HEADER,
+    'A1\t' + TSV_OK_ROW,
+    'A2\t' + TSV_BAD_ROW,
+    'A3\tmanual\t1500\t2050\tfl_single\t1525\t-918'
+  ].join('\n'));
+  const ws = Workspace.createWorkspace();
+  const outcome = Workspace.addTsvRows(ws, parsed);
+  const results = Workspace.mergeEvaluationResults(
+    Workspace.evaluateWorkspace(ws),
+    Workspace.errorsToInvalidResults(outcome.errors, 'tsv')
+  );
+  return { ws, results };
+}
+
+test('§12-1: TSV valid+invalid+valid → 2 valid case + 1 INVALID診断', () => {
+  const { ws, results } = importMixedTsv();
+  assert.equal(ws.size(), 2, 'Workspaceが持つ入力は妥当なものだけ');
+  assert.equal(results.length, 3);
+  assert.deepEqual(results.map((r) => r.status), ['OK', 'OK', 'INVALID']);
+  const invalid = results.find((r) => r.status === 'INVALID');
+  assert.equal(invalid.caseId, 'A2');
+  assert.equal(invalid.source, 'tsv');
+  assert.equal(invalid.lineNumber, 3);
+});
+
+test('§12-2: Workspace JSON valid+invalid+valid → 2 valid case + 1 INVALID診断', () => {
+  const good = manualCase(1250, 2050);
+  const json = JSON.stringify({
+    schemaVersion: 1, workspaceType: 'glass_batch_workspace',
+    cases: [
+      { caseId: 'case-001', label: 'Case A', inputPackage: good },
+      { caseId: 'case-002', label: 'Case B', inputPackage: { broken: true } },
+      { caseId: 'case-003', label: 'Case C', inputPackage: manualCase(1500, 2050) }
+    ]
+  });
+  const imported = Workspace.deserializeWorkspace(json);
+  assert.equal(imported.workspace.size(), 2);
+  assert.equal(imported.errors.length, 1);
+
+  const results = Workspace.mergeEvaluationResults(
+    Workspace.evaluateWorkspace(imported.workspace),
+    Workspace.errorsToInvalidResults(imported.errors, 'workspace_json')
+  );
+  const invalid = results.find((r) => r.status === 'INVALID');
+  assert.equal(invalid.caseId, 'case-002');
+  assert.equal(invalid.source, 'workspace_json');
+  assert.equal(invalid.index, 1);
+  assert.equal(invalid.lineNumber, null);
+});
+
+test('§12-3: summary が imported invalid rows を数える', () => {
+  const { results } = importMixedTsv();
+  const summary = Workspace.summarize(results);
+  assert.equal(summary.totalCases, 3);
+  assert.equal(summary.okCount, 2);
+  assert.equal(summary.invalidCount, 1);
+  assert.equal(summary.noSolutionCount, 0);
+});
+
+test('§12-4 / §12-5: filter INVALID / OK が正しく分離する', () => {
+  const { results } = importMixedTsv();
+  const invalidOnly = Workspace.filterResults(results, 'INVALID');
+  assert.equal(invalidOnly.length, 1);
+  assert.equal(invalidOnly[0].caseId, 'A2');
+
+  const okOnly = Workspace.filterResults(results, 'OK');
+  assert.equal(okOnly.length, 2);
+  assert.equal(okOnly.some((r) => r.status === 'INVALID'), false);
+  assert.equal(Workspace.filterResults(results, 'ALL').length, 3);
+});
+
+test('§12-6 / §12-7: CSVにINVALID行が出て、推奨構成は空のまま', () => {
+  const { results } = importMixedTsv();
+  const csv = Workspace.toCsv(results);
+  const line = csv.split('\n').find((l) => l.startsWith('A2'));
+  assert.ok(line, 'INVALID行がCSVに出る');
+
+  const cells = line.split(',');
+  const col = (name) => cells[Workspace.CSV_COLUMNS.indexOf(name)];
+  assert.equal(col('status'), 'INVALID');
+  assert.equal(col('recommendedGlass'), '', 'INVALID行に推奨構成を書かない');
+  assert.equal(col('allowablePressure'), '');
+  assert.equal(col('designPressure'), '');
+  assert.equal(col('areaM2'), '');
+  assert.ok(col('error').length > 0, '理由は出す');
+
+  const invalid = results.find((r) => r.status === 'INVALID');
+  assert.equal(invalid.recommendedLabel, null);
+  assert.equal(invalid.recommendedCandidate, null);
+  assert.equal(invalid.allowablePressure, null);
+});
+
+test('§12-8: INVALID行は governing case にならない', () => {
+  const { results } = importMixedTsv();
+  const summary = Workspace.summarize(results);
+  assert.notEqual(summary.governingCaseId, 'A2');
+  assert.equal(results.find((r) => r.caseId === summary.governingCaseId).status, 'OK');
+
+  // OKが1件も無く、INVALIDだけの場合もgoverningにしない
+  const onlyInvalid = Workspace.errorsToInvalidResults(
+    [{ lineNumber: 2, caseId: 'A9', field: 'mode', reason: 'bad' }], 'tsv');
+  const s2 = Workspace.summarize(onlyInvalid);
+  assert.equal(s2.invalidCount, 1);
+  assert.equal(s2.governingCaseId, null);
+  assert.equal(s2.governingBasis, null);
+  assert.equal(s2.maxDesignPressure, null, 'null fieldをmaxへ混ぜない');
+  assert.equal(s2.maxAreaM2, null);
+});
+
+test('§12-9 / §12-10: INVALID行はWorkspace JSONへ出ず、再importでも復活しない', () => {
+  const { ws } = importMixedTsv();
+  const json = Workspace.serializeWorkspace(ws);
+  assert.equal(json.includes('A2'), false, 'INVALID行はexportされない');
+  assert.equal(json.includes('INVALID'), false);
+  assert.equal(json.includes('NOT-A-NUMBER'), false);
+
+  const reimported = Workspace.deserializeWorkspace(json);
+  assert.deepEqual(reimported.errors, [], '正常なworkspaceの再importはエラーを生まない');
+  assert.equal(reimported.workspace.size(), 2);
+  const results = Workspace.mergeEvaluationResults(
+    Workspace.evaluateWorkspace(reimported.workspace),
+    Workspace.errorsToInvalidResults(reimported.errors, 'workspace_json')
+  );
+  assert.equal(results.filter((r) => r.status === 'INVALID').length, 0,
+    '再importでINVALID行が復活してはならない');
+});
+
+test('§4 / §5: INVALID診断はProject Input Packageではない', () => {
+  const invalid = Workspace.errorToInvalidResult(
+    { lineNumber: 4, caseId: 'A2', label: 'Case B', field: 'width_mm', reason: 'bad' }, 'tsv');
+
+  // 計算に属する値はすべてnull
+  for (const key of ['widthMm', 'heightMm', 'areaM2', 'designPressure', 'positivePressure',
+                     'negativePressure', 'glassType', 'extraFactor', 'recommendedLabel',
+                     'recommendedCandidate', 'allowablePressure', 'marginRatio',
+                     'marginPressure', 'sourceKind', 'verificationStatus']) {
+    assert.equal(invalid[key], null, key + ' は null であること');
+  }
+  assert.equal(invalid.status, 'INVALID');
+  assert.equal(invalid.source, 'tsv');
+  // PIPのfieldを持たない
+  assert.equal(invalid.schemaVersion, undefined);
+  assert.equal(invalid.provenance, undefined);
+  assert.equal(invalid.windInput, undefined);
+
+  // 診断行はWorkspaceのcaseとして追加できない
+  const ws = Workspace.createWorkspace();
+  assert.throws(() => ws.addCase(invalid), /unknown field|unexpected field|must be an object/);
+
+  // mergeは引数の向きを守らせる
+  assert.throws(() => Workspace.mergeEvaluationResults([invalid], []),
+    /diagnostic rows must be passed as invalidResults/);
+  assert.throws(() => Workspace.mergeEvaluationResults([], [{ status: 'OK' }]),
+    /invalidResults must all be INVALID/);
+  assert.throws(() => Workspace.errorToInvalidResult({ reason: 'x' }, 'csv'), /unknown source/);
+});
+
+test('§8: INVALID診断に生データを載せない', () => {
+  const invalid = Workspace.errorToInvalidResult(
+    { lineNumber: 4, caseId: 'A2', label: 'Case B', field: 'width_mm', reason: 'bad value' }, 'tsv');
+  const allowed = [
+    'caseId', 'label', 'source', 'lineNumber', 'index', 'field', 'error', 'status',
+    'sourceKind', 'verificationStatus', 'widthMm', 'heightMm', 'areaM2',
+    'positivePressure', 'negativePressure', 'designPressure', 'glassType', 'extraFactor',
+    'recommendedCandidate', 'recommendedLabel', 'allowablePressure',
+    'marginRatio', 'marginPressure', 'okCount', 'ngCount', 'outOfScopeCount', 'outOfScopePresent'
+  ];
+  assert.deepEqual(Object.keys(invalid).sort(), allowed.slice().sort());
+  // 呼び出し側が余分なものを詰めても運ばない
+  const withExtra = Workspace.errorToInvalidResult({
+    lineNumber: 4, caseId: 'A2', reason: 'bad',
+    rawRow: 'A2\tmanual\tSECRET\t2050', rawCase: { secret: true }, filePath: '/home/user/x.tsv'
+  }, 'tsv');
+  const serialized = JSON.stringify(withExtra);
+  assert.equal(serialized.includes('SECRET'), false);
+  assert.equal(serialized.includes('/home/user/'), false);
+  assert.equal(withExtra.rawRow, undefined);
+  assert.equal(withExtra.rawCase, undefined);
+  assert.equal(withExtra.filePath, undefined);
+});
+
+/* ============================================================
+   §11 duplicate caseId import
+============================================================ */
+
+test('§11: 重複caseIdは診断になり、他のcaseのimportを止めない', () => {
+  const json = JSON.stringify({
+    schemaVersion: 1, workspaceType: 'glass_batch_workspace',
+    cases: [
+      { caseId: 'case-001', label: 'first', inputPackage: manualCase(1250, 2050) },
+      { caseId: 'case-001', label: 'duplicate', inputPackage: manualCase(1500, 2050) },
+      { caseId: 'case-002', label: 'third', inputPackage: manualCase(1250, 2050) }
+    ]
+  });
+  const imported = Workspace.deserializeWorkspace(json);
+
+  assert.equal(imported.workspace.size(), 2, '重複以外は取り込まれる');
+  assert.equal(imported.errors.length, 1);
+  assert.equal(imported.errors[0].index, 1);
+  assert.equal(imported.errors[0].caseId, 'case-001');
+  assert.match(imported.errors[0].reason, /duplicate caseId/);
+
+  // 最初のcaseが上書きされていないこと
+  assert.equal(imported.workspace.getCase('case-001').label, 'first');
+  assert.equal(imported.workspace.getCase('case-001').inputPackage.widthMm, 1250);
+  assert.ok(imported.workspace.has('case-002'));
 });

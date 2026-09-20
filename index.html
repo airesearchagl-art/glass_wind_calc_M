@@ -1811,6 +1811,12 @@ window.addEventListener('DOMContentLoaded', function() {
 var batchWorkspace = (typeof WorkspaceCore !== 'undefined') ? WorkspaceCore.createWorkspace() : null;
 var batchResults = [];
 
+// Required Fix 2: import時に弾かれた行の**表示専用**診断レコード。
+// Workspaceが持つ入力は常に妥当なPIP v2だけであり（AC-03）、
+// 壊れた行はここに隔離する。serializeWorkspace / ProjectInput / GlassCalc
+// のいずれにも渡らない。
+var batchInvalidDiagnostics = [];
+
 function setView(view) {
   var single = document.getElementById('view-single');
   var batch = document.getElementById('view-batch');
@@ -1887,6 +1893,7 @@ function batchRemove(caseId) {
 /** §16: ブラウザ上のruntime stateだけを空にする。preset / Evidenceには触れない。 */
 function batchClear() {
   var removed = batchWorkspace.clear();
+  batchInvalidDiagnostics = [];
   batchResults = [];
   batchUpdateCount();
   batchRender();
@@ -1895,11 +1902,17 @@ function batchClear() {
 
 function batchEvaluate() {
   try {
-    batchResults = WorkspaceCore.evaluateWorkspace(batchWorkspace);
+    // 妥当caseの評価 + import診断のINVALID行 をまとめて表示用listにする。
+    // INVALID行を作るのは workspace.js 側の canonical helper であり、
+    // ここでその場しのぎの行を組み立てない（§5）。
+    batchResults = WorkspaceCore.mergeEvaluationResults(
+      WorkspaceCore.evaluateWorkspace(batchWorkspace),
+      batchInvalidDiagnostics
+    );
     batchRender();
     var summary = WorkspaceCore.summarize(batchResults);
     batchSetStatus('batch-status',
-      summary.totalCases + ' 件を計算しました（OK ' + summary.okCount +
+      summary.totalCases + ' 件を表示しています（OK ' + summary.okCount +
       ' / 解なし ' + summary.noSolutionCount + ' / 入力エラー ' + summary.invalidCount + '）。', false);
   } catch (e) {
     batchSetStatus('batch-status', '計算できませんでした: ' + e.message, true);
@@ -1923,12 +1936,17 @@ function batchImportTsv() {
   try {
     var parsed = WorkspaceCore.parseTsv(text);
     var outcome = WorkspaceCore.addTsvRows(batchWorkspace, parsed);
+    // TSVはWorkspaceへ**追加**するので、診断も追加する
+    batchInvalidDiagnostics = batchInvalidDiagnostics.concat(
+      WorkspaceCore.errorsToInvalidResults(outcome.errors, 'tsv')
+    );
     batchUpdateCount();
     batchEvaluate();
 
     var message = outcome.added.length + ' 件を取り込みました。';
     if (outcome.errors.length > 0) {
-      message += '\n取り込めなかった行（' + outcome.errors.length + '件）:\n'
+      message += '\n取り込めなかった行（' + outcome.errors.length + '件）は'
+        + '「入力エラー」として一覧に残ります:\n'
         + batchFormatErrors(outcome.errors);
     }
     batchSetStatus('batch-tsv-status', message, outcome.errors.length > 0);
@@ -1951,14 +1969,18 @@ function batchImportJson() {
   var text = document.getElementById('batch-json').value;
   try {
     var imported = WorkspaceCore.deserializeWorkspace(text);
+    // Workspace JSONはWorkspaceを**置き換える**ので、診断も置き換える。
+    // 前回importの診断が残ると、今のファイルに無い行が一覧に居座る。
     batchWorkspace = imported.workspace;
+    batchInvalidDiagnostics = WorkspaceCore.errorsToInvalidResults(imported.errors, 'workspace_json');
     batchUpdateCount();
     batchEvaluate();
 
     var message = batchWorkspace.size() + ' 件を読み込みました。'
       + '\n読み込んだケースは「取り込みデータ（未検証）」として扱われます。';
     if (imported.errors.length > 0) {
-      message += '\n読み込めなかったケース（' + imported.errors.length + '件）:\n'
+      message += '\n読み込めなかったケース（' + imported.errors.length + '件）は'
+        + '「入力エラー」として一覧に残ります:\n'
         + batchFormatErrors(imported.errors);
     }
     batchSetStatus('batch-json-status', message, imported.errors.length > 0);
@@ -2135,13 +2157,31 @@ function batchRender() {
       var reason = document.createElement('div');
       reason.style.fontSize = '10px';
       reason.style.color = 'var(--text3)';
+      // どこで落ちたかを特定できるようにする（§37）。
+      // 生のTSV行・生のJSONは載せず、位置と理由だけを出す。
+      var where = [];
+      if (typeof r.lineNumber === 'number') where.push(r.lineNumber + '行目');
+      if (typeof r.index === 'number') where.push('case[' + r.index + ']');
+      if (r.field) where.push(r.field);
       // 例外メッセージもtextContentで入れる（HTMLとして解釈させない）
-      reason.textContent = r.error;
+      reason.textContent = (where.length > 0 ? where.join(' / ') + ': ' : '') + r.error;
       statusTd.appendChild(reason);
     }
     tr.appendChild(statusTd);
 
     var actionTd = document.createElement('td');
+    if (r.status === 'INVALID' && r.source) {
+      // import診断行はWorkspaceのcaseではないので、複製も削除もできない。
+      // 操作ボタンを出すと、存在しないcaseIdに対する操作になる。
+      var note = document.createElement('span');
+      note.style.fontSize = '10px';
+      note.style.color = 'var(--text3)';
+      note.textContent = r.source === 'tsv' ? '取込エラー（TSV）' : '取込エラー（JSON）';
+      actionTd.appendChild(note);
+      tr.appendChild(actionTd);
+      tbody.appendChild(tr);
+      return;
+    }
     var dupBtn = document.createElement('button');
     dupBtn.type = 'button';
     dupBtn.className = 'btn-secondary';

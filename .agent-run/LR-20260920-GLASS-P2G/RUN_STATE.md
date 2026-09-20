@@ -10,7 +10,7 @@
 - Base SHA: ace00edfe4325570e8c31cde9cf56b2c708c458d
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY` — `git rev-parse HEAD` またはPRの現在headで解決する（自己参照回避contract）
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 4 — TSV paste / Workspace JSON export-import / CSV result export（Wave 3完了）
+- Current wave: Wave 4H — Batch Error Contract Closure（Required Fix 1 / 2 完了）
 - Task Packet ID: LRP-20260920-GLASS-P2G
 - Task Packet revision: 1
 - Task Packet snapshot path: .agent-run/LR-20260920-GLASS-P2G/TASK_PACKET_SNAPSHOT.md
@@ -92,7 +92,14 @@ Phase 2F merged確認             : PASS（693226f が origin/main の祖先。m
 architecture inventory          : PASS（§6の全symbolを実測。複製実装しない方針を確定）
 workspace.js（Wave 1-2）        : PASS（case lifecycle / evaluation / summary / grouping /
                                  sort-filter / Workspace Package v1 / TSV / CSV）
-npm test (Wave 4)              : PASS（316 pass / 0 fail。baseline 270 → 305 → 316）
+npm test (Wave 4H)             : PASS（332 pass / 0 fail。baseline 270 → 305 → 316 → 332）
+Required Fix 1 物理行番号        : PASS（A-E の5ケース。空header は fail closed）
+Required Fix 2 INVALID到達性     : PASS（§12の10項目すべて。診断は隔離層）
+§9 field contract               : PASS（二段階目の失敗は field: "project_input"）
+§11 duplicate caseId            : PASS（診断化。他caseのimportを止めず、上書きもしない）
+browser（Wave 4H実測）          : PASS（物理4行目を表示 / INVALID filter / invalidCount 1 /
+                                 CSVにINVALID行 / Workspace JSONには出ない /
+                                 JSON再importで診断が置き換わる / storage 0 / error 0）
 §35 known-answer                : PASS（Case A FL6 OK / Case B FL6 NG。single coreから導出）
 §36 determinism                 : PASS（2回evaluateで同一。sort/filterは結果をmutationしない）
 AC-02 no duplicated formula     : PASS（面積式をGlassCalc.paneAreaM2へ一本化。
@@ -105,6 +112,14 @@ browser（Wave 3-4実測）         : PASS（page error 0 / console error 0。
                                  round-trip後は imported_unverified へ降格。
                                  localStorage / sessionStorage entries = 0）
 ```
+
+### Wave 4H で閉じた2件（Required Fix）
+
+1. **物理TSV行番号の欠落**: 空行を捨ててから番号を振っていたため、
+   ユーザーのシート上の行番号とズレていた（D-003）。
+2. **INVALIDがdead enumだった**: enum・filter・summaryにINVALIDはあったが、
+   外部importで弾かれた行がどこにも現れず、§18の「silent skipしない」を
+   実質満たしていなかった（D-004）。
 
 ### Wave 3 で見つけて直した実バグ
 

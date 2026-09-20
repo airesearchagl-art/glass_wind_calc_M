@@ -123,8 +123,9 @@ test('AC-19: Batch UIはユーザー由来の文字列をinnerHTMLへ入れな�
   // 表示はtextContentで行っている
   assert.match(batch, /td\.textContent =/);
   assert.match(batch, /host\.textContent = ''/);
-  // ラベル・エラー文もtextContent
-  assert.match(batch, /reason\.textContent = r\.error/);
+  // ラベル・エラー文もtextContent（位置情報を前置しても textContent のまま）
+  assert.match(batch, /reason\.textContent = \(where\.length > 0[\s\S]*?\) \+ r\.error;/);
+  assert.match(batch, /note\.textContent = r\.source === 'tsv'/);
 });
 
 test('AC-19: 行の操作ボタンはaddEventListenerで繋ぐ（onclick文字列を組み立てない）', () => {

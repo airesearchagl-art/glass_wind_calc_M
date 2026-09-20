@@ -4,11 +4,12 @@
 
 | Wave | 内容 | 状態 |
 |---|---|---|
-| 0 | Fresh Gate / Run Artifact / Phase 2F closeout / baseline | IN_PROGRESS |
-| 1 | existing architecture inventory / Workspace contract design | PENDING |
-| 2 | Workspace Package v1 / case lifecycle / evaluation orchestration / summary | PENDING |
-| 3 | Batch UI / Add Current / Duplicate / Remove / Sort / Filter / Grouping | PENDING |
-| 4 | TSV paste / Workspace JSON export-import / CSV result export | PENDING |
+| 0 | Fresh Gate / Run Artifact / Phase 2F closeout / baseline | DONE |
+| 1 | existing architecture inventory / Workspace contract design | DONE |
+| 2 | Workspace Package v1 / case lifecycle / evaluation orchestration / summary | DONE |
+| 3 | Batch UI / Add Current / Duplicate / Remove / Sort / Filter / Grouping | DONE |
+| 4 | TSV paste / Workspace JSON export-import / CSV result export | DONE |
+| 4H | Batch Error Contract Closure（Required Fix 1 / 2） | DONE |
 | 5 | security / privacy / CSV injection / HTML escaping / prototype pollution / limits / mutation | PENDING |
 | 6 | full regression / browser / independent verifier | PENDING |
 | 7 | README / Run Artifact convergence / Draft PR / Vercel exact head / Completion Report | PENDING |
@@ -46,7 +47,8 @@
 ## Next Action
 
 ```text
-Wave 1: Workspace contract design（既存関数のorchestrationに徹する境界を決める）
+Wave 5: security / privacy / CSV formula injection / HTML escaping /
+        prototype pollution / size limits / mutation tests
 ```
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管 / §44）。

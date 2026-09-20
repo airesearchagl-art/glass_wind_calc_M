@@ -437,6 +437,106 @@
     return entries.map(function (entry) { return evaluateCase(entry); });
   }
 
+
+  // ============================================================
+  // Invalid診断レイヤ（Required Fix 2 / §4 / §5）
+  // ============================================================
+
+  var INVALID_RESULT_SOURCES = ['tsv', 'workspace_json'];
+
+  /**
+   * import時に弾かれた行を、**表示専用の** INVALID resultへ変換する。
+   *
+   * ── なぜWorkspaceへ入れないか ─────────────────────────────
+   *
+   * Workspaceが保持する入力は「常に妥当なPIP v2」でなければならない（AC-03）。
+   * 壊れた入力をWorkspaceへ入れて INVALID を出せるようにすると、
+   * authoritativeな入力モデルに妥当でないものが混ざり、
+   * serializeWorkspace() がそれを書き出してしまう。
+   *
+   * そこで、妥当なcaseとは**別の層**として診断レコードだけを持つ。
+   * これはreport用のオブジェクトであり、Project Input Packageではない。
+   * ProjectInput / GlassCalc / WindPressure / serializeWorkspace のいずれにも渡さない。
+   *
+   * ── 何を載せてよいか（§8） ────────────────────────────────
+   *
+   * TSV            : lineNumber / 安全なcaseId / field / reason
+   * Workspace JSON : case index / 安全なcaseId / reason
+   * label          : normalizeLabel を通った後の値のみ
+   *
+   * 生のTSV行・生のJSON object・入力package全体・ファイル名・パスは**載せない**。
+   */
+  function errorToInvalidResult(error, source) {
+    if (!isPlainObject(error)) {
+      throw new Error('errorToInvalidResult(): error record must be an object');
+    }
+    if (INVALID_RESULT_SOURCES.indexOf(source) === -1) {
+      throw new Error('errorToInvalidResult(): unknown source ' + JSON.stringify(source));
+    }
+    return {
+      caseId: error.caseId === undefined ? null : error.caseId,
+      label: error.label === undefined ? null : error.label,
+      source: source,
+      lineNumber: typeof error.lineNumber === 'number' ? error.lineNumber : null,
+      index: typeof error.index === 'number' ? error.index : null,
+      field: error.field === undefined ? null : error.field,
+      error: error.reason === undefined ? null : error.reason,
+      status: 'INVALID',
+      // 計算に属する値は**すべてnull**。INVALID行が数値を持つと、
+      // summaryのmax値やgoverning caseへ混ざってしまう。
+      sourceKind: null,
+      verificationStatus: null,
+      widthMm: null,
+      heightMm: null,
+      areaM2: null,
+      positivePressure: null,
+      negativePressure: null,
+      designPressure: null,
+      glassType: null,
+      extraFactor: null,
+      recommendedCandidate: null,
+      recommendedLabel: null,
+      allowablePressure: null,
+      marginRatio: null,
+      marginPressure: null,
+      okCount: 0,
+      ngCount: 0,
+      outOfScopeCount: 0,
+      outOfScopePresent: false
+    };
+  }
+
+  /** import診断の配列をまとめてINVALID resultへ変換する。 */
+  function errorsToInvalidResults(errors, source) {
+    if (!Array.isArray(errors)) {
+      throw new Error('errorsToInvalidResults(): errors array is required');
+    }
+    return errors.map(function (error) { return errorToInvalidResult(error, source); });
+  }
+
+  /**
+   * 妥当caseの評価結果と、import診断のINVALID行を1つの表示用listにまとめる。
+   *
+   * 妥当case（追加順）→ INVALID診断（検出順）の順で並べる。
+   * これ自体は表示用の並びであり、sort / filter は別途この結果に対して行う。
+   */
+  function mergeEvaluationResults(validResults, invalidResults) {
+    if (!Array.isArray(validResults) || !Array.isArray(invalidResults)) {
+      throw new Error('mergeEvaluationResults(): two result arrays are required');
+    }
+    for (var i = 0; i < validResults.length; i++) {
+      if (validResults[i].status === 'INVALID' && validResults[i].source !== undefined) {
+        throw new Error('mergeEvaluationResults(): diagnostic rows must be passed as invalidResults');
+      }
+    }
+    for (var j = 0; j < invalidResults.length; j++) {
+      if (invalidResults[j].status !== 'INVALID') {
+        throw new Error('mergeEvaluationResults(): invalidResults must all be INVALID');
+      }
+    }
+    return validResults.concat(invalidResults);
+  }
+
   // ============================================================
   // Summary / Grouping
   // ============================================================
@@ -672,6 +772,7 @@
 
     parsed.cases.forEach(function (rawCase, index) {
       var safeCaseId = null;
+      var safeLabel = null;
       try {
         if (!isPlainObject(rawCase)) {
           throw new Error('case must be an object');
@@ -681,6 +782,7 @@
         var caseId = assertCaseId(rawCase.caseId);
         safeCaseId = caseId;
         var label = normalizeLabel(rawCase.label);
+        safeLabel = label;
         if (!isPlainObject(rawCase.inputPackage)) {
           throw new Error('case inputPackage must be an object');
         }
@@ -692,6 +794,8 @@
         errors.push({
           index: index,
           caseId: safeCaseId,
+          label: safeLabel,
+          field: null,
           reason: e && e.message ? e.message : String(e)
         });
       }
@@ -784,13 +888,24 @@
       throw new Error('TSV payload is too large (max ' + MAX_TSV_BYTES + ' bytes)');
     }
 
-    var lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n')
-      .filter(function (line) { return line.trim() !== ''; });
-    if (lines.length === 0) {
+    // Required Fix 1: 物理行番号を保つ。
+    //
+    // 以前は空行を**先に捨ててから**番号を振っていたため、
+    // Excelから貼り付けたときの実際の行番号とズレた
+    // （header / valid / blank / invalid で、invalidが「3行目」と報告された）。
+    // §37はユーザーが自分のシート上で行を特定できることを求めるので、
+    // 空行はskipするが**番号は物理位置のまま**にする。
+    var physicalLines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    if (physicalLines.length === 0) {
       throw new Error('TSV payload is empty');
     }
 
-    var header = lines[0].split('\t').map(function (h) { return h.trim().toLowerCase(); });
+    // headerは必ず物理1行目。空ならfail closed（headerを後ろへずらさない）。
+    if (physicalLines[0].trim() === '') {
+      throw new Error('TSV line 1 must be the header row (it is blank)');
+    }
+
+    var header = physicalLines[0].split('\t').map(function (h) { return h.trim().toLowerCase(); });
     if (header.length > TSV_KNOWN_COLUMNS.length) {
       throw new Error('TSV has too many columns (max ' + TSV_KNOWN_COLUMNS.length + ')');
     }
@@ -821,17 +936,25 @@
       }
     }
 
-    var dataLines = lines.slice(1);
-    if (dataLines.length > MAX_CASES) {
+    // 空行は case にしないが、物理番号は保持する。
+    // MAX_CASESは**実データ行数**で数える（空行でcapを回避できないように）。
+    var dataRows = [];
+    for (var li = 1; li < physicalLines.length; li++) {
+      if (physicalLines[li].trim() === '') continue;
+      dataRows.push({ lineNumber: li + 1, text: physicalLines[li] });
+    }
+    if (dataRows.length > MAX_CASES) {
       throw new Error('TSV has too many rows (max ' + MAX_CASES + ')');
     }
 
     var rows = [];
     var errors = [];
 
-    dataLines.forEach(function (line, i) {
-      var lineNumber = i + 2;   // 1-based, header込み
+    dataRows.forEach(function (dataRow) {
+      var line = dataRow.text;
+      var lineNumber = dataRow.lineNumber;   // 物理行番号（1-based）
       var safeCaseId = null;
+      var safeLabel = null;
       var currentField = null;
       try {
         var cells = line.split('\t');
@@ -849,6 +972,8 @@
         }
         currentField = 'label';
         var label = normalizeLabel(record.label === '' ? null : record.label);
+        // normalizeLabel を通った後の値だけを診断に載せてよい（§8）
+        safeLabel = label;
 
         currentField = 'mode';
         var mode = (record.mode || '').toLowerCase();
@@ -929,6 +1054,7 @@
         errors.push({
           lineNumber: lineNumber,
           caseId: safeCaseId,
+          label: safeLabel,
           field: currentField,
           reason: e && e.message ? e.message : String(e)
         });
@@ -956,10 +1082,17 @@
         var caseId = workspace.addCase(pkg, { caseId: row.caseId, label: row.label });
         added.push(caseId);
       } catch (e) {
+        // §9: parseTsvを通った後、既存ProjectInputのvalidationで落ちる場合がある
+        // （glass type / 寸法範囲 / extraFactor / 圧力contract / wind contract）。
+        // その判定ロジックをここへ複製すると、契約が二重になり必ずズレる。
+        // かといって error textを正規表現で切り分けるのも脆い。
+        // したがって「ProjectInput正規化に由来する失敗」という**安定した上位field**を返す。
+        // field: null は、fieldに属しようがない構造的失敗のために残しておく。
         errors.push({
           lineNumber: row.lineNumber,
           caseId: row.caseId,
-          field: null,
+          label: row.label,
+          field: 'project_input',
           reason: e && e.message ? e.message : String(e)
         });
       }
@@ -1073,6 +1206,10 @@
     groupByRecommended: groupByRecommended,
     sortResults: sortResults,
     filterResults: filterResults,
+    INVALID_RESULT_SOURCES: Object.freeze(INVALID_RESULT_SOURCES),
+    errorToInvalidResult: errorToInvalidResult,
+    errorsToInvalidResults: errorsToInvalidResults,
+    mergeEvaluationResults: mergeEvaluationResults,
     toWorkspacePackage: toWorkspacePackage,
     serializeWorkspace: serializeWorkspace,
     deserializeWorkspace: deserializeWorkspace,
