@@ -88,7 +88,9 @@ Task Packet §1の要求（197 tests以上 / 0 fail）を満たす。
 | 2 | Promotion Gate closure / Evidence Ledger / case validator | `cc98ebc13a64e808a30658f15f0b85c6106e2b89` |
 | 2H | immutability / factKey allowlist / IP boundary / reference保持 | `f289249c4e96cafdbd53c8d12a394b7c122bccf5` |
 | 4 / 5 | Evidence status UI / 照合表示 / spoofing tests | `31dac755836a7a1f702b307d05c2a406b9a3d82a` |
-| 6 / 7 | README / Run Artifact convergence / Draft PR | 本convergence commit自身を含むため固定値を書かない（自己参照回避） |
+| 6 / 7 | Browser / README / Run Artifact convergence / Draft PR | `0f15f9f5f78e5cac0e947a165b3682273d887b28` |
+| 8 | Independent verifier findings repair (F1-F12) | `ffaac1ce52a8ebf8d94dcbc5155fa412d9a2195b` |
+| — | Final Artifact Reconciliation | `current_artifact_sync_head = RESOLVE_DYNAMICALLY`（このcommit自身を含むため固定値を書かない） |
 
 Wave 3 は Evidence UNAVAILABLE のため `SKIPPED_BY_DESIGN / NO_EVIDENCE_AVAILABLE`。
 データを捏造してwaveを埋めていない。

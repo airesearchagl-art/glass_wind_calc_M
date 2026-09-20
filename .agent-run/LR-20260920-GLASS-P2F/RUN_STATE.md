@@ -8,8 +8,16 @@
 - Working branch: claude/phase2f-verified-project-cases
 - Base SHA: a185b4675cac03d501ea6805b449437c3fbbb0fd
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY` — `git rev-parse HEAD` またはPRの現在headで解決する（自己参照回避contract）
-- Implementation verification head: `RESOLVE_AT_CHECKPOINT`（Wave 7 convergence commitで確定）
-- Current wave: Wave 8 — Independent verifier findings repair（Wave 7まで完了）
+- Implementation verification head: `ffaac1ce52a8ebf8d94dcbc5155fa412d9a2195b`
+  （Wave 8 independent verifier findings repair完了時点。source / tests / UI /
+  trust / privacy implementationの確定head。以下の検証はすべてこのheadに対して成立する:
+  verifier PASS WITH FINDINGS / F1-F12修復 / 270 tests 0 fail /
+  Wave 8 repair mutants 19-of-19 killed / browser 4 modes・page error 0・console error 0 /
+  privacy sweep / exact-head Vercel Preview READY）
+- Current wave: Final Run Artifact Reconciliation / Independent Verification Closure
+  （**新規Implementation Waveではない**。Run Artifactをactual final stateへ同期するのみ。
+  Wave 8: DONE / Independent verification: DONE / Verdict: PASS WITH FINDINGS /
+  Findings: 12 / Findings closed: 12 of 12）
 - Task Packet ID: LRP-20260920-GLASS-P2F
 - Task Packet revision: 1
 - Task Packet snapshot path: .agent-run/LR-20260920-GLASS-P2F/TASK_PACKET_SNAPSHOT.md
@@ -112,9 +120,18 @@ factKey allowlist              : PASS（fail closed。A_102_pdf等を拒否）
 public reference IP boundary   : PASS（fe80::/10全域・未指定・IPv6リテラルclass）
 verifiedValue reference保持     : PASS（Option A。ephemeral pathなし）
 independent verifier           : PASS WITH FINDINGS（F1-F12。全件Wave 8で対応。下記参照）
-mutation（Wave 8 修復 19件）    : PASS（すべてkill。MF9b / MF10はtest gapを露呈→closeしてkill）
+verifier findings closed       : 12 / 12
+mutation（Wave 8 修復 19件）    : PASS（19 / 19 killed。MF9b / MF10はtest gapを露呈→closeしてkill）
 browser（Wave 8 再実測）        : PASS（4モード。page error 0 / console error 0。
                                  F1・F5の攻撃がブラウザ実行時にも拒否されることを確認）
+privacy sweep                  : PASS（Wave 8 diffにprivate識別子の新規追加なし。
+                                 denylist pattern と合成negative fixtureのみ）
+trust                          : PASS（trusted構築経路・保持中の不変性・照合の順序すべてmutationで固定）
+preset mutation                : NONE
+verifiedCases                  : 0
+project-specific promotion     : NONE
+private Evidence               : UNAVAILABLE
+exact-head Vercel Preview      : READY / success
 ```
 
 ## Hard Checks（Quality Debt化禁止）
@@ -218,10 +235,14 @@ code / testファイルが欠落していた（独立検証F7）。変更内容�
 ## Remaining tasks
 
 ```text
-Human Gate待ち（Claude側で実施しない）:
-  - PR #7 の Ready-for-review / merge / Production 認可
-  - private Evidence の供給（EVIDENCE.md のEvidence Request Matrix参照）
-Claude側の残作業: なし
+1. Final focused independent delta review（本artifact commit後に外部Reviewerが実施）
+2. Human Gate — Ready / merge / Production authorization
+3. private Evidence供給（将来・任意。EVIDENCE.md のEvidence Request Matrix参照）
+
+Claude側implementation : none
+Ready                  : not authorized
+merge                  : not authorized
+Production             : not authorized
 ```
 
 ## Next action
@@ -278,7 +299,14 @@ explicit_unverified_items: 4
 preset_mutation: NONE
 quality_debt: none
 independent_verifier: PASS_WITH_FINDINGS (F1-F12, all repaired in Wave 8)
-tests: 270 pass / 0 fail
+verifier_findings: 12
+verifier_findings_closed: 12
+wave8_repair_mutants: 19 / 19 killed
+tests_baseline: 197 pass / 0 fail
+tests_final: 270 pass / 0 fail
+browser: PASS
+privacy: PASS
+trust: PASS
 ```
 
 `verifiedCases` が空であることはbugではない。Evidenceが存在しないため、
@@ -289,4 +317,24 @@ tests: 270 pass / 0 fail
 canonical `COMPLETE_VERIFIED` は「Explicit unverified itemsなし」を**すべて**要求する
 要件の一つとして課している。本Campaignは4件を意図的に保持しているため到達しない。
 
-加えてIndependent Verifierの結果反映が残っている。
+```yaml
+independent_verification: completed
+verifier_verdict: PASS_WITH_FINDINGS
+verifier_findings: 12
+verifier_findings_closed: 12
+claude_side_implementation_work: none
+final_state: COMPLETE_PENDING_FULL_VERIFY   # 維持する
+```
+
+Independent Verifierの結果反映は**完了している**（Wave 8。F1-F12すべてclose）。
+`COMPLETE_PENDING_FULL_VERIFY` を維持する理由は、verifierの未反映ではなく、
+下記4件のExplicit unverified itemsがEvidence不在のため意図的に未検証であることに尽きる。
+
+```text
+1. ガラス1枚の実見付 W/H
+2. 階別正圧 1297 / 1525 / 1695 / 1729 の元計算根拠
+3. 負圧 918 / 1122 の元計算根拠
+4. 各階評価高さ Z とpresetのexact mapping
+```
+
+Evidenceが供給されない限りこの4件は閉じない。`COMPLETE_VERIFIED` へは変更しない。

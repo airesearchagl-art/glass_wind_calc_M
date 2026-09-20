@@ -138,9 +138,11 @@ W7-5 Completion Report + Human Evidence Request Matrix             次
 ## Next Action
 
 ```text
-Claude側: なし（Wave 8で完了）
-Human Gate: PR #7 の Ready-for-review / merge / Production 認可
-           private Evidence供給（EVIDENCE.md のEvidence Request Matrix）
+Claude側implementation: なし（Wave 8で完了）
+
+1. Final focused independent delta review（外部Reviewerが実施）
+2. Human Gate — PR #7 の Ready-for-review / merge / Production 認可
+3. private Evidence供給（将来・任意。EVIDENCE.md のEvidence Request Matrix）
 ```
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管）。
