@@ -538,7 +538,9 @@
   // Invalid診断レイヤ（Required Fix 2 / §4 / §5）
   // ============================================================
 
-  var INVALID_RESULT_SOURCES = ['tsv', 'workspace_json'];
+  // 診断行の出所。UIはこの値で見出しを選ぶので、実際に通った経路を名乗る。
+  // 'scenario_matrix' は Phase 2H の Scenario Matrix → Workspace 追加（F2）。
+  var INVALID_RESULT_SOURCES = ['tsv', 'workspace_json', 'scenario_matrix'];
 
 
   /**
@@ -972,6 +974,105 @@
     return value;
   }
 
+
+  /**
+   * TSVの「表としての構造」だけを解釈する汎用パーサ。
+   *
+   * ここが見るのはsizeとheaderと物理行だけで、列の意味は見ない。
+   * Phase 2GのWorkspace TSVも、Phase 2HのScenario Matrix TSVも、
+   * 同じ物理行番号規約・同じheader規約・同じfail closedの形で動く必要がある。
+   * 2か所に書くと、片方だけ直したときに片方の行番号がずれる。
+   *
+   * whole-fileの問題（size / 空 / header不正 / 列不正 / 行数超過）はthrowする。
+   * 個別行の解釈は呼び出し側が行う。
+   *
+   * @returns {{header: string[], seen: object, rows: Array<{lineNumber:number, text:string, record:object}>}}
+   */
+  function parseTsvTable(text, options) {
+    options = options || {};
+    var label = options.label || 'TSV';
+    var knownColumns = options.knownColumns || [];
+    var forbiddenColumns = options.forbiddenColumns || [];
+    var requiredColumns = options.requiredColumns || [];
+    var maxBytes = typeof options.maxBytes === 'number' ? options.maxBytes : MAX_TSV_BYTES;
+    var maxRows = typeof options.maxRows === 'number' ? options.maxRows : MAX_CASES;
+    var forbiddenMessage = options.forbiddenMessage ||
+      function (name) { return label + ' must not carry the column: ' + JSON.stringify(name); };
+
+    if (typeof text !== 'string') {
+      throw new Error(label + ': input must be a string');
+    }
+    if (byteLengthOf(text) > maxBytes) {
+      throw new Error(label + ' payload is too large (max ' + maxBytes + ' bytes)');
+    }
+
+    // 物理行番号を保つ。空行はデータにしないが**番号は消費する**。
+    // 空行を先に捨てて番号を振ると、Excel上の行番号とずれる。
+    var physicalLines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+    if (physicalLines.length === 0) {
+      throw new Error(label + ' payload is empty');
+    }
+    // headerは必ず物理1行目。空でも後ろへずらさない。
+    if (physicalLines[0].trim() === '') {
+      throw new Error(label + ' line 1 must be the header row (it is blank)');
+    }
+
+    var header = physicalLines[0].split('\t').map(function (h) { return h.trim().toLowerCase(); });
+    if (header.length > knownColumns.length) {
+      throw new Error(label + ' has too many columns (max ' + knownColumns.length + ')');
+    }
+
+    var seen = Object.create(null);
+    for (var h = 0; h < header.length; h++) {
+      var name = header[h];
+      if (name === '') {
+        throw new Error(label + ' header has an empty column name at position ' + (h + 1));
+      }
+      if (forbiddenColumns.indexOf(name) !== -1) {
+        throw new Error(forbiddenMessage(name));
+      }
+      if (knownColumns.indexOf(name) === -1) {
+        throw new Error(label + ' has an unknown column: ' + JSON.stringify(name));
+      }
+      if (seen[name]) {
+        throw new Error(label + ' has a duplicate column: ' + JSON.stringify(name));
+      }
+      seen[name] = true;
+    }
+    for (var r = 0; r < requiredColumns.length; r++) {
+      if (!seen[requiredColumns[r]]) {
+        throw new Error(label + ' is missing a required column: ' + JSON.stringify(requiredColumns[r]));
+      }
+    }
+
+    var dataRows = [];
+    for (var li = 1; li < physicalLines.length; li++) {
+      if (physicalLines[li].trim() === '') continue;
+      dataRows.push({ lineNumber: li + 1, text: physicalLines[li] });
+    }
+    // 上限は**実データ行数**で数える（空行でcapを回避できない）
+    if (dataRows.length > maxRows) {
+      throw new Error(label + ' has too many rows (max ' + maxRows + ')');
+    }
+
+    var rows = dataRows.map(function (dataRow) {
+      var cells = dataRow.text.split('\t');
+      var record = Object.create(null);
+      var tooManyCells = cells.length > header.length;
+      header.forEach(function (colName, ci) {
+        record[colName] = ci < cells.length ? String(cells[ci]).trim() : '';
+      });
+      return {
+        lineNumber: dataRow.lineNumber,
+        text: dataRow.text,
+        record: record,
+        tooManyCells: tooManyCells
+      };
+    });
+
+    return { header: header, seen: seen, rows: rows };
+  }
+
   /**
    * ExcelからのTSV貼り付けを解析して、case specの配列にする。
    *
@@ -983,90 +1084,33 @@
    *            errors: Array<{lineNumber:number, caseId:(string|null), field:(string|null), reason:string}>}}
    */
   function parseTsv(text) {
-    if (typeof text !== 'string') {
-      throw new Error('parseTsv(): input must be a string');
-    }
-    if (byteLengthOf(text) > MAX_TSV_BYTES) {
-      throw new Error('TSV payload is too large (max ' + MAX_TSV_BYTES + ' bytes)');
-    }
-
-    // Required Fix 1: 物理行番号を保つ。
-    //
-    // 以前は空行を**先に捨ててから**番号を振っていたため、
-    // Excelから貼り付けたときの実際の行番号とズレた
-    // （header / valid / blank / invalid で、invalidが「3行目」と報告された）。
-    // §37はユーザーが自分のシート上で行を特定できることを求めるので、
-    // 空行はskipするが**番号は物理位置のまま**にする。
-    var physicalLines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-    if (physicalLines.length === 0) {
-      throw new Error('TSV payload is empty');
-    }
-
-    // headerは必ず物理1行目。空ならfail closed（headerを後ろへずらさない）。
-    if (physicalLines[0].trim() === '') {
-      throw new Error('TSV line 1 must be the header row (it is blank)');
-    }
-
-    var header = physicalLines[0].split('\t').map(function (h) { return h.trim().toLowerCase(); });
-    if (header.length > TSV_KNOWN_COLUMNS.length) {
-      throw new Error('TSV has too many columns (max ' + TSV_KNOWN_COLUMNS.length + ')');
-    }
-
-    var seen = Object.create(null);
-    for (var h = 0; h < header.length; h++) {
-      var name = header[h];
-      if (name === '') {
-        throw new Error('TSV header has an empty column name at position ' + (h + 1));
+    var table = parseTsvTable(text, {
+      label: 'TSV',
+      knownColumns: TSV_KNOWN_COLUMNS,
+      forbiddenColumns: TSV_FORBIDDEN_COLUMNS,
+      requiredColumns: TSV_REQUIRED_COLUMNS,
+      maxBytes: MAX_TSV_BYTES,
+      maxRows: MAX_CASES,
+      forbiddenMessage: function (name) {
+        return 'TSV must not carry a derived or trust column: ' + JSON.stringify(name) +
+          ' (pressures and glass selection are computed, never imported)';
       }
-      if (TSV_FORBIDDEN_COLUMNS.indexOf(name) !== -1) {
-        throw new Error(
-          'TSV must not carry a derived or trust column: ' + JSON.stringify(name) +
-            ' (pressures and glass selection are computed, never imported)'
-        );
-      }
-      if (TSV_KNOWN_COLUMNS.indexOf(name) === -1) {
-        throw new Error('TSV has an unknown column: ' + JSON.stringify(name));
-      }
-      if (seen[name]) {
-        throw new Error('TSV has a duplicate column: ' + JSON.stringify(name));
-      }
-      seen[name] = true;
-    }
-    for (var r = 0; r < TSV_REQUIRED_COLUMNS.length; r++) {
-      if (!seen[TSV_REQUIRED_COLUMNS[r]]) {
-        throw new Error('TSV is missing a required column: ' + JSON.stringify(TSV_REQUIRED_COLUMNS[r]));
-      }
-    }
-
-    // 空行は case にしないが、物理番号は保持する。
-    // MAX_CASESは**実データ行数**で数える（空行でcapを回避できないように）。
-    var dataRows = [];
-    for (var li = 1; li < physicalLines.length; li++) {
-      if (physicalLines[li].trim() === '') continue;
-      dataRows.push({ lineNumber: li + 1, text: physicalLines[li] });
-    }
-    if (dataRows.length > MAX_CASES) {
-      throw new Error('TSV has too many rows (max ' + MAX_CASES + ')');
-    }
+    });
+    var seen = table.seen;
 
     var rows = [];
     var errors = [];
 
-    dataRows.forEach(function (dataRow) {
-      var line = dataRow.text;
+    table.rows.forEach(function (dataRow) {
       var lineNumber = dataRow.lineNumber;   // 物理行番号（1-based）
+      var record = dataRow.record;
       var safeCaseId = null;
       var safeLabel = null;
       var currentField = null;
       try {
-        var cells = line.split('\t');
-        if (cells.length > header.length) {
+        if (dataRow.tooManyCells) {
           throw new Error('row has more cells than the header declares');
         }
-        var record = Object.create(null);
-        header.forEach(function (colName, ci) {
-          record[colName] = ci < cells.length ? String(cells[ci]).trim() : '';
-        });
 
         if (record.case_id) {
           currentField = 'case_id';
@@ -1314,6 +1358,7 @@
     groupByRecommended: groupByRecommended,
     sortResults: sortResults,
     filterResults: filterResults,
+    parseTsvTable: parseTsvTable,
     INVALID_RESULT_SOURCES: Object.freeze(INVALID_RESULT_SOURCES),
     MAX_REASON_LENGTH: MAX_REASON_LENGTH,
     SAFE_REASON_VOCABULARY: Object.freeze(SAFE_REASON_VOCABULARY),

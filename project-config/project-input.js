@@ -210,6 +210,25 @@
     return v;
   }
 
+  /**
+   * pane寸法とextraFactorの入力契約。
+   *
+   * この2つは Project Input Package の契約であって、上流のUIやBatch /
+   * Scenario層が各自で書き写すものではない。書き写すと必ず片方だけ直る。
+   * 実装をここ1か所に置き、上流はこれを**呼ぶ**（Phase 2H F5）。
+   */
+  function assertPaneDimensionMm(v, label) {
+    return requirePositiveInRange(v, label, MAX_DIMENSION_MM);
+  }
+
+  function assertExtraFactor(v) {
+    var extraFactor = requireFiniteNumber(v, 'extraFactor');
+    if (extraFactor <= 0 || extraFactor > 1.0) {
+      throw new Error('extraFactor must satisfy 0 < value <= 1.0, got: ' + JSON.stringify(extraFactor));
+    }
+    return extraFactor;
+  }
+
   function assertPublicSafeString(v, label) {
     if (typeof v !== 'string') {
       throw new Error(label + ' must be a string, got: ' + JSON.stringify(v));
@@ -298,8 +317,8 @@
     }
 
     // 寸法
-    var widthMm = requirePositiveInRange(raw.widthMm, 'widthMm', MAX_DIMENSION_MM);
-    var heightMm = requirePositiveInRange(raw.heightMm, 'heightMm', MAX_DIMENSION_MM);
+    var widthMm = assertPaneDimensionMm(raw.widthMm, 'widthMm');
+    var heightMm = assertPaneDimensionMm(raw.heightMm, 'heightMm');
 
     // windInput（v2。告示風圧計算の入力条件）
     //
@@ -361,10 +380,7 @@
     }
 
     // extraFactor（告示外の追加低減係数: 0 < v <= 1.0）
-    var extraFactor = requireFiniteNumber(raw.extraFactor, 'extraFactor');
-    if (extraFactor <= 0 || extraFactor > 1.0) {
-      throw new Error('extraFactor must satisfy 0 < value <= 1.0, got: ' + JSON.stringify(extraFactor));
-    }
+    var extraFactor = assertExtraFactor(raw.extraFactor);
 
     // provenance
     var rawProv = raw.provenance;
@@ -656,6 +672,9 @@
     MAX_STRING_LENGTH: MAX_STRING_LENGTH,
     IMPORTED_PUBLIC_LABEL: IMPORTED_PUBLIC_LABEL,
     NOTIFICATION_PUBLIC_LABEL: NOTIFICATION_PUBLIC_LABEL,
+    MAX_DIMENSION_MM: MAX_DIMENSION_MM,
+    assertPaneDimensionMm: assertPaneDimensionMm,
+    assertExtraFactor: assertExtraFactor,
     computeDesignPressure: computeDesignPressure,
     createProjectInput: createProjectInput,
     validateProjectInput: function (pkg) { return validateAndNormalize(pkg, {}); },
