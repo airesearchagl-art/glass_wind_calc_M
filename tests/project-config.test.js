@@ -72,15 +72,68 @@ test('project-config: getPublicLabel() — disclosure-safeなidentity.publicLabe
   assert.equal(MiyoshiProjectConfig.getPublicLabel(), 'みよし案件');
   assert.equal(MiyoshiProjectConfig.getPublicLabel(), MiyoshiProjectConfig.identity.publicLabel);
 
-  // publicLabelが欠落している場合、projectName等へフォールバックせず
-  // 例外を投げること（公開UIの表示元をfail-closedにする境界の確認）。
-  const saved = MiyoshiProjectConfig.identity.publicLabel;
-  delete MiyoshiProjectConfig.identity.publicLabel;
+  // F3以降、identityは深くfreezeされているため、この元テストが行っていた
+  // `delete identity.publicLabel` 自体が構造的に不可能になった（後段のfreeze
+  // 回帰テストで固定する）。ただし「publicLabelが欠落したらprojectName等へ
+  // フォールバックせず例外を投げる」というfail-closedな実装自体は、freezeに
+  // 依存せず独立に成り立っていなければならない。
+  // そこで freeze行だけを外したコピーを別に読み込み、その分岐を実際に通す。
+  const src = fs.readFileSync(PROJECT_CONFIG_SRC_PATH, 'utf8');
+  const freezeMarker = 'deepFreeze(config.identity);';
+  assert.equal(src.split(freezeMarker).length - 1, 1,
+    'identity freezeマーカーが一意に1件見つかるはず（ソース構造が変わった可能性）');
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'miyoshi-public-label-test-'));
   try {
-    assert.throws(() => MiyoshiProjectConfig.getPublicLabel());
+    fs.writeFileSync(
+      path.join(tmpDir, 'evidence.js'),
+      fs.readFileSync(path.join(__dirname, '..', 'project-config', 'evidence.js'), 'utf8')
+    );
+    const tmpFile = path.join(tmpDir, 'miyoshi.js');
+    fs.writeFileSync(tmpFile, src.replace(freezeMarker, '/* freeze removed for this test */'));
+    delete require.cache[require.resolve(tmpFile)];
+    const unfrozen = require(tmpFile);
+
+    assert.equal(Object.isFrozen(unfrozen.identity), false, 'このコピーではidentityはfreezeされていない');
+    delete unfrozen.identity.publicLabel;
+    assert.throws(() => unfrozen.getPublicLabel(), /Public project label is required/);
+    // projectNameへフォールバックしていないこと
+    assert.notEqual(unfrozen.projectName, undefined);
   } finally {
-    MiyoshiProjectConfig.identity.publicLabel = saved;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test('F3: identity / dimensions / wind / verifiedCases は検証後に改変できない', () => {
+  // Ledger entryだけをfreezeしても、UIが実際に読む一次のtrusted objectが
+  // mutableなら「検証後改変の封鎖」は半分しか成り立たない。
+  const C = MiyoshiProjectConfig;
+  for (const [name, obj] of [['identity', C.identity], ['dimensions', C.dimensions],
+    ['wind', C.wind], ['verifiedCases', C.verifiedCases]]) {
+    assert.equal(Object.isFrozen(obj), true, name + ' はfreezeされているはず');
+  }
+  // nested（値・evidence）まで届いていること
+  assert.equal(Object.isFrozen(C.wind.V0), true);
+  assert.equal(Object.isFrozen(C.wind.V0.evidence), true);
+  assert.equal(Object.isFrozen(C.dimensions.defaultW), true);
+  assert.equal(Object.isFrozen(C.dimensions.defaultW.evidence), true);
+  assert.equal(Object.isFrozen(C.wind.positivePressureByFloor['1']), true);
+
+  // 具体的な攻撃が通らないこと（strict modeなのでthrowする）
+  assert.throws(() => { C.wind.V0.value = 99; }, TypeError);
+  assert.throws(() => { C.wind.V0.evidence.level = 'none'; }, TypeError);
+  assert.throws(() => { C.dimensions.mode = 'verified_project_case'; }, TypeError);
+  assert.throws(() => { C.dimensions.defaultW.verificationStatus = 'verified'; }, TypeError);
+  assert.throws(() => { C.wind.positivePressureByFloor['1'].value = 9999; }, TypeError);
+  // validateVerifiedCase() を一切通らない裏口登録
+  assert.throws(() => { C.verifiedCases.push({ caseId: 'X' }); }, TypeError);
+
+  // 値が実際に無傷であること
+  assert.equal(C.wind.V0.value, 34);
+  assert.equal(C.dimensions.mode, 'sample_default');
+  assert.equal(C.getPositivePressure('1'), 1297);
+  assert.equal(C.verifiedCases.length, 0);
+  assert.deepEqual(C.validateAllEvidence(), []);
 });
 
 test('project-config: wind.V0 — 社内基本設計資料で直接確認済み（verified）、evidence.level=primary、checkedAt=2026-09-17', () => {
@@ -283,13 +336,23 @@ test('RF-01: identityの構築時（モジュール読み込み時）にpromotio
   const src = fs.readFileSync(PROJECT_CONFIG_SRC_PATH, 'utf8');
 
   function requireBrokenCopy(brokenSrc) {
-    const tmpFile = path.join(os.tmpdir(), 'miyoshi-evidence-guard-test-' + process.pid + '-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.js');
+    // Phase 2FでEvidence contractを project-config/evidence.js へ抽出したため、
+    // 壊したコピーも evidence.js を解決できる必要がある。
+    // コピー先へ evidence.js も一緒に置き、`require('./evidence.js')` が
+    // 自己完結で解決できるようにする（同一プロセスで先にロードされた
+    // global.ProjectEvidence に偶然依存させない）。
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'miyoshi-evidence-guard-test-'));
+    const tmpFile = path.join(tmpDir, 'miyoshi.js');
+    fs.writeFileSync(
+      path.join(tmpDir, 'evidence.js'),
+      fs.readFileSync(path.join(__dirname, '..', 'project-config', 'evidence.js'), 'utf8')
+    );
     fs.writeFileSync(tmpFile, brokenSrc);
     try {
       delete require.cache[require.resolve(tmpFile)];
       require(tmpFile);
     } finally {
-      fs.unlinkSync(tmpFile);
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   }
 
@@ -613,4 +676,161 @@ test('代表ケース: FL6 W=1500/H=2050/2F/general/extraFactor=1.00 → ≈1463
   assert.ok(fl6, 'FL6候補が存在するはず');
   assert.ok(Math.abs(fl6.P - 1463.4146341463415) < 1e-6);
   assert.equal(fl6.status, 'ng');
+});
+
+/* ============================================================
+   Phase 2F: Evidence contract抽出の回帰ガード
+   （browserでのみ再現したmodule解決バグの再発防止）
+============================================================ */
+
+test('Phase 2F: Evidence contractの正は evidence.js であり miyoshi.js は再実装しない', () => {
+  const evidence = require('../project-config/evidence.js');
+  // 契約の実体が evidence.js にある
+  for (const fn of ['makeEvidence', 'assertEvidenceConsistency', 'isValidCheckedAt',
+                    'assertPublicSafeEvidenceText', 'verifiedValue',
+                    'EVIDENCE_LEVELS', 'VERIFICATION_STATUSES']) {
+    assert.ok(evidence[fn] !== undefined, 'evidence.js が ' + fn + ' を持つこと');
+  }
+  // miyoshi.js が公開する関数は evidence.js のものと同一実体（コピーではない）
+  assert.equal(MiyoshiProjectConfig.makeEvidence, evidence.makeEvidence);
+  assert.equal(MiyoshiProjectConfig.isValidCheckedAt, evidence.isValidCheckedAt);
+  assert.equal(MiyoshiProjectConfig.assertPublicSafeEvidenceText, evidence.assertPublicSafeEvidenceText);
+  assert.equal(MiyoshiProjectConfig.VERIFICATION_STATUSES, evidence.VERIFICATION_STATUSES);
+
+  // miyoshi.js のソースに契約の再実装が残っていないこと
+  const src = fs.readFileSync(PROJECT_CONFIG_SRC_PATH, 'utf8');
+  assert.doesNotMatch(src, /function makeEvidence\s*\(/, 'makeEvidenceを再定義していない');
+  assert.doesNotMatch(src, /function assertEvidenceConsistency\s*\(/, 'promotion guardを再定義していない');
+  assert.doesNotMatch(src, /function isValidCheckedAt\s*\(/, 'isValidCheckedAtを再定義していない');
+  assert.doesNotMatch(src, /var EVIDENCE_LEVELS = \[/, 'EVIDENCE_LEVELSを再定義していない');
+});
+
+test('Phase 2F: evidence contractの解決が bare `global` 識別子に依存しない（browser互換）', () => {
+  // miyoshi.js のUMD factoryは global を引数に取らないため、
+  // `typeof global` はブラウザで常に undefined になる。
+  // resolver が globalThis を参照していることをソースで固定する。
+  const src = fs.readFileSync(PROJECT_CONFIG_SRC_PATH, 'utf8');
+  const start = src.indexOf('function resolveEvidenceContract');
+  assert.ok(start > -1, 'resolveEvidenceContract が存在すること');
+  const body = src.slice(start, src.indexOf('\n  }', start));
+  assert.match(body, /globalThis/, 'resolverは globalThis を参照すること');
+  assert.doesNotMatch(body, /typeof global ===/, 'bare `global` に依存しないこと');
+
+  // factory signature が引数なしであるという前提自体も固定する
+  assert.match(src, /\}\)\(typeof globalThis !== 'undefined' \? globalThis : this, function \(\) \{/);
+});
+
+test('Phase 2F: index.html が evidence.js を miyoshi.js より前に読み込む', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const ev = html.indexOf('src="project-config/evidence.js"');
+  const mi = html.indexOf('src="project-config/miyoshi.js"');
+  const pi = html.indexOf('src="project-config/project-input.js"');
+  assert.ok(ev > -1, 'evidence.js のscriptタグが存在すること');
+  assert.ok(ev < mi, 'evidence.js は miyoshi.js より前');
+  assert.ok(ev < pi, 'evidence.js は project-input.js より前');
+});
+
+test('Phase 2F: 既存の verified な値はすべて強化後のpromotion gateを通る', () => {
+  const evidence = require('../project-config/evidence.js');
+  // identity / wind.V0 / wind.roughnessCategory の3件
+  const verifiedEntries = [
+    ['identity', MiyoshiProjectConfig.identity.evidence],
+    ['wind.V0', MiyoshiProjectConfig.wind.V0.evidence],
+    ['wind.roughnessCategory', MiyoshiProjectConfig.wind.roughnessCategory.evidence]
+  ];
+  for (const [label, ev] of verifiedEntries) {
+    assert.doesNotThrow(
+      () => evidence.assertPromotionGate('verified', ev, label),
+      label + ' は強化後のgateを通ること'
+    );
+    assert.equal(ev.privateReferenceAvailable, true, label + ' は private reference を持つ');
+  }
+});
+
+/* ============================================================
+   独立検証(Phase 2F) F9 — caseIdのpublic-safe boundary
+============================================================ */
+
+test('F9: verified case の caseId に図面番号・ファイル名・URLを持ち込めない', () => {
+  // caseIdはUI・export package・PR本文にそのまま出る公開identifierである。
+  // D-012がfactKeyにallowlistを課したのと同じ理由がここにも等しく当てはまる。
+  const base = makeValidVerifiedCaseFixture();
+  assert.doesNotThrow(() => MiyoshiProjectConfig.validateVerifiedCase(base));
+
+  const rejected = [
+    'A-102.pdf', 'plan_A102.dwg', 'shop-drawing.dxf', 'calc.xlsx', 'sheet.DOC',
+    'A_102_pdf', '図面A-102', 'case A102', '2026-案件',
+    'https://example.com/a', '/home/user/secret.pdf', 'C:\\docs\\a.pdf',
+    '1A102', '-A102', '',
+    'x'.repeat(49),
+    // CASE_ID_PATTERNは通る長さ・字種だが、不透明な長いトークン
+    // （Drive file ID等をそのままcaseIdにした形）はpublic-safe guardが塞ぐ。
+    // この1件があることで、pattern検査とpublic-safe guardが別々に効いている。
+    'SyntheticOpaqueTokenAAAAAAAAAA'
+  ];
+  for (const caseId of rejected) {
+    const broken = Object.assign({}, base, { caseId });
+    assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(broken),
+      /caseId/, 'caseId ' + JSON.stringify(caseId) + ' は拒否されるべき');
+  }
+
+  // 公開して差し支えない短い記号IDは通る
+  for (const caseId of ['case_1', 'GlassPane-A', 'F3W1250H2050', 'sample']) {
+    const okCase = Object.assign({}, base, { caseId });
+    assert.doesNotThrow(() => MiyoshiProjectConfig.validateVerifiedCase(okCase),
+      'caseId ' + JSON.stringify(caseId) + ' は受理されるべき');
+  }
+});
+
+/* ============================================================
+   独立検証(Phase 2F) F11 — 構築経路ではなく「configに載った結果」を検査する
+============================================================ */
+
+test('F11: validateAllEvidence() は強化後のpromotion gateでconfigの実体を検査する', () => {
+  // identityは verifiedValue() を経由せずliteralで組まれているため、
+  // 「gateを通したevidence変数」と「literalが実際に載せたevidence」が
+  // 別物になっても、構築時のgateだけでは気づけない。
+  // validateAllEvidence() が結果を検査し、module loadごと失敗させること。
+  assert.deepEqual(MiyoshiProjectConfig.validateAllEvidence(), []);
+
+  const src = fs.readFileSync(PROJECT_CONFIG_SRC_PATH, 'utf8');
+  const marker = `      evidence: identityEvidence\n    },`;
+  assert.equal(src.split(marker).length - 1, 1,
+    'identity.evidence のliteralが一意に見つかるはず（ソース構造が変わった可能性）');
+
+  // gateを通した identityEvidence ではなく、別の弱いevidenceをliteralに載せる。
+  // 構築時の assertPromotionGate('verified', identityEvidence) は依然成功するので、
+  // これを捕まえられるのは「結果を検査する」経路だけである。
+  const repointed = src.replace(marker,
+    `      evidence: makeEvidence('indirect', '2026-09-17', '間接的に整合を確認', true)\n    },`);
+  assert.notEqual(repointed, src);
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'miyoshi-identity-rebind-test-'));
+  try {
+    fs.writeFileSync(path.join(tmpDir, 'evidence.js'),
+      fs.readFileSync(path.join(__dirname, '..', 'project-config', 'evidence.js'), 'utf8'));
+    const tmpFile = path.join(tmpDir, 'miyoshi.js');
+    fs.writeFileSync(tmpFile, repointed);
+    delete require.cache[require.resolve(tmpFile)];
+    assert.throws(() => require(tmpFile),
+      /evidence contract violated at module load[\s\S]*identity/,
+      'identity.evidence を差し替えたらmodule loadが失敗するはず');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('F11: validateAllEvidence() は privateReferenceAvailable まで見る（弱い方に退行しない）', () => {
+  // assertEvidenceConsistency は privateReferenceAvailable を検査しない。
+  // そちらへ退行すると、private参照もpublic referenceも無い 'verified' が
+  // configに載ったまま「違反なし」と報告されてしまう。
+  const src = fs.readFileSync(PROJECT_CONFIG_SRC_PATH, 'utf8');
+  const fn = src.slice(src.indexOf('config.validateAllEvidence = function'));
+  const body = fn.slice(0, fn.indexOf('\n  };'));
+  assert.match(body, /assertPromotionGate\(/,
+    'validateAllEvidence は強化後のgateを使うこと');
+  assert.doesNotMatch(body, /assertEvidenceConsistency\(/,
+    'validateAllEvidence は弱いconsistency checkに退行しないこと');
+  assert.match(body, /sourceReference/,
+    'public primary referenceで検証した値も正しく判定できること');
 });

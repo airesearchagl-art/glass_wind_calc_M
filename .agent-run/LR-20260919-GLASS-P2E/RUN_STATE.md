@@ -384,3 +384,31 @@ Vercel Preview                 : exact head で success
 しかし保持している限りcanonical上 `COMPLETE_VERIFIED` には到達しない。
 
 加えてFinal focused independent delta reviewが未実施である。
+
+## Phase 2E closeout（post-merge。Phase 2F Wave 0で記録）
+
+```yaml
+pr_6: MERGED
+final_feature_head: dab2105b15f9da9a4d858cc6439ed863fae360fa
+merge_commit_main: a185b4675cac03d501ea6805b449437c3fbbb0fd
+production: READY
+final_focused_review: PASS
+required_fix: 0
+human_merge_authorization: received
+final_run_state: COMPLETE_PENDING_FULL_VERIFY
+task_packet_snapshot: unchanged
+task_packet_digest: unchanged (137e9cde…185f)
+```
+
+Final Run Stateは `COMPLETE_PENDING_FULL_VERIFY` を維持する。merge・Production反映・
+Final Focused Review PASS が成立してもなお、canonical contractが `COMPLETE_VERIFIED` に
+要求する「Explicit unverified itemsなし」を満たさないためである
+（実見付W/H・正圧の元計算根拠・負圧の元計算根拠・floor/Z mappingの4件を意図的に保持）。
+
+これら4件はPhase 2F（LR-20260920-GLASS-P2F）へ引き継ぐ。
+
+**Phase 2F Wave 0でのEvidence availability判定は UNAVAILABLE であった**ため、
+Phase 2FでもこれらをclosureしていないPhase 2Eのpost-closeout stateは
+`COMPLETE_PENDING_FULL_VERIFY` のまま据え置く。
+
+後続作業はPhase 2Fで扱う。本Run Artifactはこれ以上更新しない。

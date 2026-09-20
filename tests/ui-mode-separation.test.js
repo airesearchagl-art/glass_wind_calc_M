@@ -22,6 +22,9 @@ const path = require('node:path');
 
 const INDEX_HTML_PATH = path.join(__dirname, '..', 'index.html');
 
+// Phase 2F: Evidence status表示の検証で実際のconfigを参照する
+const MiyoshiProjectConfig = require('../project-config/miyoshi.js');
+
 function readIndexHtml() {
   return fs.readFileSync(INDEX_HTML_PATH, 'utf8');
 }
@@ -289,4 +292,94 @@ test('AC-10: 参考比較は明示選択したときだけ表示される', () =
   const html = readIndexHtml();
   assert.match(html, /id="inp-wind-compare"/);
   assert.match(html, /compareSel\.value !== 'on'/);
+});
+
+/* ============================================================
+   Phase 2F Wave 4: Evidence status UI / case selector / reconciliation
+============================================================ */
+
+test('AC-16: Evidence status表示はconfigのmetadataから導出し、UIに固定値を持たない', () => {
+  const html = readIndexHtml();
+  assert.match(html, /id="evidence-status-table"/);
+  // 検証状況はconfigから読む
+  assert.match(html, /config\.wind\.V0\.verificationStatus/);
+  assert.match(html, /config\.wind\.roughnessCategory\.verificationStatus/);
+  assert.match(html, /config\.identity\.verificationStatus/);
+  assert.match(html, /dims\.status/);
+  assert.match(html, /config\.wind\.status/);
+  // UI側に検証状況をハードコードしていない
+  assert.doesNotMatch(html, /'ガラス見付寸法',\s*'verified'/);
+  assert.doesNotMatch(html, /V0[^\n]*'verified'/);
+});
+
+test('AC-16: Verified Case selectorはcaseが存在するときだけ描画される', () => {
+  const html = readIndexHtml();
+  const fnStart = html.indexOf('function renderVerifiedCaseSelector');
+  assert.ok(fnStart > -1);
+  const fn = html.slice(fnStart, html.indexOf('\n}', fnStart));
+  // 0件のとき早期returnし、selectを作らない
+  assert.match(fn, /verifiedCases\.length === 0/);
+  assert.match(fn, /case selectorは表示しません/);
+  // selectの生成が0件分岐より後にあること
+  assert.ok(fn.indexOf('verifiedCases.length === 0') < fn.indexOf('<select'),
+    '0件分岐がselect生成より前にあること');
+  // 現状 verifiedCases は空
+  assert.deepEqual(MiyoshiProjectConfig.verifiedCases, []);
+});
+
+test('AC-11 / AC-12: reconciliation表示は数値一致を検証済みと読み替えない', () => {
+  const html = readIndexHtml();
+  assert.match(html, /id="reconciliation-area"/);
+  assert.match(html, /数値的一致は検証済みを意味しません/);
+  assert.match(html, /INSUFFICIENT_EVIDENCE/);
+  assert.match(html, /read-onlyで、presetを書き換えることはありません/);
+  // 告示計算の近似一致も根拠にしない旨
+  assert.match(html, /告示風圧計算の結果がpreset値に近いことも、検証の根拠にはなりません/);
+});
+
+test('AC-15: UIはpresetの値をverifiedとしてLedgerへ登録しない', () => {
+  const html = readIndexHtml();
+  const fnStart = html.indexOf('function buildProjectEvidenceLedger');
+  const fn = html.slice(fnStart, html.indexOf('\n}', fnStart));
+  // 現在の検証状況をそのまま使い、'verified' を注入しない
+  assert.match(fn, /verificationStatus: dims\.defaultW\.verificationStatus/);
+  assert.match(fn, /verificationStatus: dims\.defaultH\.verificationStatus/);
+  assert.doesNotMatch(fn, /verificationStatus: 'verified'/, 'verifiedを直接注入してはならない');
+  assert.doesNotMatch(fn, /makeEvidence\('primary'/, 'primary evidenceを捏造してはならない');
+});
+
+test('Phase 2F: evidence-ledger.js が evidence.js の後に読み込まれる', () => {
+  const html = readIndexHtml();
+  const ev = html.indexOf('src="project-config/evidence.js"');
+  const led = html.indexOf('src="project-config/evidence-ledger.js"');
+  assert.ok(led > -1 && ev > -1);
+  assert.ok(ev < led, 'evidence.js が evidence-ledger.js より前');
+});
+
+/* ============================================================
+   独立検証(Phase 2F) F10 — Evidence panelは黙って消えない
+============================================================ */
+
+test('F10: renderProjectEvidencePanels の catch は失敗を画面に出す（黙殺しない）', () => {
+  const src = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  const start = src.indexOf('function renderProjectEvidencePanels');
+  assert.notEqual(start, -1, 'renderProjectEvidencePanels が見つかるはず');
+  const fn = src.slice(start, src.indexOf('\nfunction ', start + 10));
+
+  // Evidence contract / promotion gate が失敗したとき、panelが何も言わずに
+  // 消えると「検証状況の表示が無い＝問題なし」と読めてしまう。
+  // catch節は必ず panel host へ失敗を書き出すこと。
+  const catchBody = fn.slice(fn.indexOf('catch'));
+  assert.match(catchBody, /getElementById\('evidence-status-table'\)/,
+    'catch節はEvidence status panelのhostを取得して表示を書き換えるべき');
+  assert.match(catchBody, /textContent/,
+    'catch節は例外メッセージをtextContentで表示すべき（HTMLとして解釈させない）');
+  assert.doesNotMatch(catchBody, /innerHTML/,
+    'catch節で例外メッセージをinnerHTMLに入れてはならない');
+  assert.match(catchBody, /検証済み|検証状況が不明/,
+    '表示できなかったことを「検証済み」と解釈させない文言を出すべき');
+
+  // 計算機能自体は止めない（catchで握ること自体は維持する）
+  assert.match(fn, /try \{/);
+  assert.match(fn, /catch \(e\)/);
 });
