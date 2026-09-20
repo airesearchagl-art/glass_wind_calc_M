@@ -10,7 +10,7 @@
 | 3 | Batch UI / Add Current / Duplicate / Remove / Sort / Filter / Grouping | DONE |
 | 4 | TSV paste / Workspace JSON export-import / CSV result export | DONE |
 | 4H | Batch Error Contract Closure（Required Fix 1 / 2） | DONE |
-| 5 | security / privacy / CSV injection / HTML escaping / prototype pollution / limits / mutation | PENDING |
+| 5 | security / privacy / CSV injection / HTML escaping / prototype pollution / limits / mutation | DONE |
 | 6 | full regression / browser / independent verifier | PENDING |
 | 7 | README / Run Artifact convergence / Draft PR / Vercel exact head / Completion Report | PENDING |
 
@@ -47,8 +47,7 @@
 ## Next Action
 
 ```text
-Wave 5: security / privacy / CSV formula injection / HTML escaping /
-        prototype pollution / size limits / mutation tests
+Wave 6: full regression / browser / independent verifier
 ```
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管 / §44）。

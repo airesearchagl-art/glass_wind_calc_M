@@ -207,3 +207,49 @@ test('取り込みデータが未検証である旨を画面に明示する', ()
   assert.match(src, /計算結果側の列は受け付けません/);
   assert.match(src, /入力だけ/);
 });
+
+/* ============================================================
+   Required Fix 2 — 診断配線のソース契約
+   （M9: 「取り込めなかった行を黙って捨てる」変更を殺すためのテスト）
+============================================================ */
+
+test('RF2: import診断がINVALID resultとして必ず表示層へ渡る', () => {
+  const batch = batchScript();
+
+  // 隔離した診断レイヤを持っている
+  assert.match(batch, /var batchInvalidDiagnostics = \[\];/);
+
+  // TSVはWorkspaceへ「追加」するので、診断も追加する
+  assert.match(batch,
+    /batchInvalidDiagnostics = batchInvalidDiagnostics\.concat\(\s*WorkspaceCore\.errorsToInvalidResults\(outcome\.errors, 'tsv'\)\s*\);/,
+    'TSV importの診断をINVALID resultへ変換して保持すること');
+
+  // Workspace JSONはWorkspaceを「置き換える」ので、診断も置き換える
+  assert.match(batch,
+    /batchInvalidDiagnostics = WorkspaceCore\.errorsToInvalidResults\(imported\.errors, 'workspace_json'\);/,
+    'JSON importの診断をINVALID resultへ変換して置き換えること');
+
+  // 評価結果と診断をmergeして表示する
+  assert.match(batch,
+    /batchResults = WorkspaceCore\.mergeEvaluationResults\(\s*WorkspaceCore\.evaluateWorkspace\(batchWorkspace\),\s*batchInvalidDiagnostics\s*\);/,
+    '表示listは valid結果 + INVALID診断 のmergeであること');
+
+  // clearは診断も消す（消したはずの行が残らない）
+  assert.match(batch, /batchInvalidDiagnostics = \[\];[\s\S]{0,120}batchResults = \[\];/,
+    'clear時に診断も空にすること');
+
+  // INVALID行をindex.html側で手組みしない（canonical helperを使う / §5）
+  assert.doesNotMatch(batch, /status:\s*'INVALID'/,
+    'INVALID resultをUI側で組み立ててはならない');
+});
+
+test('RF2: 診断行はWorkspace / 計算コアへ渡らない', () => {
+  const batch = batchScript();
+  // serializeWorkspace はWorkspaceだけを受け取る（診断を混ぜない）
+  assert.match(batch, /WorkspaceCore\.serializeWorkspace\(batchWorkspace\)/);
+  assert.doesNotMatch(batch, /serializeWorkspace\([^)]*batchInvalidDiagnostics/);
+  assert.doesNotMatch(batch, /addCase\([^)]*batchInvalidDiagnostics/);
+  assert.doesNotMatch(batch, /evaluateWorkspace\([^)]*batchInvalidDiagnostics/);
+  // 診断行には操作ボタンを出さない（存在しないcaseへの操作になる）
+  assert.match(batch, /if \(r\.status === 'INVALID' && r\.source\)/);
+});

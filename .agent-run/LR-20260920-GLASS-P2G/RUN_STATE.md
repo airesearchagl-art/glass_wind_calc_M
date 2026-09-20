@@ -130,19 +130,47 @@ browser（Wave 3-4実測）         : PASS（page error 0 / console error 0。
 
 ## Hard Checks（Quality Debt化禁止 / §41）
 
+Wave 5で実測した結果に置き換えた。事前にPASSと書かない。
+
 ```text
-wrong calculation result                 : 未評価（Wave 2以降）
-Single regression                        : 未評価（Wave 6）
-trust promotion bypass                   : 未評価（Wave 5）
-Evidence spoof                           : 未評価（Wave 5）
-CSV formula injection                    : 未評価（Wave 5）
-HTML injection                           : 未評価（Wave 5）
-prototype pollution                      : 未評価（Wave 5）
-private data committed                   : PASS（Wave 0時点。synthetic fixtureのみ使用する方針）
-unbounded import                         : 未評価（Wave 4-5）
-derived result accepted as authoritative : 未評価（Wave 2 / 4）
-preset mutation                          : 未評価（Wave 6）
-security/privacy failure                 : 未評価
+wrong calculation result                 : PASS（Batchの推奨構成・許容耐力は single core から導出。
+                                           Batch側に期待値をhard-codeしていない。§35 known-answer一致）
+Single regression                        : PASS（Miyoshi 1250x2050 FL6 = 1756.09756097561、
+                                           1500x2050 FL6 = 1463.4146341463415、Manual designP 1400、
+                                           Er = 0.8516557589672942、qBar = 503.08024004410464。
+                                           いずれもbit-equal）
+trust promotion bypass                   : PASS（Workspace JSONの registered_preset / verified 主張は
+                                           imported_unverified / unverified へ降格。TSVは
+                                           manual / notification しか作れない。攻撃10件すべて遮断）
+Evidence spoof                           : PASS（Workspace schemaが evidence / verifiedCases を
+                                           unknown fieldとして拒否。verifiedCases = [] 不変）
+CSV formula injection                    : PASS（= + - @ TAB CR を先頭に持つstring cellを中和。
+                                           数値セルは中和しない（-918 は -918 のまま）。
+                                           RFC4180 escaping）
+HTML injection                           : PASS（Batch UIは textContent / createElement のみ。
+                                           innerHTML / insertAdjacentHTML / document.write なし。
+                                           実機で <img onerror> は文字列として描画、要素は作られない）
+prototype pollution                      : PASS（__proto__ / constructor.prototype いずれも
+                                           Object.prototype を汚染しない）
+private data committed                   : PASS（diff privacy sweepで新規のprivate識別子なし。
+                                           testsは Case A / North-01 / Sample-001 等の synthetic のみ）
+unbounded import                         : PASS（MAX_CASES 1000 / workspace JSON 1MB / TSV 1MB /
+                                           label 200 / caseId 64。空行でcapを回避できない）
+derived result accepted as authoritative : PASS（Workspace JSONに derived resultを保存しない。
+                                           designPressure spoof 99999 は 1525 へ再計算）
+preset mutation                          : PASS（preset値 1297/1525/1695/1729・918/1122・1250x2050
+                                           すべて不変。validateAllEvidence() = []）
+```
+
+### Wave 5 実測
+
+```text
+§14 攻撃                          : 34件すべて遮断 / leak 0
+mutation M1-M15（16 mutants）     : 16 / 16 killed
+  - M8  はpatch文字列の不一致で当初PATCH-MISS（テストの穴ではなくmutation定義の誤り）
+  - M9  は**実際に生き残った**。index.html側で取り込み診断を捨てる変更を
+        殺すテストが無かった（error integrityのtest gap）。
+        診断配線をソース契約として固定するテストを追加してkill。
 ```
 
 ## Quality Debt
