@@ -83,6 +83,12 @@ Task Packet §1の要求（197 tests以上 / 0 fail）を満たす。
 
 | Wave | Goal | Commit（full SHA） |
 |---|---|---|
-| 0 | Fresh Gate / Run Artifact初期化 / Phase 2E closeout / baseline | 本Wave 0 commit自身を含むため固定値を書かない（自己参照回避） |
+| 0 | Fresh Gate / Run Artifact初期化 / Phase 2E closeout / baseline | `6b69a7b320f7756f46ad60e6b0fb7225a8406e11` |
+| 1 | architecture inventory / Evidence contract抽出 | `0c76b4e4acc4e748967f9af9027f4b5c90499805` |
+| 2 | Promotion Gate closure / Evidence Ledger / case validator | `cc98ebc13a64e808a30658f15f0b85c6106e2b89` |
+| 2H | immutability / factKey allowlist / IP boundary / reference保持 | `f289249c4e96cafdbd53c8d12a394b7c122bccf5` |
+| 4 / 5 | Evidence status UI / 照合表示 / spoofing tests | `31dac755836a7a1f702b307d05c2a406b9a3d82a` |
+| 6 / 7 | README / Run Artifact convergence / Draft PR | 本convergence commit自身を含むため固定値を書かない（自己参照回避） |
 
-以降のWaveは成立ごとに追記する。
+Wave 3 は Evidence UNAVAILABLE のため `SKIPPED_BY_DESIGN / NO_EVIDENCE_AVAILABLE`。
+データを捏造してwaveを埋めていない。

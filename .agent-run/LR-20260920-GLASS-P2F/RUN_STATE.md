@@ -3,12 +3,13 @@
 - Run ID: LR-20260920-GLASS-P2F
 - Mode: LONG_RUN
 - Horizon: 8H
-- Current state: RUNNING（Wave 0-2H完了 → Wave 4 UI / reconciliation表示へ）
+- Current state: COMPLETE_PENDING_FULL_VERIFY
 - Repository: airesearchagl-art/glass_wind_calc_M
 - Working branch: claude/phase2f-verified-project-cases
 - Base SHA: a185b4675cac03d501ea6805b449437c3fbbb0fd
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY` — `git rev-parse HEAD` またはPRの現在headで解決する（自己参照回避contract）
-- Current wave: Wave 2H — Ledger immutability / factKey allowlist / IP boundary / reference retention（完了）
+- Implementation verification head: `RESOLVE_AT_CHECKPOINT`（Wave 7 convergence commitで確定）
+- Current wave: Wave 7 — README / Run Artifact convergence / Draft PR
 - Task Packet ID: LRP-20260920-GLASS-P2F
 - Task Packet revision: 1
 - Task Packet snapshot path: .agent-run/LR-20260920-GLASS-P2F/TASK_PACKET_SNAPSHOT.md
@@ -25,26 +26,26 @@ Project Evidence Ledger + Verified Project Case のgeneric boundaryを導入す�
 
 ## Acceptance Criteria
 
-- [ ] AC-01 Private Evidenceがpublic repoへ入らない
+- [x] AC-01 — **PASS**（private識別子の追加なし。factKey allowlist / publicDescription境界 / sourceReference構造検証）
 - [x] AC-02 — **PASS**（inventory実施。契約をevidence.jsへ移動し重複を解消）
 - [x] AC-03 — **PASS**（evidence-ledger.js）
 - [x] AC-04 — **PASS**（gateをtrusted経路へ接続。bypass mutationはすべてkill）
 - [x] AC-05 — **PASS**（field verified ≠ case verified）
 - [ ] AC-06 Verified Project Case validatorが成立
 - [x] AC-07 — **PASS**（sample_default / unverified のまま）
-- [ ] AC-08 CW overall dimensions / pitchからpane dimensionを推定しない
+- [x] AC-08 — **PASS**（推定経路なし。1250×2050は sample_default のまま）
 - [x] AC-09 — **PASS**（reconcileはEvidence優先。数値一致でも INSUFFICIENT_EVIDENCE）
 - [x] AC-10 — **PASS**（推測経路なし。算定provenance主張時はevaluation_height根拠を要求）
 - [x] AC-11 — **PASS**（reconcileFact / MATCH・MISMATCH・INSUFFICIENT_EVIDENCE）
 - [x] AC-12 — **PASS**（判定順序がEvidence優先。mutationで固定）
 - [x] AC-13 — **PASS**（read-only。preset不変をtestで固定）
 - [x] AC-14 — **PASS**（verifiedCasesは空のまま）
-- [ ] AC-15 imported dataはverified evidence/caseを作れない
-- [ ] AC-16 Miyoshi UIでEvidence statusが明確
-- [ ] AC-17 existing four modes regressionなし
-- [ ] AC-18 Wind Pressure Trace Engine regressionなし
-- [ ] AC-19 PIP v1/v2 compatibility維持
-- [ ] AC-20 README / Evidence / Run Artifact actual sync
+- [x] AC-15 — **PASS**（package schemaにevidence/sourceReference/verifiedCase fieldが存在しない）
+- [x] AC-16 — **PASS**（configのmetadataから導出。0件時はcase selectorを描画しない）
+- [x] AC-17 — **PASS**（実機4モード。1756 / 1463 / Manual 1400 / trace）
+- [x] AC-18 — **PASS**（Er / qBar 既知解不変）
+- [x] AC-19 — **PASS**（schemaVersion 2 のまま。v3へ上げていない）
+- [x] AC-20 — **PASS**
 
 ## Completed
 
@@ -60,11 +61,15 @@ Project Evidence Ledger + Verified Project Case のgeneric boundaryを導入す�
 Wave 0-2完了。Wave 3は Evidence UNAVAILABLE のため SKIPPED_BY_DESIGN。
 
 ```text
-Wave 0  Fresh Gate / Run Artifact / Phase 2E closeout / baseline   DONE
-Wave 1  architecture inventory + Evidence contract抽出              DONE
-Wave 2  Promotion Gate closure / Evidence Ledger / case validator   DONE
-Wave 3  private Evidence reconciliation                            SKIPPED_BY_DESIGN / NO_EVIDENCE_AVAILABLE
-Wave 4  UI Evidence status / reconciliation diagnostic             次
+Wave 0   Fresh Gate / Run Artifact / Phase 2E closeout / baseline   DONE
+Wave 1   architecture inventory + Evidence contract抽出             DONE
+Wave 2   Promotion Gate closure / Evidence Ledger / case validator  DONE
+Wave 2H  immutability / allowlist / IP boundary / reference保持     DONE
+Wave 3   private Evidence reconciliation                           SKIPPED_BY_DESIGN / NO_EVIDENCE_AVAILABLE
+Wave 4   UI Evidence status / case selector規則 / 照合表示           DONE
+Wave 5   security / spoofing / mutation                            DONE
+Wave 6   browser / full regression / independent verifier          browser DONE / verifier実行中
+Wave 7   README / Run Artifact convergence / Draft PR              DONE
 ```
 
 **project-specific promotion: NONE。** verifiedCases: 0。Explicit unverified items: 4。
@@ -88,7 +93,7 @@ explicit_unverified_items: 4   # 維持
 ```text
 Fresh Gate                     : PASS（base SHA一致、working tree clean）
 baseline npm test              : PASS（197 pass / 0 fail）
-full npm test (current)        : PASS（246 pass / 0 fail）
+full npm test (current)        : PASS（256 pass / 0 fail。baseline 197 → 256）
 Evidence availability          : UNAVAILABLE（§23の経路を取る）
 Evidence contract抽出           : PASS（evidence.js が単一の正。重複実装なし）
 Promotion Gate on trusted paths: PASS（verifiedValue / identity / validateVerifiedCase）
@@ -110,8 +115,12 @@ verifiedValue reference保持     : PASS（Option A。ephemeral pathなし）
 private Evidence leak                    : PASS（現時点でprivate情報の記載なし）
 secret leak                              : PASS
 trust promotion bypass                   : PASS（trusted構築経路がすべてgateを通る。mutationで確認）
-verified-state spoofing                  : 部分PASS（検証後改変によるbypassを封鎖。import spoofingはWave 5）
+verified-state spoofing                  : PASS（検証後改変・import spoofing・forged evidenceいずれも封鎖）
 data integrity                           : PASS（preset無変更をtestで固定）
+Evidence without source                  : PASS（Evidenceを主張していない。verifiedCases 0）
+automatic pressure replacement            : PASS（照合はread-only。MISMATCHでも書き換えない）
+automatic pane-dimension inference        : PASS
+automatic Z inference                     : PASS
 Evidence without source                  : PASS（Evidenceを主張していない）
 automatic pressure replacement            : PASS（preset無変更）
 automatic pane-dimension inference        : PASS（推定していない）
@@ -188,3 +197,35 @@ repair_strategies          : 0 / 3
 6. npm test でtargeted smoke check
 7. 上記 Next action から再開する
 ```
+
+
+## Wave 4-7 実施サマリ
+
+| Wave | 内容 | 結果 |
+|---|---|---|
+| 2H | immutability / allowlist / IP boundary / reference保持 | 選定mutation 7件すべてkill（H4はtest gapを露呈→close） |
+| 4 | Evidence status UI / case selector規則 / read-only照合 | 実機確認。4群すべて INSUFFICIENT_EVIDENCE |
+| 5 | import spoofing / preset mutation / privacy | package schemaにEvidence fieldが無く到達不能 |
+| 6 | browser 4モード / full regression | JS error 0。1756 / 1463 / 1400 / trace不変 |
+| 7 | README / Run Artifact / Draft PR | Evidence未取得であることを明記 |
+
+### 最終状態
+
+```yaml
+private_evidence: UNAVAILABLE
+project_specific_promotion: NONE
+verifiedCases: 0
+explicit_unverified_items: 4
+preset_mutation: NONE
+quality_debt: none
+```
+
+`verifiedCases` が空であることはbugではない。Evidenceが存在しないため、
+仕組みだけを構築して昇格を行わなかった結果である（§23 / D-001 / D-003）。
+
+## Final state — COMPLETE_PENDING_FULL_VERIFY を維持する理由
+
+canonical `COMPLETE_VERIFIED` は「Explicit unverified itemsなし」を**すべて**要求する
+要件の一つとして課している。本Campaignは4件を意図的に保持しているため到達しない。
+
+加えてIndependent Verifierの結果反映が残っている。

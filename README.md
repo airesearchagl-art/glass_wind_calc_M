@@ -336,6 +336,154 @@ UIでもこの2つを別々のチップとして表示します。
 
 ---
 
+## Evidence アーキテクチャ（Phase 2F）
+
+案件の事実（fact）を、**推測せず・private情報をpublic repoへ置かずに**管理するための仕組みです。
+
+### モジュール構成
+
+| モジュール | 役割 |
+|---|---|
+| `project-config/evidence.js` | 案件非依存の**Evidence契約**。level / checkedAt / public-safe境界 / Promotion Gate / public source reference検証 |
+| `project-config/evidence-ledger.js` | 案件非依存の**Evidence Ledger**。field単位のfact、case-level昇格判定、read-onlyの照合 |
+| `project-config/<project>.js` | 案件固有のfactと検証状況（例: `miyoshi.js`） |
+
+Phase 2Fで、Evidence契約を案件固有モジュールから `evidence.js` へ切り出しました。
+**契約の正は1か所だけ**で、Ledgerも案件configも再実装しません。
+
+### Promotion Gate — verified を名乗れる条件
+
+```text
+verificationStatus === 'verified' のとき、すべて必要:
+
+  evidence.level === 'primary'
+  evidence.checkedAt が妥当な "YYYY-MM-DD"
+  かつ
+  evidence.privateReferenceAvailable === true
+  または 構造検証を通った public primary source reference
+```
+
+これは**実際の構築経路**（`verifiedValue()` / 案件identity構築 / case検証）で強制されます。
+gateを呼ばない経路は存在しません。
+
+以下は**いずれも根拠になりません**。
+
+```text
+「たぶん正しい」
+「数値が近い」
+「告示風圧計算でだいたい再現できる」
+「preset値から逆算できる」
+```
+
+### private Evidence は保存しない
+
+public repositoryに保存してよいのは次だけです。
+
+```yaml
+verificationStatus: verified | partially_verified | unverified
+evidence:
+  level: primary | indirect | none
+  checkedAt: "YYYY-MM-DD"
+  publicDescription: 公開してよい説明（URL・パス・IDを含めない）
+  privateReferenceAvailable: true   # 「社内に根拠がある」という事実だけ
+sourceReference: null               # private Evidenceでは常に null
+```
+
+**private Drive URL / SharePoint URL / Notion URL / 内部パス / ファイル名 / 図面番号 /
+担当者名 / 施主の正式名称 は保存しません。**
+
+### public primary source reference
+
+公的な公開資料に限り、参照URLを保持できます。
+
+```yaml
+sourceReference:
+  kind: public_primary
+  url: https://...    # 構造検証を通ったもの
+```
+
+構造検証の内容: https であること / 資格情報を埋め込まないこと / localhost・loopback・
+私設ネットワーク・IPリテラルでないこと / 既知のprivate provider（Drive・Docs・Notion・
+SharePoint・Dropbox）でないこと / 完全修飾ホスト名であること / tokenを提供元にしないこと。
+
+> ⚠️ 検証しているのは **public-safeな構造** であって、その資料が本当に一次資料か・
+> 発行者が信頼できるかではありません。**それはHuman / reviewerの判断**です。
+> 構造検証を通ったことを「一次資料であることの証明」と読み替えないでください。
+
+なお `publicDescription` は逆に**URLを含めることを禁止**します（説明文へ参照先を書かせないため）。
+役割が正反対なので、両者を同じ検証で扱いません。
+
+### field verified と case verified は別
+
+あるfactがverifiedでも、caseがverifiedになるとは限りません。
+
+```text
+pane_width_mm   : verified
+pane_height_mm  : verified
+positive_pressure : unverified
+negative_pressure : unverified
+
+→ dimension facts は verified
+→ **case は NOT VERIFIED**
+```
+
+caseがverifiedを名乗るには、そのcase typeのcritical factが**すべて**gateを通っている必要があります。
+算定由来のprovenanceを主張する場合は、評価高さの根拠も必要です。
+
+### 照合（reconciliation）— 数値的一致は検証済みを意味しません
+
+read-onlyの診断で、preset値とEvidenceを突き合わせます。
+
+| status | 意味 |
+|---|---|
+| `MATCH` | Evidenceがverifiedで、値も一致 |
+| `MISMATCH` | Evidenceがverifiedだが、値が一致しない → **presetを自動変更せずHuman Gateへ** |
+| `INSUFFICIENT_EVIDENCE` | Evidenceがverifiedでない（**数値が一致していてもこれ**） |
+
+**判定順序はEvidenceが先、数値が後です。** 逆にすると「数値が合っているから検証済み」という
+最も危険な誤解をコードが追認してしまいます。照合はpresetを書き換えません。
+
+### 現在の状態 — Evidence は未取得
+
+```yaml
+private_evidence: UNAVAILABLE
+project_specific_promotion: NONE
+verifiedCases: 0
+explicit_unverified_items: 4
+```
+
+本実行環境からは案件の一次資料へアクセスできず、Task Packetにも案件factの実データは
+含まれていませんでした。したがってPhase 2Fは**仕組みだけを構築し、案件factの昇格は行っていません**。
+
+`verifiedCases` が空であることはbugではありません。
+**「空だから何か埋める」ことを目的にしていません。**
+
+未解決のまま維持している4項目:
+
+```text
+1. ガラス1枚の実見付 W / H（1250×2050 は sample_default / unverified）
+2. 階別正圧 1297 / 1525 / 1695 / 1729 N/m² の元計算根拠
+3. 負圧 918 / 1122 N/m² の元計算根拠
+4. 各階評価高さ Z と preset の対応
+```
+
+### Evidence Request Matrix — 何があれば昇格できるか
+
+以下が得られれば、上記のPromotion Gateを通して昇格できます。
+**ファイル名・URL・Drive ID・図面番号・担当者名は不要です**（public repoにも記録しません）。
+
+| 必要なfact | 必要なEvidence |
+|---|---|
+| ガラス見付幅 | ガラス**1枚**の見付幅を直接示す一次資料（CW全体幅や列ピッチからの逆算は不可） |
+| ガラス見付高さ | ガラス**1枚**の見付高さを直接示す一次資料（ACW全体高さは不可） |
+| 階別正圧 | 当該pressure値が直接記載された資料、または算定inputs一式（V0 / 粗度 / 建物高さ / 軒高 / 評価Z / 建物種別 / zone / 算定基準）が直接記載され、Phase 2E Trace Engineで再現できること |
+| 部位別負圧 | 同上 |
+| floor → 評価高さ Z | 階（1F / 2F / 3F / RF）と評価高さの対応が**直接**分かる資料（階高からの生成は不可） |
+
+公開リポジトリへ残るのは、値と検証状況と公開可能な説明だけです。
+
+---
+
 ## 設計定数
 
 ### 設計風圧（正圧・負圧）＝「みよし案件プリセット」値
@@ -435,6 +583,8 @@ glass_wind_calc_M/
 ├── calc.js                       # 汎用計算コア（k1・k2・許容耐風圧・candidate generation等。案件非依存）
 ├── wind-pressure.js              # 汎用風圧算定コア（Phase 2E）。Er・qBar・Cpe/Gpe・Cf・trace。案件非依存
 ├── project-config/
+│   ├── evidence.js               # 案件非依存のEvidence契約（Phase 2F）。Promotion Gate・public source reference検証
+│   ├── evidence-ledger.js        # 案件非依存のEvidence Ledger（Phase 2F）。field/case昇格・read-only照合
 │   ├── miyoshi.js                # 「みよし案件」固有プリセット（設計風圧・初期寸法）＋検証状況・Evidenceメタデータ
 │   ├── manual.js                 # 「手入力 / Generic」モードの入力契約（Phase 2C）。miyoshi.jsに非依存
 │   ├── registry.js               # generic preset registry（Phase 2D）。built-in presetのみ登録可・unknownはfail closed
@@ -445,6 +595,8 @@ glass_wind_calc_M/
 │   ├── manual-config.test.js     # 手入力モードの回帰・不正入力・Miyoshi非依存性のテスト（Phase 2C）
 │   ├── project-input.test.js     # Project Input Package / registry / import security のテスト（Phase 2D）
 │   ├── wind-pressure.test.js     # 風圧算定のknown-answer / 境界 / 単位 / 検証状態分離（Phase 2E）
+│   ├── evidence.test.js          # Evidence契約・Promotion Gate・public source reference（Phase 2F）
+│   ├── evidence-ledger.test.js   # Evidence Ledger・case昇格・照合・spoofing（Phase 2F）
 │   └── ui-mode-separation.test.js # 入力モードのUI契約テスト（Phase 2C〜2E）
 ├── package.json
 └── README.md                     # このファイル
@@ -739,6 +891,7 @@ Phase 2Aで `project-config/miyoshi.js` を分離したことに伴うテスト�
 
 | バージョン | 日付 | 内容 |
 |-----------|------|------|
+| v1.7.0-phase2f | 2026-09-20 | **Phase 2F：Evidence アーキテクチャと Verified Case レイヤ。**（1）Evidence契約（level / checkedAt / public-safe境界 / promotion guard）が案件固有の `miyoshi.js` に閉じ込められていたため、案件非依存の `project-config/evidence.js` へ**移動**（再実装ではない）。`project-input.js` にあった `VERIFICATION_STATUSES` の重複定義も解消し、契約の正を1か所にした。（2）**Promotion Gate を強化し、実際の構築経路へ接続**。`verified` は `level === 'primary'` かつ妥当な `checkedAt` に加えて、`privateReferenceAvailable === true` または構造検証済みの public primary source reference を要求する。`verifiedValue()` / 案件identity構築 / `validateVerifiedCase()` のすべてがこのgateを通る（gateを呼ばない経路は存在しない）。（3）`assertPublicPrimarySourceReference()` を新設。https / 資格情報なし / localhost・loopback・私設ネットワーク・IPリテラルでない / 既知private provider（Drive・Docs・Notion・SharePoint・Dropbox）でない / 完全修飾ホスト / tokenを提供元にしない、を構造検証する。**検証するのはpublic-safeな構造であって資料の真正性ではない**旨を明記。`publicDescription`（URLを禁止）とは役割が逆であるため別関数とした。（4）`project-config/evidence-ledger.js` を新設。field単位のfactを検証状況付きで保持し、case-level昇格は critical fact が**すべて** gate を通ることを要求する（field verified ≠ case verified）。factKeyはレビュー済み allowlist のみ（`A_102_pdf` 等のprivate filename由来キーを拒否）。entryは検証後に改変できないよう深くfreezeし、呼び出し側objectから切り離して保持する。（5）read-onlyの照合診断を追加。**判定順序はEvidenceが先、数値が後**で、Evidenceがverifiedでなければ数値が完全一致していても `INSUFFICIENT_EVIDENCE` を返す（`MATCH` ≠ verified）。照合はpresetを一切変更しない。（6）案件プリセットモードへEvidence status表示を追加（configのmetadataから導出。UI側に検証状況を持たない）。`verifiedCases` が0件のため **case selectorは描画しない**（空のUIを作らない）。（7）**案件の一次資料が本実行環境から利用できなかったため、案件factの昇格は一切行っていない。** `verifiedCases: []`、Explicit unverified items 4件を維持。1250×2050 は `sample_default` / `unverified` のまま。告示1458号式・k1・k2・IGU・TP・Low-E・`extraFactor`・Phase 2E Wind Trace（Er / qBar / Cpe×Gpe / 内圧係数 / IV→III / 再現期間の分離）・みよし案件の風圧値・V0=34・roughness III はいずれも無変更。テストは baseline 197 → 256。 |
 | v1.6.0-phase2e | 2026-09-19 | **Phase 2E：追跡可能な帳壁ガラス風圧算定エンジン。**（1）`wind-pressure.js` を新設し、案件非依存の汎用風圧算定コアを導入。`H=(建物高さ+軒高)/2`、`H'=max(H,Zb)`、`Er=1.7×(H'/ZG)^α`、`qBar=0.6×Er²×(V0×y)²`、`Cf=外圧ピーク係数−内圧ピーク係数`（正圧・負圧を別算定）、`W=qBar×Cf`、`設計風圧=max(|W+|,|W−|)` を実装し、**各ステップの式・値・単位をtraceとして保持**する。採用した式・係数・適用条件は一次資料に基づき `.agent-run/LR-20260919-GLASS-P2E/EVIDENCE.md` §4 へ出典付きで記録（provenance: `human_supplied_primary_evidence`）。（2）**式の検証状況と入力値の検証状況を分離**（`formulaVerificationStatus: verified_primary_source` / `inputVerificationStatus: user_input_unverified`）。式が検証済みでも、ユーザーが入力したV0・粗度区分・高さ・評価高さ・建物種別・部位をverifiedへ昇格させない。（3）**自動推定を実装しない**：粗度区分の住所・都市計画区域からの判定、階→評価高さZ／建物高さの導出、自治体別V0 lookup、図面からの隅角部判定はいずれも行わず、すべて明示入力。階由来のキーは未知フィールドとして拒否する。（4）板ガラスの粗度区分IV→III読み替えを**入力と計算の二層**で保持（`inputRoughnessCategory` / `calculationRoughnessCategory`）し、読み替えとその理由を画面に表示。silent rewriteしない。（5）算定基準を `notification_baseline`（y=1.00固定・`recurrenceYears`を受け付けない）と `itakyo_recommended`（50/100/200/300/500年を明示選択）に二分。**y>1.00へ暗黙にdefaultする経路を持たない**（業界推奨を法的要求へ格上げしない）。（6）Project Input Packageを `schemaVersion: 2` へ。`windInput`（入力条件のみ。算定済みtraceは保存しない）を追加し、`windInput` がある場合は正圧・負圧をpayloadから読まず**必ず再計算**する。改竄されたpressureは取り込まれない。v1は `windInput: null` のv2へ決定的にmigrateされ挙動は不変、`schemaVersion: 3` 以上はfail closed。（7）UIへ「告示風圧計算」モードを追加（既定は案件プリセットのまま）。算定トレース表・IV→III読み替え通知・隅角部帯幅・**案件プリセットとの参考比較（comparison only）**を表示。比較はプリセットの置換でも検証状況の昇格でもなく、算定根拠が未解決であることを明示する。（8）告示1458号式・k1・k2・IGU ratio cap 2.0・厚板/薄板>2.5の自動推奨除外・TP rules・Low-Eモデル・`extraFactor` 既定値・みよし案件の風圧値/V0=34/roughness III/W=1250・H=2050・`verificationStatus`・`evidence` はいずれも**無変更**。テストは baseline 133 → 190。 |
 | v1.5.0-phase2d | 2026-09-18 | **Phase 2D：calculation coreの完全な案件非依存化 + Project Input Package。**（1）`calc.js` からPhase 2A〜2Cの後方互換用に残していた案件固有プリセットの複製3件（階別正圧 / 部位別負圧 / 案件既定寸法）を、定義・export・案件固有コメントとも削除。`calc.js` は k1・k2・告示式・複層計算・candidate generation/sorting/split のみを担当する汎用計算コアになり、案件固有値・ラベル・provenance（`verificationStatus` / `evidence`）を一切持たない。全consumer（tests / README）を移行し、移行方法をREADMEへ記録。（2）`project-config/project-input.js` を新設し、versioned Project Input Package（`schemaVersion: 1`、`sourceKind`: `registered_preset` / `manual` / `imported_unverified`）を導入。共通validator（値域・有限数・W/H>0・designP>0・`0<extraFactor<=1.0`・known glassTypeのみ・public-safe string・長さ上限・未知フィールド拒否・決定的正規化）と、`designPressure` を常に `max(|正圧|, |負圧|)` から再計算する契約を実装。（3）`project-config/registry.js` を新設し、generic preset registry（`registerPreset` / `getPreset` / `listPresets`、重複reject、unknownはfail closed、`getPublicLabel()` 境界維持）を導入。登録できるのは `hasFixedPreset: true` を持つrepository内built-in configだけで、手入力はtrusted presetにできない。（4）入力条件のExport / Importを追加（backend不要・localStorage不使用・`file://` 互換）。取り込んだデータは payload が `registered_preset` / `verified` / 案件ラベルを主張していても常に `imported_unverified` / `unverified` / 中立ラベルへdowngradeされ、案件のverified provenanceを偽装できない。（5）import security: `__proto__`/`prototype`/`constructor` キー・16KB超payload・深さ8超ネスト・未知フィールド・不正JSON・HTML/script/URL/絶対パス/制御文字を含む文字列を拒否。`eval`/`Function` 不使用、取り込み文字列は `textContent` のみでDOMへ渡す。（6）UIへ「取り込みデータ（Imported / Unverified）」モードを追加し、`runCalc()` をモードによらずProject Input Package経由へ統一。案件presetはregistry経由でlookupする。告示1458号式・k1・k2・IGU ratio・TP rules・Low-Eモデル・`extraFactor` 既定値・みよし案件の風圧値/V0=34/roughness III/W=1250・H=2050・`verificationStatus`・`evidence` はいずれも無変更（1250×2050をverified pane dimensionへ昇格させていない）。テストは baseline 91 →  128（新規37件、削除1件は同等カバレッジを既存テストが保持）。 |
 | v1.4.0-phase2c | 2026-09-17 | **Phase 2C：案件プリセットと手入力 / Genericモードの安全な共存。**（1）Evidence契約のhardening：`makeEvidence()` の `checkedAt` 黙示的丸め込み（`checkedAt \|\| null`）を廃止し、不正な `checkedAt`/`level` はfactory入口で例外を投げるように変更。将来 `verifiedCases` へ実ケースを追加する際の入力契約 `validateVerifiedCase()` を新設（必須フィールド・floor/zone値域・寸法/圧力の正数・W/H/pressure evidenceのprimary要求・private URL/ID混入拒否）。**まだどのケースにも適用しておらず、`verifiedCases` は引き続き空配列。**（2）新規 `project-config/manual.js`（`ManualProjectConfig`）を追加：「手入力 / Generic」モードの入力契約。`project-config/miyoshi.js` に一切依存せず、みよし案件の正圧・負圧プリセットを暗黙適用しない。`buildManualDesignInput()` はW/H/正圧/負圧/extraFactorを検証し `designP = max(|正圧|, |負圧|)` を算出、結果には常に `source: "user_input"` と `verificationStatus: "unverified"` を付与（本ツールが手入力値を「verified」と主張することはない）。固定dimensions/windプリセットは一切保持しない。（3）`index.html` に入力モードセレクタ（既定値: 案件プリセット）を追加し、案件プリセットモードの既存挙動を完全維持したまま、手入力モードでは階数/部位セレクトを隠し、正圧/負圧の直接入力欄を表示。結果表示は手入力モードで「みよし案件プリセット」等の文言を一切表示せず、代わりに「⚠ ユーザー入力値 — 案件原典との照合は本ツールでは未実施」を常時表示。汎用計算コア（`calc.js`）はモード非依存のまま両モードで共用。（4）告示1458号式・k1・k2・IGU ratio・TP候補ルール・Low-Eモデル・extraFactor既定値・みよし案件の風圧数値/V0=34/roughness III/W=1250・H=2050・`calc.js`はいずれも無変更。新規テスト（`tests/manual-config.test.js` 14件、`tests/project-config.test.js` へのEvidence hardening関連10件）を追加し、既存72テスト構成（calc 23 + project-config 35 + manual-config 14）全pass。ブラウザ実機（Playwright, headless Chromium）で両モードの表示・計算・警告文言・Miyoshi非漏洩を確認済み。Draft PRを作成し、Human Gateでの Ready/merge判断待ち（本バージョンではマージ・Production反映は行っていない）。 |

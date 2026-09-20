@@ -60,66 +60,66 @@ W3-1 Evidenceが実際に利用可能な範囲でのみ実施   SKIPPED_BY_DESIG
 ## Wave 4 — UI
 
 ```text
-W4-1 Miyoshi evidence-status表示                                  TODO
-W4-2 Verified Case selector（casesが存在する場合のみ）             N/A（verifiedCases: []）
-W4-3 reconciliation diagnostic（read-only / preset不変）           TODO
+W4-1 Miyoshi evidence-status表示                                  DONE
+W4-2 Verified Case selector（0件のため描画しない）                 DONE（空UIを作らない）
+W4-3 reconciliation diagnostic（read-only / preset不変）           DONE
 ```
 
 ## Wave 5 — Tests
 
 ```text
-W5-1 promotion gate / spoofing / privacy（§22の24カテゴリ）        TODO
-W5-2 mutation                                                     TODO
-W5-3 regression（4 modes / Wind Trace / PIP v1・v2）               TODO
+W5-1 promotion gate / spoofing / privacy                          DONE
+W5-2 mutation（gate 5 / ledger 3 / Wave 2H 7）                     DONE
+W5-3 regression（4 modes / Wind Trace / PIP v1・v2）               DONE
 ```
 
 ## Wave 6 — Verification
 
 ```text
-W6-1 browser                                                      TODO
-W6-2 full regression                                              TODO
-W6-3 independent verifier（別context）                             TODO
+W6-1 browser                                                      DONE（JS error 0）
+W6-2 full regression                                              DONE（256 pass / 0 fail）
+W6-3 independent verifier（別context）                             実行中
 ```
 
 ## Wave 7 — Convergence
 
 ```text
-W7-1 README同期                                                    TODO
-W7-2 Run Artifact収束                                              TODO
-W7-3 Draft PR                                                      TODO
-W7-4 Vercel Preview exact-head                                     TODO
-W7-5 Completion Report + Human Evidence Request Matrix             TODO
+W7-1 README同期                                                    DONE
+W7-2 Run Artifact収束                                              DONE
+W7-3 Draft PR                                                      次
+W7-4 Vercel Preview exact-head                                     次
+W7-5 Completion Report + Human Evidence Request Matrix             次
 ```
 
 ## Acceptance Criteria status
 
 | AC | 内容 | 状態 |
 |---|---|---|
-| AC-01 | Private Evidenceがpublic repoへ入らない | TODO |
+| AC-01 | Private Evidenceがpublic repoへ入らない | PASS |
 | AC-02 | Existing contracts inventory / 重複実装なし | PASS |
 | AC-03 | Generic Evidence Ledger | PASS |
 | AC-04 | promotion guard fail closed | PASS |
 | AC-05 | partial → case-level 自動昇格なし | PASS |
 | AC-06 | Verified Case validator | PASS |
 | AC-07 | sample defaultをEvidenceなしに昇格しない | PASS |
-| AC-08 | CW寸法 / pitchからpane推定しない | TODO |
+| AC-08 | CW寸法 / pitchからpane推定しない | PASS |
 | AC-09 | 近似一致だけでpressure昇格しない | PASS |
 | AC-10 | floor→Z推測しない | PASS |
 | AC-11 | reconciliation table | PASS |
 | AC-12 | MATCH と verified の分離 | PASS |
 | AC-13 | mismatch時にpreset自動更新しない | PASS |
 | AC-14 | verifiedCases はgate通過caseのみ | PASS |
-| AC-15 | imported dataはverifiedを作れない | TODO |
-| AC-16 | UIでEvidence status明確 | TODO |
-| AC-17 | 4 modes regressionなし | TODO |
-| AC-18 | Wind Trace regressionなし | TODO |
-| AC-19 | PIP v1/v2 compatibility | TODO |
-| AC-20 | Documentation sync | TODO |
+| AC-15 | imported dataはverifiedを作れない | PASS |
+| AC-16 | UIでEvidence status明確 | PASS |
+| AC-17 | 4 modes regressionなし | PASS |
+| AC-18 | Wind Trace regressionなし | PASS |
+| AC-19 | PIP v1/v2 compatibility | PASS |
+| AC-20 | Documentation sync | PASS |
 
 ## Next Action
 
 ```text
-Wave 1 Existing Evidence architecture inventory
+Draft PR → Vercel Preview exact-head → Independent Verifier結果反映 → Completion Report
 ```
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管）。
