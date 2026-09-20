@@ -1,8 +1,11 @@
 # Quality Debt — LR-20260920-GLASS-P2G
 
 ```text
-none（Wave 0時点）
+none（Wave 7時点）
 ```
+
+独立検証の指摘4件（F1-F4）はいずれも本Campaign内で修復済みであり、
+Quality Debtとして繰り越していない。
 
 ## このファイルの規則
 

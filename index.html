@@ -2162,7 +2162,9 @@ function batchRender() {
       var where = [];
       if (typeof r.lineNumber === 'number') where.push(r.lineNumber + '行目');
       if (typeof r.index === 'number') where.push('case[' + r.index + ']');
-      if (r.field) where.push(r.field);
+      // reason自体が列名で始まる場合は前置しない
+      // （「4行目 / width_mm: width_mm: ...」のような二重表示を避ける）
+      if (r.field && r.error.indexOf(r.field + ':') !== 0) where.push(r.field);
       // 例外メッセージもtextContentで入れる（HTMLとして解釈させない）
       reason.textContent = (where.length > 0 ? where.join(' / ') + ': ' : '') + r.error;
       statusTd.appendChild(reason);

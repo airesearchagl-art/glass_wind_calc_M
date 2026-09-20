@@ -154,6 +154,102 @@
     return label;
   }
 
+  // ------------------------------------------------------------
+  // 診断メッセージのsanitize（独立検証 F1）
+  // ------------------------------------------------------------
+  //
+  // validatorの例外メッセージは、落ちた**値そのもの**を引用符で埋め込む
+  //   例: unsupported glassType: "SECRET-PROJECT-DWG-A1023"
+  // これがそのまま画面に出て、さらに**エクスポートされたCSVに書かれる**。
+  // CSVは共有されるファイルなので、ここが実際のegress pathになる。
+  //
+  // 行全体やJSON object全体は元から載せていないが、「落ちたセル1つ」は載っていた。
+  // §8が挙げる禁止リストの文言には入っていないものの、
+  // 利用者の案件名・図面番号がそのまま出る以上、同じ性質の漏れである。
+  //
+  // ── 方針 ──────────────────────────────────────────────
+  //
+  // 引用符で囲まれた部分は、**このシステム自身が定義している語彙**に
+  // 一致するときだけそのまま残し、それ以外は伏せる。
+  // 語彙に無いものは利用者由来とみなす（fail safe側に倒す）。
+  // 過剰に伏せる方向のズレは安全側であり、計算には一切影響しない。
+  //
+  // これは「利用者の入力が絶対に出ない」ことの保証ではなく、
+  // **無制限に出ることを止め、既知の語彙以外を伏せる**ための境界である。
+  var MAX_REASON_LENGTH = 200;
+  var REDACTED_QUOTED = '"…"';
+
+  // 表示用のsanitizeにだけ使う語彙。**契約ではない**ので、
+  // ここが実装からズレても計算・検証には影響しない（伏せすぎるだけ）。
+  // 風圧側の語彙は wind-pressure.js を require せずに持つ必要があるため
+  // リテラルで置く（AC-02: Batch layerは風圧エンジンに依存しない）。
+  var WIND_DISPLAY_VOCABULARY = [
+    'I', 'II', 'III', 'IV',
+    'closed', 'open',
+    'general', 'corner',
+    'notification_baseline', 'itakyo_recommended'
+  ];
+
+  // 「拒否することが分かっている」field名。これらは利用者データではなく
+  // こちら側が定義している語彙なので、伏せずに名指ししたほうが診断として有用
+  // （evidence を混ぜてしまった人に「どれが問題か」を返せる）。
+  var KNOWN_REJECTED_FIELD_NAMES = [
+    'evidence', 'verifiedCases', 'sourceReference', 'recommendedGlass',
+    'recommendedCandidate', 'allowablePressure', 'marginRatio', 'marginPressure',
+    'trace', 'windTrace', 'okCount', 'ngCount', 'outOfScopeCount',
+    'areaM2', 'status', 'source', 'verified'
+  ];
+
+  function buildSafeReasonVocabulary() {
+    var vocabulary = [];
+    function addAll(list) {
+      if (!list) return;
+      for (var i = 0; i < list.length; i++) {
+        if (typeof list[i] === 'string' && vocabulary.indexOf(list[i]) === -1) {
+          vocabulary.push(list[i]);
+        }
+      }
+    }
+    addAll(TSV_KNOWN_COLUMNS);
+    addAll(TSV_FORBIDDEN_COLUMNS);
+    addAll(KNOWN_REJECTED_FIELD_NAMES);
+    addAll(CASE_KEYS);
+    addAll(TOP_LEVEL_WORKSPACE_KEYS);
+    addAll(CASE_STATUSES);
+    addAll(FILTER_VALUES);
+    addAll(SORT_KEYS);
+    addAll(INVALID_RESULT_SOURCES);
+    addAll(['manual', 'notification']);
+    addAll(WIND_DISPLAY_VOCABULARY);
+    addAll([WORKSPACE_TYPE]);
+    // 依存moduleが公開している語彙（enumそのもの）
+    addAll(ProjectInput.SOURCE_KINDS);
+    addAll(ProjectInput.VERIFICATION_STATUSES);
+    addAll(ProjectInput.ALLOWED_TOP_LEVEL_KEYS);
+    addAll(ProjectInput.WIND_INPUT_KEYS);
+    addAll(GlassCalc.GLASS_TYPES ? Object.keys(GlassCalc.GLASS_TYPES) : []);
+    return vocabulary;
+  }
+
+  var SAFE_REASON_VOCABULARY = buildSafeReasonVocabulary();
+
+  /**
+   * 診断reasonを表示・出力できる形に整える。
+   *
+   * 既知語彙に一致しない引用部分を伏せ、全体長を上限で切る。
+   */
+  function sanitizeReason(message) {
+    if (message === null || message === undefined) return null;
+    var text = String(message).replace(/"((?:[^"\\]|\\.)*)"/g, function (whole, inner) {
+      return SAFE_REASON_VOCABULARY.indexOf(inner) !== -1 ? whole : REDACTED_QUOTED;
+    });
+    if (text.length > MAX_REASON_LENGTH) {
+      text = text.slice(0, MAX_REASON_LENGTH - 1) + '…';
+    }
+    return text;
+  }
+
+
   // ============================================================
   // Workspace（case lifecycle）
   // ============================================================
@@ -444,6 +540,7 @@
 
   var INVALID_RESULT_SOURCES = ['tsv', 'workspace_json'];
 
+
   /**
    * import時に弾かれた行を、**表示専用の** INVALID resultへ変換する。
    *
@@ -473,14 +570,19 @@
     if (INVALID_RESULT_SOURCES.indexOf(source) === -1) {
       throw new Error('errorToInvalidResult(): unknown source ' + JSON.stringify(source));
     }
+    // F4: この関数は「INVALID行を作る唯一の正規経路」と位置づけている以上、
+    // labelがnormalizeLabelを通っていることを**呼び出し側の規約に頼らない**。
+    // ここを通らないlabelはCSVまで届いてしまう。
+    var label = normalizeLabel(error.label === undefined ? null : error.label);
     return {
       caseId: error.caseId === undefined ? null : error.caseId,
-      label: error.label === undefined ? null : error.label,
+      label: label,
       source: source,
       lineNumber: typeof error.lineNumber === 'number' ? error.lineNumber : null,
       index: typeof error.index === 'number' ? error.index : null,
       field: error.field === undefined ? null : error.field,
-      error: error.reason === undefined ? null : error.reason,
+      // F1: 落ちた値がそのままCSVへ出ないようsanitizeを通す
+      error: sanitizeReason(error.reason === undefined ? null : error.reason),
       status: 'INVALID',
       // 計算に属する値は**すべてnull**。INVALID行が数値を持つと、
       // summaryのmax値やgoverning caseへ混ざってしまう。
@@ -796,7 +898,7 @@
           caseId: safeCaseId,
           label: safeLabel,
           field: null,
-          reason: e && e.message ? e.message : String(e)
+          reason: sanitizeReason(e && e.message ? e.message : String(e))
         });
       }
     });
@@ -999,6 +1101,9 @@
         if (mode === 'manual') {
           TSV_MANUAL_REQUIRED.forEach(function (col) {
             if (!seen[col]) {
+              // F2: currentFieldを更新せずにthrowすると、直前に触った列
+              // （extra_factor）が原因として報告されてしまう。
+              currentField = col;
               throw new Error('mode=manual requires column: ' + col);
             }
           });
@@ -1014,6 +1119,7 @@
         } else {
           TSV_NOTIFICATION_REQUIRED.forEach(function (col) {
             if (!seen[col]) {
+              currentField = col;
               throw new Error('mode=notification requires column: ' + col);
             }
           });
@@ -1056,7 +1162,9 @@
           caseId: safeCaseId,
           label: safeLabel,
           field: currentField,
-          reason: e && e.message ? e.message : String(e)
+          // 境界はここ1か所にする。呼び出し側それぞれでsanitizeすると、
+          // 必ずどこか1つ忘れる（実際、status行だけ生のまま出ていた）。
+          reason: sanitizeReason(e && e.message ? e.message : String(e))
         });
       }
     });
@@ -1093,7 +1201,7 @@
           caseId: row.caseId,
           label: row.label,
           field: 'project_input',
-          reason: e && e.message ? e.message : String(e)
+          reason: sanitizeReason(e && e.message ? e.message : String(e))
         });
       }
     });
@@ -1207,6 +1315,9 @@
     sortResults: sortResults,
     filterResults: filterResults,
     INVALID_RESULT_SOURCES: Object.freeze(INVALID_RESULT_SOURCES),
+    MAX_REASON_LENGTH: MAX_REASON_LENGTH,
+    SAFE_REASON_VOCABULARY: Object.freeze(SAFE_REASON_VOCABULARY),
+    sanitizeReason: sanitizeReason,
     errorToInvalidResult: errorToInvalidResult,
     errorsToInvalidResults: errorsToInvalidResults,
     mergeEvaluationResults: mergeEvaluationResults,

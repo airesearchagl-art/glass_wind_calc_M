@@ -616,6 +616,9 @@ test('AC-20 / §37: TSV row errorは位置と理由だけを返し、生のrow�
     'A2\tCase B\tmanual\tnot-a-number\t2050\t' + secretish + '\t1.0\t1525\t-918',
     'A3\tCase C\tmanual\t1250\t2050\tfl_single\t1.0\t1525\t-918'
   ].join('\n');
+  // 注: この2行はいずれも secretish **以外**の列で落ちる。
+  // 「他セルを貼り付けていない」ことしか示さないので、
+  // 「落ちたセル自身が漏れない」ことは下の専用テストで別に確認する。
 
   const parsed = Workspace.parseTsv(tsv);
   assert.equal(parsed.rows.length, 1, '正常な行だけがrowsへ入る');
@@ -1124,4 +1127,183 @@ test('§11: 重複caseIdは診断になり、他のcaseのimportを止めない'
   assert.equal(imported.workspace.getCase('case-001').label, 'first');
   assert.equal(imported.workspace.getCase('case-001').inputPackage.widthMm, 1250);
   assert.ok(imported.workspace.has('case-002'));
+});
+
+
+/* ============================================================
+   独立検証(Phase 2G)の指摘に対する回帰テスト
+   F1 / F2 / F3 / F4
+============================================================ */
+
+test('F1: 落ちたセルの値そのものが診断とCSVへ出ない', () => {
+  // 以前のテストは secret を「落ちない列」に置いていたため、
+  // 実際の漏れ（落ちたセルが reason に引用される）を素通りさせていた。
+  // ここでは secret を**落ちる列そのもの**に置く。
+  const secret = 'SECRET-PROJECT-DWG-A1023-CONFIDENTIAL';
+  const parsed = Workspace.parseTsv([
+    TSV_MIN_HEADER,
+    'A1\tmanual\t1250\t2050\t' + secret + '\t1525\t-918'
+  ].join('\n'));
+  assert.deepEqual(parsed.errors, [], 'parseTsv段階では通る（glass_typeは非空としか見ない）');
+
+  const ws = Workspace.createWorkspace();
+  const outcome = Workspace.addTsvRows(ws, parsed);
+  assert.equal(outcome.errors.length, 1);
+  // sanitizeはworkspace.jsの**出口**で行う。error recordの時点で既に伏せる。
+  // 表示側それぞれでsanitizeする設計にすると必ずどこか1つ忘れる
+  // （実際、実機確認でstatus行だけ生のまま出ていた）。
+  assert.equal(outcome.errors[0].reason.includes(secret), false,
+    'error recordの時点で落ちたセルの値を持たない');
+  const invalid = Workspace.errorsToInvalidResults(outcome.errors, 'tsv')[0];
+  assert.equal(invalid.error.includes(secret), false, '診断に落ちたセルの値を残さない');
+  assert.match(invalid.error, /unsupported glassType/, 'どの項目が問題かは残す');
+  assert.match(invalid.error, /lowe_fl/, '許容値の案内は残す');
+
+  const csv = Workspace.toCsv([invalid]);
+  assert.equal(csv.includes(secret), false, 'CSVは共有されるファイルなので特に漏らさない');
+
+  // 他の入口も同じ境界を通る
+  const jsonSecret = 'ANOTHER-SECRET-VALUE-9999';
+  const imported = Workspace.deserializeWorkspace(JSON.stringify({
+    schemaVersion: 1, workspaceType: 'glass_batch_workspace',
+    cases: [{ caseId: 'c1', label: null,
+      inputPackage: Object.assign({}, manualCase(1250, 2050), { glassType: jsonSecret }) }]
+  }));
+  assert.equal(imported.errors[0].reason.includes(jsonSecret), false);
+  const jsonInvalid = Workspace.errorsToInvalidResults(imported.errors, 'workspace_json')[0];
+  assert.equal(jsonInvalid.error.includes(jsonSecret), false);
+  assert.equal(Workspace.toCsv([jsonInvalid]).includes(jsonSecret), false);
+});
+
+test('F1: workspace.jsを出る error record はすべてsanitize済み', () => {
+  // 入口が3つある（parseTsv / addTsvRows / deserializeWorkspace）。
+  // どれか1つでも生のまま返すと、UIのstatus行から漏れる。
+  const secret = 'LEAK-CANARY-9999-CONFIDENTIAL';
+
+  const a = Workspace.parseTsv([TSV_MIN_HEADER,
+    'A1\t' + secret + '\t1250\t2050\tfl_single\t1525\t-918'].join('\n'));
+  assert.equal(JSON.stringify(a.errors).includes(secret), false, 'parseTsv');
+
+  const wsB = Workspace.createWorkspace();
+  const b = Workspace.addTsvRows(wsB, Workspace.parseTsv([TSV_MIN_HEADER,
+    'A1\tmanual\t1250\t2050\t' + secret + '\t1525\t-918'].join('\n')));
+  assert.equal(JSON.stringify(b.errors).includes(secret), false, 'addTsvRows');
+
+  const c = Workspace.deserializeWorkspace(JSON.stringify({
+    schemaVersion: 1, workspaceType: 'glass_batch_workspace',
+    cases: [{ caseId: 'c1', label: null,
+      inputPackage: Object.assign({}, manualCase(1250, 2050), { glassType: secret }) }]
+  }));
+  assert.equal(JSON.stringify(c.errors).includes(secret), false, 'deserializeWorkspace');
+});
+
+test('F1: reasonは無制限に伸びない', () => {
+  const huge = 'X'.repeat(3000);
+  const parsed = Workspace.parseTsv([
+    TSV_MIN_HEADER, 'A1\tmanual\t1250\t2050\t' + huge + '\t1525\t-918'
+  ].join('\n'));
+  const ws = Workspace.createWorkspace();
+  const outcome = Workspace.addTsvRows(ws, parsed);
+  assert.ok(outcome.errors[0].reason.length <= Workspace.MAX_REASON_LENGTH,
+    'error recordの時点で既に上限内');
+
+  const invalid = Workspace.errorToInvalidResult(outcome.errors[0], 'tsv');
+  assert.ok(invalid.error.length <= Workspace.MAX_REASON_LENGTH,
+    '診断は上限で切る（実測 ' + invalid.error.length + ' 文字）');
+  assert.equal(invalid.error.includes(huge), false);
+
+  // 上のケースは引用部分の伏せ字で短くなるため、長さ上限そのものは検証できていない。
+  // 引用符に囲まれていない長い内容（伏せ字が効かない形）で上限を直接確認する。
+  const unquoted = Workspace.sanitizeReason('validation failed: ' + 'Y'.repeat(3000));
+  assert.ok(unquoted.length <= Workspace.MAX_REASON_LENGTH,
+    '引用符が無くても上限で切る（実測 ' + unquoted.length + ' 文字）');
+  assert.ok(unquoted.endsWith('…'), '切り詰めたことが分かる形にする');
+  assert.equal(Workspace.sanitizeReason('short message').endsWith('…'), false);
+});
+
+test('F1: errorToInvalidResult 自身もsanitizeする（二層目）', () => {
+  // 通常経路はworkspace.jsの出口で既にsanitize済みなので、
+  // ここを外しても普段の動きは変わらない。だからこそ、
+  // 手で組んだerror recordを直接渡す経路で二層目を固定しておく。
+  const raw = 'unsupported glassType: "HAND-BUILT-SECRET-A1023"';
+  const invalid = Workspace.errorToInvalidResult(
+    { lineNumber: 2, caseId: 'A1', reason: raw }, 'tsv');
+  assert.equal(invalid.error.includes('HAND-BUILT-SECRET-A1023'), false,
+    'helperへ直接渡された生のreasonも伏せる');
+  assert.match(invalid.error, /"…"/);
+
+  const long = Workspace.errorToInvalidResult(
+    { lineNumber: 2, caseId: 'A1', reason: 'failure: ' + 'Z'.repeat(3000) }, 'tsv');
+  assert.ok(long.error.length <= Workspace.MAX_REASON_LENGTH);
+});
+
+test('F1: sanitizeは既知語彙を残し、それ以外の引用値を伏せる', () => {
+  // システム自身が定義している語彙はそのまま残す（診断の有用性を保つ）
+  assert.equal(Workspace.sanitizeReason('mode must be "manual" or "notification"'),
+    'mode must be "manual" or "notification"');
+  assert.equal(Workspace.sanitizeReason('roughnessCategory must be one of ["I","II","III","IV"]'),
+    'roughnessCategory must be one of ["I","II","III","IV"]');
+  assert.match(Workspace.sanitizeReason('unknown factKey: "fl_single"'), /"fl_single"/);
+  assert.match(Workspace.sanitizeReason('unexpected field: "designPressure"'), /"designPressure"/);
+
+  // 語彙に無いものは利用者由来として伏せる
+  for (const userValue of ['SECRET-DWG-001', '新宿タワー2期', 'note_SECRET',
+                           '/home/user/plan.tsv', 'A1023']) {
+    const out = Workspace.sanitizeReason('unexpected field: "' + userValue + '"');
+    assert.equal(out.includes(userValue), false, userValue + ' は伏せる');
+    assert.match(out, /"…"/);
+  }
+  assert.equal(Workspace.sanitizeReason(null), null);
+
+  // 語彙は表示用であって契約ではない（計算に影響しない）
+  assert.equal(Object.isFrozen(Workspace.SAFE_REASON_VOCABULARY), true);
+  assert.ok(Workspace.SAFE_REASON_VOCABULARY.includes('manual'));
+  assert.ok(Workspace.SAFE_REASON_VOCABULARY.includes('fl_single'));
+});
+
+test('F2: 必須列の欠落は、その列名を field として報告する', () => {
+  const noBasis = Workspace.parseTsv([
+    'mode\twidth_mm\theight_mm\tglass_type\tv0\troughness\tbuilding_height_m\teaves_height_m\tevaluation_height_m\tbuilding_type\tzone',
+    'notification\t1250\t2050\tfl_single\t34\tIII\t14.2\t14.2\t14.2\tclosed\tgeneral'
+  ].join('\n'));
+  assert.equal(noBasis.errors[0].field, 'basis',
+    '直前に触った列（extra_factor）ではなく、欠けている列を指すこと');
+  assert.match(noBasis.errors[0].reason, /requires column: basis/);
+
+  const noPressure = Workspace.parseTsv([
+    'mode\twidth_mm\theight_mm\tglass_type', 'manual\t1250\t2050\tfl_single'
+  ].join('\n'));
+  assert.equal(noPressure.errors[0].field, 'positive_pressure');
+});
+
+test('F3: header列数を超えるセルを持つ行は黙って切り捨てない', () => {
+  // 例: 行側にだけ列を足したシート。切り捨てると、足した列が
+  // 「無かったこと」になって取り込まれてしまう。
+  const parsed = Workspace.parseTsv([
+    TSV_MIN_HEADER,
+    'A1\tmanual\t1250\t2050\tfl_single\t1525\t-918',
+    'A2\tmanual\t1250\t2050\tfl_single\t1525\t-918\tEXTRA',
+    'A3\tmanual\t1250\t2050\tfl_single\t1525\t-918\tEXTRA\tMORE'
+  ].join('\n'));
+  assert.equal(parsed.rows.length, 1, '正常な行だけ通す');
+  assert.equal(parsed.errors.length, 2);
+  for (const err of parsed.errors) {
+    assert.match(err.reason, /more cells than the header declares/);
+  }
+  assert.deepEqual(parsed.errors.map((e) => e.lineNumber), [3, 4]);
+});
+
+test('F4: errorToInvalidResult は label契約を呼び出し側に委ねない', () => {
+  assert.throws(() => Workspace.errorToInvalidResult(
+    { lineNumber: 2, caseId: 'A1', label: 'x'.repeat(Workspace.MAX_LABEL_LENGTH + 1), reason: 'r' }, 'tsv'),
+    /label is too long/);
+  assert.throws(() => Workspace.errorToInvalidResult(
+    { lineNumber: 2, caseId: 'A1', label: 'a\u0000b', reason: 'r' }, 'tsv'),
+    /control characters/);
+  assert.throws(() => Workspace.errorToInvalidResult(
+    { lineNumber: 2, caseId: 'A1', label: 123, reason: 'r' }, 'tsv'), /must be a string/);
+  // 正常なlabelはそのまま通る
+  assert.equal(Workspace.errorToInvalidResult(
+    { lineNumber: 2, caseId: 'A1', label: 'Case A', reason: 'r' }, 'tsv').label, 'Case A');
+  assert.equal(Workspace.errorToInvalidResult({ reason: 'r' }, 'tsv').label, null);
 });

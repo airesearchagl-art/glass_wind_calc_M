@@ -95,3 +95,41 @@ ProjectInputの16KB / depth 8 / string 512 boundaryを通す。
 
 したがって `field: 'project_input'` という**安定した上位field**を返す（§9-A）。
 `field: null` は、fieldに属しようがない構造的失敗のために残す。
+
+## D-006 — 診断メッセージは workspace.js の出口でsanitizeする（独立検証 F1）
+
+- **指摘（正当）**: validatorの例外メッセージは落ちた**値そのもの**を引用符で埋め込む。
+  `unsupported glassType: "SECRET-PROJECT-DWG-A1023"` がそのまま画面に出て、
+  さらに**エクスポートされたCSVに書かれていた**。CSVは共有されるファイルなので、
+  ここが実際のegress pathである。3000文字のセルは3075文字の診断になった（上限なし）。
+- **自分のテストが見逃した理由**: `tests/workspace.test.js` の該当テストは
+  secretを `glass_type` 列に置きながら、行は**別の列**（`mode` / `width_mm`）で
+  落ちるように組んでいた。そのためsecretセルはvalidatorに到達せず、
+  「他セルを貼り付けていない」ことしか確認していなかった。
+  **漏れを避けて書かれたテスト**だった。落ちる列そのものにsecretを置くよう直した。
+- **決定**: sanitizeは `parseTsv` / `addTsvRows` / `deserializeWorkspace` の
+  **出口1か所ずつ**で行い、生のvalidatorメッセージがworkspace.jsの外へ出ないようにする。
+  引用部分は、このシステム自身が定義している語彙（列名 / enum値 / ガラス種別 /
+  既知の拒否field名）に一致するときだけ残し、それ以外は伏せる。全体長にも上限を設ける。
+- **最初に採った形が不十分だった点**: 当初は `errorToInvalidResult` だけでsanitizeしたが、
+  実機確認でUIのstatus行が**生のreasonを表示していた**。
+  表示側それぞれでsanitizeする設計は、必ずどこか1つ忘れる。
+  出口へ移した（Phase 2Fで学んだ「経路ではなく結果を検査する」と同じ形）。
+- **この境界が保証しないこと**: 既知語彙に一致する短い文字列は残る。
+  「利用者の入力が絶対に出ない」ことの保証ではなく、
+  **無制限に出ることを止め、既知語彙以外を伏せる**ための境界である。
+
+## D-007 — 必須列の欠落はその列名を報告する（独立検証 F2）
+
+mode固有の必須列チェックは `currentField` を更新せずにthrowしていたため、
+直前に触った列（`extra_factor`）が原因として報告されていた。
+`basis` が必須なのは安全上の判断（D-005と同じ理由）なので、
+そこで誤った列を指すのは最も避けたい種類のズレである。throw前に `currentField` を設定する。
+
+## D-008 — 診断helperは自分の契約を呼び出し側に委ねない（独立検証 F4）
+
+`errorToInvalidResult()` は「INVALID行を作る唯一の正規経路」と位置づけているのに、
+`label` を検証せず素通ししていた。実際の producer 2つは `normalizeLabel` 済みの値しか
+渡していなかったが、それは**規約であって強制ではない**。
+Phase 2F D-013の一般形（構築時だけ成立する契約は実質advisory）をここにも適用し、
+helper自身が `normalizeLabel` を通す。
