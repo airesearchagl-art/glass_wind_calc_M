@@ -363,6 +363,24 @@
   .badge-ng { color: var(--ng); font-weight: 700; }
   .badge-warn { color: var(--warn); font-weight: 700; }
 
+  /* ===== Phase 2H: runtime project profile / scenario matrix ===== */
+  .profile-status { display: flex; gap: 8px; flex-wrap: wrap; }
+  .profile-badge {
+    font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+    border: 1px solid var(--border); color: var(--text2);
+  }
+  .profile-badge-unverified { color: var(--warn); border-color: rgba(245,158,11,0.5); }
+  .profile-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px;
+  }
+  .profile-grid .form-group { margin-bottom: 0; }
+  .effective-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .effective-table th, .effective-table td {
+    border-bottom: 1px solid var(--border); padding: 4px 8px; text-align: left;
+  }
+  .effective-table th { color: var(--text3); font-weight: 600; }
+  .effective-origin { font-size: 10px; color: var(--text3); }
+
   /* ===== Phase 2G: view switch / batch workspace ===== */
 
   /* `display: grid` は [hidden] の既定 `display: none` に勝ってしまう。
@@ -793,6 +811,164 @@
 <!-- ===== Batch / Scenario Workspace（Phase 2G） ===== -->
 <div class="batch-wrap" id="view-batch" hidden>
 
+  <!-- ===== Project Profile（Phase 2H）: 上流のinput composer ===== -->
+  <div class="card">
+    <div class="card-title">案件プロファイル（風条件の共通値）</div>
+
+    <div class="profile-status">
+      <span class="profile-badge">Runtime Project Profile</span>
+      <span class="profile-badge profile-badge-unverified">Unverified User Input</span>
+    </div>
+
+    <div class="notice" style="margin:12px 0 14px;border-color:rgba(245,158,11,0.4);">
+      <strong>⚠ これは「登録済み案件プリセット」ではありません</strong><br>
+      ここに入力した値は<strong>その場の利用者入力</strong>であり、検証済みEvidenceではありません。
+      保存しても、Exportしても、100ケースで使っても検証状況は変わりません。<br>
+      算定<strong>式</strong>が一次資料で検証済みであることと、ここに入れた<strong>値</strong>が
+      検証済みであることは別です。
+    </div>
+
+    <div class="profile-grid">
+      <div class="form-group">
+        <label for="prof-label">プロファイル名（任意）</label>
+        <input type="text" id="prof-label" placeholder="例: Office-A" maxlength="200">
+      </div>
+      <div class="form-group">
+        <label for="prof-v0">基準風速 V0 (m/s)</label>
+        <input type="number" id="prof-v0" step="0.1" placeholder="例: 34">
+      </div>
+      <div class="form-group">
+        <label for="prof-roughness">地表面粗度区分</label>
+        <select id="prof-roughness">
+          <option value="">— 選択してください —</option>
+          <option value="I">I</option><option value="II">II</option>
+          <option value="III">III</option><option value="IV">IV</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="prof-building-h">建物高さ H (m)</label>
+        <input type="number" id="prof-building-h" step="0.1" placeholder="例: 14.2">
+      </div>
+      <div class="form-group">
+        <label for="prof-eaves-h">軒高 (m)</label>
+        <input type="number" id="prof-eaves-h" step="0.1" placeholder="例: 14.2">
+      </div>
+      <div class="form-group">
+        <label for="prof-building-type">建物タイプ</label>
+        <select id="prof-building-type">
+          <option value="">— 選択してください —</option>
+          <option value="closed">閉鎖型</option>
+          <option value="open">開放型</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="prof-basis">算定基準</label>
+        <select id="prof-basis" onchange="profileBasisChanged()">
+          <option value="">— 選択してください —</option>
+          <option value="notification_baseline">告示1458号系（再現期間の割増なし）</option>
+          <option value="itakyo_recommended">板硝子協会推奨（再現期間の割増あり）</option>
+        </select>
+      </div>
+      <div class="form-group" id="prof-recurrence-group" hidden>
+        <label for="prof-recurrence">再現期間（年）</label>
+        <select id="prof-recurrence">
+          <option value="">— 選択してください —</option>
+          <option value="50">50</option><option value="100">100</option>
+          <option value="200">200</option><option value="300">300</option>
+          <option value="500">500</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="font-size:11px;color:var(--text3);margin:10px 0 12px;">
+      評価高さ Z と部位（一般部／隅角部）は<strong>ここには入りません</strong>。
+      この2つは開口ごとに異なり設計風圧を直接左右するため、共通値として継承させず
+      ケースごとに必ず入力します。
+    </div>
+
+    <div class="batch-toolbar">
+      <button type="button" id="btn-profile-apply" class="btn-secondary" onclick="applyProfile()">✓ プロファイルを確定</button>
+      <button type="button" id="btn-profile-export" class="btn-secondary" onclick="exportProfile()">⬇ Export</button>
+      <button type="button" id="btn-profile-import" class="btn-secondary" onclick="importProfile()">⬆ Import</button>
+    </div>
+    <textarea id="prof-json" rows="4" spellcheck="false" style="margin-top:8px;"
+      placeholder="Profile JSON（入力値のみ。計算結果・検証状況は含みません）"></textarea>
+    <div class="batch-status" id="prof-status"></div>
+  </div>
+
+  <!-- ===== Scenario Matrix（Phase 2H） ===== -->
+  <div class="card">
+    <div class="card-title">検討ケース（Scenario Matrix）</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:10px;">
+      開口ごとの値だけを入力します。風条件はプロファイル側の共通値を使います。
+      ケース行に V0・粗度・建物高さ・算定基準を書くことはできません
+      （個別に風条件を変える場合は下の Workspace TSV を使ってください）。
+    </div>
+
+    <div class="profile-grid">
+      <div class="form-group"><label for="sc-w">幅 W (mm)</label><input type="number" id="sc-w" placeholder="1250"></div>
+      <div class="form-group"><label for="sc-h">高さ H (mm)</label><input type="number" id="sc-h" placeholder="2050"></div>
+      <div class="form-group"><label for="sc-z">評価高さ Z (m)</label><input type="number" id="sc-z" step="0.1" placeholder="14.2"></div>
+      <div class="form-group">
+        <label for="sc-zone">部位</label>
+        <select id="sc-zone">
+          <option value="">— 選択してください —</option>
+          <option value="general">一般部</option>
+          <option value="corner">隅角部</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="sc-type">ガラス種別</label>
+        <select id="sc-type"></select>
+      </div>
+      <div class="form-group"><label for="sc-label">ラベル（任意）</label><input type="text" id="sc-label" maxlength="200" placeholder="例: 北面 2F A"></div>
+    </div>
+    <div class="batch-toolbar" style="margin-top:8px;">
+      <button type="button" id="btn-scenario-add" class="btn-secondary" onclick="addScenarioRow()">＋ ケースを追加</button>
+      <button type="button" id="btn-scenario-preview" class="btn-secondary" onclick="previewScenario()">🔍 計算に使う値を確認</button>
+      <span class="batch-count" id="sc-count">0 件</span>
+    </div>
+    <div class="batch-status" id="sc-status"></div>
+    <div id="sc-preview" style="margin-top:10px;"></div>
+
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+      <label>組み合わせ生成（明示した値の直積）</label>
+      <div style="font-size:11px;color:var(--text3);margin:6px 0 8px;">
+        カンマ区切りで入力した値だけを組み合わせます。階から評価高さを作ることはしません。
+      </div>
+      <div class="profile-grid">
+        <div class="form-group"><label for="gen-w">幅 W (mm)</label><input type="text" id="gen-w" placeholder="1250, 1500" oninput="updateMatrixPreview()"></div>
+        <div class="form-group"><label for="gen-h">高さ H (mm)</label><input type="text" id="gen-h" placeholder="2050" oninput="updateMatrixPreview()"></div>
+        <div class="form-group"><label for="gen-z">評価高さ Z (m)</label><input type="text" id="gen-z" placeholder="4.2, 8.4, 12.6" oninput="updateMatrixPreview()"></div>
+        <div class="form-group"><label for="gen-zone">部位</label><input type="text" id="gen-zone" placeholder="general, corner" oninput="updateMatrixPreview()"></div>
+        <div class="form-group"><label for="gen-type">ガラス種別</label><input type="text" id="gen-type" placeholder="fl_single" oninput="updateMatrixPreview()"></div>
+      </div>
+      <div class="batch-toolbar" style="margin-top:8px;">
+        <button type="button" id="btn-matrix-generate" class="btn-secondary" onclick="generateMatrix()">▦ 生成</button>
+        <span class="batch-count" id="gen-preview">0 件が生成されます</span>
+      </div>
+      <div class="batch-status" id="gen-status"></div>
+    </div>
+
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+      <label>Excelから貼り付け（ケースTSV）</label>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0;">
+        <button type="button" id="btn-scenario-tsv-template" class="btn-secondary" onclick="insertScenarioTsvTemplate()">列見本</button>
+        <button type="button" id="btn-scenario-tsv-import" class="btn-secondary" onclick="importScenarioTsv()">⬆ 取り込む</button>
+      </div>
+      <textarea id="sc-tsv" rows="4" spellcheck="false"
+        placeholder="width_mm / height_mm / evaluation_height_m / zone / glass_type（風条件の列は入れられません）"></textarea>
+      <div class="batch-status" id="sc-tsv-status"></div>
+    </div>
+
+    <div id="sc-table" style="margin-top:14px;"></div>
+    <div class="batch-toolbar" style="margin-top:10px;">
+      <button type="button" id="btn-scenario-to-workspace" class="btn-secondary" onclick="addScenariosToWorkspace()">▶ Workspaceへ追加して計算</button>
+      <button type="button" id="btn-scenario-clear" class="btn-secondary" onclick="clearScenarios()">✕ ケースをすべて削除</button>
+    </div>
+    <div class="batch-status" id="sc-add-status"></div>
+  </div>
+
   <div class="card">
     <div class="card-title">一括検討 Workspace</div>
 
@@ -894,6 +1070,7 @@
 <script src="project-config/registry.js"></script>
 <script src="project-config/project-input.js"></script>
 <script src="workspace.js"></script>
+<script src="project-profile.js"></script>
 <script>
 /* ============================================================
    計算ロジックは calc.js（GlassCalc、案件非依存の汎用計算コア）に、
@@ -1795,7 +1972,336 @@ window.addEventListener('DOMContentLoaded', function() {
 
   // Phase 2G: Batch viewの初期件数表示。Single viewが既定のまま。
   if (typeof batchUpdateCount === 'function') batchUpdateCount();
+  // Phase 2H: ケース入力のガラス種別を計算コアから引く（UI側に一覧を持たない）
+  if (typeof initScenarioGlassTypes === 'function') initScenarioGlassTypes();
+  if (typeof renderScenarioTable === 'function') renderScenarioTable();
 });
+
+/* ============================================================
+   Phase 2H: Runtime Project Profile / Scenario Matrix
+   ------------------------------------------------------------
+   このブロックも計算を持たない。Profile + Scenario を
+   project-profile.js が effective WindInput へ展開し、
+   そこから先は既存の ProjectInput → wind-pressure.js → GlassCalc が行う。
+
+   Profileは registered preset ではなく verified Evidence でもない。
+   画面でもそれを明示する（値ではなく式が検証済みである、という区別）。
+   memory-only。localStorage等へ保存しない。
+============================================================ */
+
+var activeProfile = null;
+var scenarioMatrix = (typeof ProjectProfile !== 'undefined') ? ProjectProfile.createScenarioMatrix() : null;
+// §24: Workspaceへ生成した後にProfileを変えたら、それを利用者へ伝える必要がある
+var profileChangedSinceLastAdd = false;
+
+function profileBasisChanged() {
+  var basis = document.getElementById('prof-basis').value;
+  // 再現期間は板硝子協会推奨のときだけ意味を持つ（Phase 2Eの分離をUIでも保つ）
+  document.getElementById('prof-recurrence-group').hidden = basis !== 'itakyo_recommended';
+}
+
+function readProfileForm() {
+  var basis = document.getElementById('prof-basis').value;
+  var windDefaults = {
+    V0: document.getElementById('prof-v0').value,
+    roughnessCategory: document.getElementById('prof-roughness').value,
+    buildingHeightM: document.getElementById('prof-building-h').value,
+    eavesHeightM: document.getElementById('prof-eaves-h').value,
+    buildingType: document.getElementById('prof-building-type').value,
+    basis: basis
+  };
+  if (basis === 'itakyo_recommended') {
+    windDefaults.recurrenceYears = document.getElementById('prof-recurrence').value;
+  }
+  return { label: document.getElementById('prof-label').value || null, windDefaults: windDefaults };
+}
+
+function writeProfileForm(profile) {
+  document.getElementById('prof-label').value = profile.label || '';
+  document.getElementById('prof-v0').value = profile.windDefaults.V0;
+  document.getElementById('prof-roughness').value = profile.windDefaults.roughnessCategory;
+  document.getElementById('prof-building-h').value = profile.windDefaults.buildingHeightM;
+  document.getElementById('prof-eaves-h').value = profile.windDefaults.eavesHeightM;
+  document.getElementById('prof-building-type').value = profile.windDefaults.buildingType;
+  document.getElementById('prof-basis').value = profile.windDefaults.basis;
+  profileBasisChanged();
+  if (profile.windDefaults.recurrenceYears !== undefined) {
+    document.getElementById('prof-recurrence').value = String(profile.windDefaults.recurrenceYears);
+  }
+}
+
+function applyProfile() {
+  try {
+    var wasSet = activeProfile !== null;
+    activeProfile = ProjectProfile.createProfile(readProfileForm());
+    var message = 'プロファイルを確定しました（' + activeProfile.verificationStatus + '）。';
+    if (wasSet && batchWorkspace && batchWorkspace.size() > 0) {
+      // §24: 自動同期しない。既存の検討結果が黙って変わらないようにするため。
+      profileChangedSinceLastAdd = true;
+      message += '\n注意: すでにWorkspaceにあるケースには反映されていません。'
+        + '変更後の条件で計算するには、ケースを追加し直してください。';
+    }
+    batchSetStatus('prof-status', message, profileChangedSinceLastAdd);
+    renderScenarioTable();
+  } catch (e) {
+    activeProfile = null;
+    batchSetStatus('prof-status', 'プロファイルを確定できません: ' + e.message, true);
+  }
+}
+
+function exportProfile() {
+  try {
+    if (!activeProfile) throw new Error('先にプロファイルを確定してください。');
+    document.getElementById('prof-json').value = ProjectProfile.serializeProfile(activeProfile);
+    batchSetStatus('prof-status',
+      'Profile JSONを出力しました（入力値のみ。計算結果・検証状況は含みません）。', false);
+  } catch (e) {
+    batchSetStatus('prof-status', '出力できません: ' + e.message, true);
+  }
+}
+
+function importProfile() {
+  try {
+    activeProfile = ProjectProfile.deserializeProfile(document.getElementById('prof-json').value);
+    writeProfileForm(activeProfile);
+    profileChangedSinceLastAdd = batchWorkspace && batchWorkspace.size() > 0;
+    batchSetStatus('prof-status',
+      '読み込みました。外部データのため、検証状況は ' + activeProfile.verificationStatus +
+      ' のままです。' + (profileChangedSinceLastAdd
+        ? '\n注意: すでにWorkspaceにあるケースには反映されていません。' : ''), profileChangedSinceLastAdd);
+    renderScenarioTable();
+  } catch (e) {
+    batchSetStatus('prof-status', '読み込めません: ' + e.message, true);
+  }
+}
+
+/* ---------- Scenario ---------- */
+
+function readScenarioForm() {
+  return {
+    widthMm: document.getElementById('sc-w').value,
+    heightMm: document.getElementById('sc-h').value,
+    evaluationHeightM: document.getElementById('sc-z').value,
+    zone: document.getElementById('sc-zone').value,
+    glassType: document.getElementById('sc-type').value,
+    label: document.getElementById('sc-label').value || null
+  };
+}
+
+function addScenarioRow() {
+  try {
+    scenarioMatrix.add(ProjectProfile.createScenario(readScenarioForm()));
+    renderScenarioTable();
+    batchSetStatus('sc-status', 'ケースを追加しました。', false);
+  } catch (e) {
+    batchSetStatus('sc-status', '追加できません: ' + e.message, true);
+  }
+}
+
+/** §13: 「何を使って計算するのか」を、継承と書かずに最終値で見せる。 */
+function previewScenario() {
+  var host = document.getElementById('sc-preview');
+  host.textContent = '';
+  try {
+    if (!activeProfile) throw new Error('先にプロファイルを確定してください。');
+    var described = ProjectProfile.describeEffectiveInput(
+      activeProfile, ProjectProfile.createScenario(readScenarioForm()));
+
+    var table = document.createElement('table');
+    table.className = 'effective-table';
+    var head = document.createElement('tr');
+    ['項目', '値', '入力元'].forEach(function (text) {
+      var th = document.createElement('th'); th.textContent = text; head.appendChild(th);
+    });
+    table.appendChild(head);
+
+    function addRow(entry, origin) {
+      var tr = document.createElement('tr');
+      var k = document.createElement('td'); k.textContent = entry.field;
+      var v = document.createElement('td'); v.textContent = String(entry.value);
+      var o = document.createElement('td'); o.className = 'effective-origin'; o.textContent = origin;
+      tr.appendChild(k); tr.appendChild(v); tr.appendChild(o);
+      table.appendChild(tr);
+    }
+    described.fromProfile.forEach(function (e) { addRow(e, 'プロファイル（共通・未検証）'); });
+    described.fromScenario.forEach(function (e) { addRow(e, 'このケース'); });
+    host.appendChild(table);
+    batchSetStatus('sc-status', 'この値で計算されます。', false);
+  } catch (e) {
+    batchSetStatus('sc-status', '確認できません: ' + e.message, true);
+  }
+}
+
+function parseNumberList(value) {
+  return String(value).split(',').map(function (x) { return x.trim(); })
+    .filter(function (x) { return x !== ''; }).map(Number);
+}
+function parseTextList(value) {
+  return String(value).split(',').map(function (x) { return x.trim(); })
+    .filter(function (x) { return x !== ''; });
+}
+function readMatrixLists() {
+  return {
+    widths: parseNumberList(document.getElementById('gen-w').value),
+    heights: parseNumberList(document.getElementById('gen-h').value),
+    evaluationHeights: parseNumberList(document.getElementById('gen-z').value),
+    zones: parseTextList(document.getElementById('gen-zone').value),
+    glassTypes: parseTextList(document.getElementById('gen-type').value)
+  };
+}
+
+/** §20: 生成前に件数を見せる。 */
+function updateMatrixPreview() {
+  var count = ProjectProfile.countScenarioMatrix(readMatrixLists());
+  var existing = scenarioMatrix.size() + (batchWorkspace ? batchWorkspace.size() : 0);
+  var el = document.getElementById('gen-preview');
+  el.textContent = count + ' 件が生成されます'
+    + (existing > 0 ? '（既存 ' + existing + ' 件と合わせて ' + (existing + count) + ' 件）' : '');
+}
+
+function generateMatrix() {
+  try {
+    var existing = scenarioMatrix.size() + (batchWorkspace ? batchWorkspace.size() : 0);
+    var generated = ProjectProfile.generateScenarioMatrix(readMatrixLists(), { existingCaseCount: existing });
+    scenarioMatrix.addMany(generated);
+    renderScenarioTable();
+    batchSetStatus('gen-status', generated.length + ' 件を生成しました。', false);
+  } catch (e) {
+    batchSetStatus('gen-status', '生成できません: ' + e.message, true);
+  }
+}
+
+function insertScenarioTsvTemplate() {
+  document.getElementById('sc-tsv').value =
+    'scenario_id\tlabel\twidth_mm\theight_mm\tevaluation_height_m\tzone\tglass_type\textra_factor\n'
+    + 'S1\t\t1250\t2050\t14.2\tgeneral\tfl_single\t1.00';
+  batchSetStatus('sc-tsv-status',
+    '列見本を入れました。風条件（V0・粗度・建物高さ・算定基準）の列は入れられません。', false);
+}
+
+function importScenarioTsv() {
+  try {
+    var parsed = ProjectProfile.parseScenarioTsv(document.getElementById('sc-tsv').value);
+    parsed.rows.forEach(function (row) { scenarioMatrix.add(row.scenario); });
+    renderScenarioTable();
+    var message = parsed.rows.length + ' 件を取り込みました。';
+    if (parsed.errors.length > 0) {
+      message += '\n取り込めなかった行（' + parsed.errors.length + '件）:\n'
+        + batchFormatErrors(parsed.errors);
+    }
+    batchSetStatus('sc-tsv-status', message, parsed.errors.length > 0);
+  } catch (e) {
+    batchSetStatus('sc-tsv-status', '取り込めません: ' + e.message, true);
+  }
+}
+
+function clearScenarios() {
+  var removed = scenarioMatrix.clear();
+  renderScenarioTable();
+  batchSetStatus('sc-add-status', removed + ' 件のケースを削除しました（Workspaceの結果は変わりません）。', false);
+}
+
+/**
+ * §14 / §22: ここで effective input を PIP v2 として固定する。
+ * 以後Profileを変えても、追加済みのcaseは変わらない。
+ */
+function addScenariosToWorkspace() {
+  try {
+    if (!activeProfile) throw new Error('先にプロファイルを確定してください。');
+    var scenarios = scenarioMatrix.list();
+    if (scenarios.length === 0) throw new Error('追加するケースがありません。');
+
+    var outcome = ProjectProfile.addScenariosToWorkspace(batchWorkspace, activeProfile, scenarios);
+    batchInvalidDiagnostics = batchInvalidDiagnostics.concat(
+      WorkspaceCore.errorsToInvalidResults(outcome.errors, 'workspace_json')
+    );
+    profileChangedSinceLastAdd = false;
+    batchUpdateCount();
+    batchEvaluate();
+
+    var message = outcome.added.length + ' 件をWorkspaceへ追加して計算しました。'
+      + '\nこの時点の値で固定されます（あとでプロファイルを変更しても、このケースは変わりません）。';
+    if (outcome.errors.length > 0) {
+      message += '\n追加できなかったケース（' + outcome.errors.length + '件）は'
+        + '「入力エラー」として一覧に残ります:\n' + batchFormatErrors(outcome.errors);
+    }
+    batchSetStatus('sc-add-status', message, outcome.errors.length > 0);
+  } catch (e) {
+    batchSetStatus('sc-add-status', '追加できません: ' + e.message, true);
+  }
+}
+
+/* ---------- Scenario table（textContent / createElement のみ） ---------- */
+
+var SCENARIO_HEADERS = ['ケースID', 'ラベル', 'W (mm)', 'H (mm)', 'Z (m)', '部位', 'ガラス種別', '係数', '操作'];
+
+function renderScenarioTable() {
+  var host = document.getElementById('sc-table');
+  host.textContent = '';
+  document.getElementById('sc-count').textContent = scenarioMatrix.size() + ' 件';
+  updateMatrixPreview();
+
+  var scenarios = scenarioMatrix.list();
+  if (scenarios.length === 0) return;
+
+  var table = document.createElement('table');
+  table.className = 'batch-table';
+  var thead = document.createElement('thead');
+  var headRow = document.createElement('tr');
+  SCENARIO_HEADERS.forEach(function (text) {
+    var th = document.createElement('th'); th.textContent = text; headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  scenarios.forEach(function (sc) {
+    var tr = document.createElement('tr');
+    [sc.scenarioId, sc.label === null ? '—' : sc.label].forEach(function (value, i) {
+      var td = document.createElement('td');
+      if (i === 1) td.className = 'label-cell';
+      td.textContent = String(value);
+      tr.appendChild(td);
+    });
+    [sc.widthMm, sc.heightMm, sc.evaluationHeightM].forEach(function (value) {
+      var td = document.createElement('td'); td.className = 'num';
+      td.textContent = String(value); tr.appendChild(td);
+    });
+    [sc.zone, sc.glassType].forEach(function (value) {
+      var td = document.createElement('td'); td.textContent = String(value); tr.appendChild(td);
+    });
+    var factor = document.createElement('td'); factor.className = 'num';
+    factor.textContent = fmt(sc.extraFactor, 2); tr.appendChild(factor);
+
+    var actions = document.createElement('td');
+    var dup = document.createElement('button');
+    dup.type = 'button'; dup.className = 'btn-secondary'; dup.textContent = '複製';
+    dup.addEventListener('click', function () {
+      try { scenarioMatrix.duplicate(sc.scenarioId); renderScenarioTable(); }
+      catch (e) { batchSetStatus('sc-status', e.message, true); }
+    });
+    var del = document.createElement('button');
+    del.type = 'button'; del.className = 'btn-secondary'; del.textContent = '削除';
+    del.addEventListener('click', function () { scenarioMatrix.remove(sc.scenarioId); renderScenarioTable(); });
+    actions.appendChild(dup); actions.appendChild(del);
+    tr.appendChild(actions);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  host.appendChild(table);
+}
+
+function initScenarioGlassTypes() {
+  var select = document.getElementById('sc-type');
+  if (!select || typeof GlassCalc === 'undefined') return;
+  Object.keys(GlassCalc.GLASS_TYPES).forEach(function (key) {
+    var option = document.createElement('option');
+    option.value = key;
+    option.textContent = GlassCalc.GLASS_TYPES[key].label;
+    select.appendChild(option);
+  });
+}
+
 
 /* ============================================================
    Phase 2G: Batch / Scenario Workspace

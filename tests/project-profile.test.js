@@ -559,3 +559,124 @@ test('§28: fixtureで実際に使うlabelはsyntheticなものだけ', () => {
   assert.equal(generated[0].label, null);
   assert.equal(generated[0].scenarioId, null);
 });
+
+/* ============================================================
+   UI契約（index.html をソースとして固定する）
+   実挙動はPlaywrightで別途確認する。
+============================================================ */
+
+const INDEX_HTML = path.join(__dirname, '..', 'index.html');
+const html = () => fs.readFileSync(INDEX_HTML, 'utf8');
+
+function profileScript() {
+  const src = html();
+  const marker = src.indexOf('Phase 2H: Runtime Project Profile / Scenario Matrix');
+  assert.notEqual(marker, -1, 'Phase 2H UIブロックが見つかるはず');
+  const start = src.lastIndexOf('/*', marker);
+  return src.slice(start, src.indexOf('</script>', start));
+}
+function profileCodeOnly() {
+  return profileScript()
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1 ')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""');
+}
+
+test('AC-31: Profile cardが runtime / unverified であることを画面に出す', () => {
+  const src = html();
+  assert.match(src, /Runtime Project Profile/);
+  assert.match(src, /Unverified User Input/);
+  // 「式が検証済み」と「値が検証済み」の区別を明示する
+  assert.match(src, /登録済み案件プリセット.*ではありません|これは「登録済み案件プリセット」ではありません/);
+  assert.match(src, /算定<strong>式<\/strong>[\s\S]{0,120}<strong>値<\/strong>/);
+});
+
+test('AC-05: Profile編集UIに Z / zone の入力欄が無い', () => {
+  const src = html();
+  const card = src.slice(src.indexOf('案件プロファイル（風条件の共通値）'),
+                         src.indexOf('検討ケース（Scenario Matrix）'));
+  // profileフォームのidだけを見る
+  for (const id of ['prof-z', 'prof-evaluation', 'prof-zone']) {
+    assert.equal(card.includes('id="' + id + '"'), false, 'Profileに ' + id + ' を置かない');
+  }
+  // Scenario側にはある
+  assert.match(src, /id="sc-z"/);
+  assert.match(src, /id="sc-zone"/);
+  // なぜ置かないかを画面でも説明している
+  assert.match(card, /ここには入りません/);
+});
+
+test('AC-02: Phase 2H UIは計算を持たず、既存モジュール経由でのみ動く', () => {
+  const script = profileScript();
+  for (const api of ['createProfile', 'serializeProfile', 'deserializeProfile',
+                     'createScenario', 'describeEffectiveInput', 'generateScenarioMatrix',
+                     'countScenarioMatrix', 'createScenarioMatrix', 'parseScenarioTsv',
+                     'addScenariosToWorkspace']) {
+    assert.ok(script.includes('ProjectProfile.' + api), 'ProjectProfile.' + api);
+  }
+  assert.doesNotMatch(script, /GlassCalc\.generateCandidates/);
+  assert.doesNotMatch(script, /WindPressure\./);
+  assert.doesNotMatch(script, /ProjectInput\.fromWindCalculation/,
+    'UIから直接PIPを組み立てない（resolver経由）');
+  // ガラス種別一覧をUI側に持たない
+  assert.match(script, /GlassCalc\.GLASS_TYPES/);
+  assert.equal(script.includes("'fl_single'"), false, 'ガラス種別をUIへhard-codeしない');
+});
+
+test('AC-20: Phase 2H UIは innerHTML を使わない', () => {
+  const script = profileScript();
+  assert.doesNotMatch(script, /\.innerHTML/);
+  assert.doesNotMatch(script, /insertAdjacentHTML/);
+  assert.doesNotMatch(script, /document\.write/);
+  assert.match(script, /td\.textContent/);
+  assert.doesNotMatch(script, /onclick\s*=\s*['"`][^'"`]*\+/);
+  assert.match(script, /addEventListener\('click'/);
+});
+
+test('AC-22: Phase 2H UIは永続化しない', () => {
+  const code = profileCodeOnly();
+  for (const api of ['localStorage', 'sessionStorage', 'indexedDB', 'cookie',
+                     'XMLHttpRequest', 'sendBeacon', 'WebSocket']) {
+    assert.doesNotMatch(code, new RegExp('\\b' + api + '\\b'), api);
+  }
+  assert.doesNotMatch(code, /\bfetch\s*\(/);
+  assert.match(profileScript(), /memory-only/);
+});
+
+test('AC-09 / §24: Profile変更が既存Workspaceへ自動同期しないことをUIが明示する', () => {
+  const script = profileScript();
+  // 自動で作り直さない
+  assert.doesNotMatch(script, /batchWorkspace\.clear\(\)[\s\S]{0,200}addScenariosToWorkspace/);
+  assert.match(script, /profileChangedSinceLastAdd/);
+  assert.match(script, /反映されていません/);
+  // 追加時点でsnapshotされる旨を出す
+  assert.match(script, /固定されます/);
+});
+
+test('§20: 生成前に件数を表示し、既存件数を含めて判定する', () => {
+  const script = profileScript();
+  assert.match(script, /countScenarioMatrix/);
+  assert.match(script, /existingCaseCount:\s*existing/);
+  assert.match(script, /scenarioMatrix\.size\(\)\s*\+\s*\(batchWorkspace \? batchWorkspace\.size\(\) : 0\)/);
+});
+
+test('UI: Phase 2H のボタンは一意なidを持つ（ラベル文字列に依存しない）', () => {
+  // 「⬆ Import」はPhase 2Dのボタンとラベルが同じで、text selectorでは区別できない。
+  // 実機確認でこれに当たったので、idで特定できる形にしてある。
+  const src = html();
+  for (const id of ['btn-profile-apply', 'btn-profile-export', 'btn-profile-import',
+                    'btn-scenario-add', 'btn-scenario-preview', 'btn-matrix-generate',
+                    'btn-scenario-tsv-import', 'btn-scenario-tsv-template',
+                    'btn-scenario-to-workspace', 'btn-scenario-clear']) {
+    assert.equal(src.split('id="' + id + '"').length - 1, 1, id + ' は一意');
+  }
+});
+
+test('project-profile.js は project-input.js / workspace.js の後に読み込む', () => {
+  const src = html();
+  const order = ['project-config/project-input.js', 'workspace.js', 'project-profile.js']
+    .map((f) => src.indexOf('<script src="' + f + '"></script>'));
+  assert.ok(order.every((i) => i !== -1));
+  assert.ok(order[0] < order[2] && order[1] < order[2]);
+});
