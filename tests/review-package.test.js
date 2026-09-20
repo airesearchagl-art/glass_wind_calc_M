@@ -482,9 +482,7 @@ test('AA: Review生成で Evidence state は1つも動かない', () => {
   assert.equal(MiyoshiProjectConfig.isFullyVerified(), false);
 
   const rev = Review.buildReviewPackage({ workspace: makeWorkspace() });
-  assert.equal(rev.evidenceSummary.verifiedCaseCount, 0);
-  assert.equal(rev.evidenceSummary.projectSpecificPromotion, 'NONE');
-  assert.equal(rev.evidenceSummary.explicitUnresolvedItemCount, 4);
+  assert.equal(rev.evidenceSummary.reportChangesVerification, false);
 });
 
 // ── §22 ──────────────────────────────────────────────────────
@@ -588,4 +586,110 @@ test('§9: privacyMode は full / redacted のみ', () => {
   assert.throws(() => Review.buildReviewPackage({
     workspace: makeWorkspace(), privacyMode: 'partial' }), /unknown privacyMode/);
   assert.equal(Review.buildReviewPackage({ workspace: makeWorkspace() }).privacyMode, 'full');
+});
+
+// ============================================================
+// Required Fix: evidenceSummary は generic core の事実だけを述べる
+//
+// 以前は verifiedCaseCount: 0 / projectSpecificPromotion: 'NONE' /
+// explicitUnresolvedItemCount: 4 を固定値で持っていた。
+// 現在の案件では正しい値だが、Review coreが知り得る事実ではない。
+// 手入力だけのWorkspaceでも「未解決4件」と報告してしまっていた。
+// ============================================================
+
+const PROJECT_EVIDENCE_FIELDS = [
+  'verifiedCaseCount', 'projectSpecificPromotion', 'explicitUnresolvedItemCount',
+  'verifiedCases', 'unresolvedItems', 'reconciliationStatus', 'promotion'
+];
+
+function assertNoProjectEvidenceClaim(rev, where) {
+  for (const field of PROJECT_EVIDENCE_FIELDS) {
+    assert.equal(rev.evidenceSummary[field], undefined,
+      where + ': ' + field + ' を名乗らない');
+  }
+  const json = JSON.stringify(rev.evidenceSummary);
+  assert.equal(json.includes('NONE'), false, where + ': promotion stateを名乗らない');
+  assert.equal(/"[^"]*":\s*4\b/.test(json), false, where + ': 未解決4件を名乗らない');
+}
+
+test('Fix-A: 手入力だけのWorkspaceは「未解決4件」を主張しない', () => {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(manualPkg(), { caseId: 'M1', label: 'manual only' });
+  const rev = Review.buildReviewPackage({ workspace: ws });
+
+  assertNoProjectEvidenceClaim(rev, 'manual-only');
+  assert.deepEqual(rev.evidenceSummary.bySourceKind, { manual: 1 });
+  assert.deepEqual(rev.evidenceSummary.byVerificationStatus, { unverified: 1 });
+  assert.equal(rev.evidenceSummary.reportChangesVerification, false);
+});
+
+test('Fix-B: 告示算定だけのWorkspaceは案件Evidence状態を主張しない', () => {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(notificationPkg(), { caseId: 'N1' });
+  const rev = Review.buildReviewPackage({ workspace: ws });
+
+  assertNoProjectEvidenceClaim(rev, 'notification-only');
+  assert.deepEqual(rev.evidenceSummary.bySourceKind, { notification_calculation: 1 });
+});
+
+test('Fix-C: 取り込みデータだけのWorkspaceも案件Evidence状態を主張しない', () => {
+  const imported = ProjectInput.deserialize(
+    ProjectInput.serialize(manualPkg()), { forceUntrustedProvenance: true });
+  const ws = Workspace.createWorkspace();
+  ws.addCase(imported, { caseId: 'I1' });
+  const rev = Review.buildReviewPackage({ workspace: ws });
+
+  assertNoProjectEvidenceClaim(rev, 'imported-only');
+  assert.deepEqual(rev.evidenceSummary.bySourceKind, { imported_unverified: 1 });
+  assert.deepEqual(rev.evidenceSummary.byVerificationStatus, { unverified: 1 });
+});
+
+test('Fix-D / Fix-E: bySourceKind / byVerificationStatus は実際の行と一致する', () => {
+  const ws = makeWorkspace();
+  const diagnostics = makeDiagnostics('no_such_glass');
+  const rev = Review.buildReviewPackage({ workspace: ws, diagnostics });
+
+  const all = Workspace.mergeEvaluationResults(Workspace.evaluateWorkspace(ws), diagnostics);
+  const expectedKind = {};
+  const expectedStatus = {};
+  all.forEach((r) => {
+    const sk = r.sourceKind === null || r.sourceKind === undefined ? 'diagnostic' : r.sourceKind;
+    const vs = r.verificationStatus === null || r.verificationStatus === undefined
+      ? 'diagnostic' : r.verificationStatus;
+    expectedKind[sk] = (expectedKind[sk] || 0) + 1;
+    expectedStatus[vs] = (expectedStatus[vs] || 0) + 1;
+  });
+
+  assert.deepEqual(JSON.parse(JSON.stringify(rev.evidenceSummary.bySourceKind)), expectedKind);
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(rev.evidenceSummary.byVerificationStatus)), expectedStatus);
+  // 4 sourceKind + 1 diagnostic
+  assert.equal(expectedKind.manual, 2);
+  assert.equal(expectedKind.registered_preset, 1);
+  assert.equal(expectedKind.notification_calculation, 1);
+  assert.equal(expectedKind.diagnostic, 1);
+  // presetは partially_verified のまま（verifiedへ丸めない）
+  assert.equal(expectedStatus.partially_verified, 1);
+});
+
+test('Fix-G: Review coreは案件固有のEvidence値を持たない（コードのみを見る）', () => {
+  const code = stripComments(fs.readFileSync(REVIEW_SRC, 'utf8'));
+
+  // 案件状態を表す固定値をコードに持たない
+  assert.equal(/explicitUnresolvedItemCount/.test(code), false);
+  assert.equal(/projectSpecificPromotion/.test(code), false);
+  assert.equal(/verifiedCaseCount/.test(code), false);
+  assert.equal(/['"]NONE['"]/.test(code), false);
+  // Phase 2F の判定語彙を持ち込まない
+  for (const token of ['MATCH', 'MISMATCH', 'INSUFFICIENT_EVIDENCE', 'verifiedCases']) {
+    assert.equal(code.includes(token), false, token + ' を持たない');
+  }
+  // 案件moduleへ依存しない
+  assert.equal(/require\([^)]*miyoshi/.test(code), false);
+  assert.equal(/require\([^)]*evidence/.test(code), false);
+  assert.equal(code.includes('MiyoshiProjectConfig'), false);
+
+  // 派生できる事実だけを組み立てている
+  assert.match(code, /bySourceKind/);
+  assert.match(code, /byVerificationStatus/);
 });

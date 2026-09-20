@@ -87,3 +87,27 @@ Phase 2D〜2Hと同一。Resume時に再計算して一致を確認する。
   - 外から観測できる不変条件（生成後にsourceを変えてもreportは変わらない）は
     test U / V / W / X と deepFreeze で既に固定されている
 - survivorを黙って消すことも、testが無いのに「覆われている」と言うこともしない。
+
+## D-007 — Review coreに案件のEvidence状態を書かない（Required Fix / Wave 2H）
+
+- **指摘（正当）**: `buildEvidenceSummary()` が
+  `verifiedCaseCount: 0` / `projectSpecificPromotion: 'NONE'` /
+  `explicitUnresolvedItemCount: 4` を固定値で返していた。
+  現在の案件のEvidence状態としては正しい。だが Review core は generic であり、
+  **この3つを知り得る立場にない**。
+- **実測**: 手入力1件だけのWorkspaceでreportを作ると、
+  preset caseが1件も無いのに「未解決4件」「promotion NONE」と報告した。
+  偶然正しい値が書いてあるだけで、これは false report である。
+- **決定**: 自分の結果集合から導出できる事実だけにする。
+  ```text
+  bySourceKind             : allResultsから数える
+  byVerificationStatus     : allResultsから数える
+  reportChangesVerification: false（製品としての固定文）
+  note                     : 出力しても検証状況は変わらない
+  ```
+- 案件のEvidence状態が要るなら、presentation層が
+  該当する registered preset を見つけたときだけ Phase 2F の public-safe API を呼ぶ。
+  Phase 2F のlogicをここへ複製しない。複製した時点で正が2つになる。
+- testは**exportされたobject**を見る。ソースgrepは
+  `explicitUnresolvedItemCount` 等の識別子に絞り、説明コメントに当たらないよう
+  コメント除去後のコードだけを対象にする。

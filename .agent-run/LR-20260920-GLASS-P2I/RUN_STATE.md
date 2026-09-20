@@ -10,7 +10,7 @@
 - Base SHA: 6a5232f65d02e2a8bfa8c2c87049b5865c584855
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 2 — review-package.js core 完了
+- Current wave: Wave 2H — evidenceSummary genericity fix 完了
 - Task Packet ID: LRP-20260920-GLASS-P2I
 - Task Packet revision: 1
 - Task Packet SHA-256: 901afdc2317e0b38ca90dcb69ba1fb8d8b271b1e073acd40e20d0e784c8f229e
@@ -177,6 +177,21 @@ redacted modeで伏せたはずのlabelが Review JSON から素通りしてい�
 対処: snapshotを非enumerableにし、exportには free text を含まない
       sourceSummary だけを載せる（D-005）。
 §44 の Redacted mode leak に当たるため、Quality Debt化せず即修理した。
+```
+
+## Wave 2H — Required Fix: evidenceSummary の genericity
+
+```text
+指摘: Review core が案件固有のEvidence状態を固定値で持っていた
+実測: 手入力1件だけのWorkspaceでも「未解決4件 / promotion NONE」と報告した
+対処: 自分の結果集合から導出できる事実だけにした（D-007）
+tests: 434 → 439 pass / 0 fail
+
+mutation（4件 / すべてKILLED / SURVIVED 0 / PATCH-MISS 0）
+  H1 explicitUnresolvedItemCount: 4 を再導入   KILLED
+  H2 projectSpecificPromotion を再導入          KILLED
+  H3 byVerificationStatus 計算を削除            KILLED
+  H4 bySourceKind 計算を削除                    KILLED
 ```
 
 ## Quality Debt

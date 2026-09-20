@@ -511,11 +511,19 @@
   // ============================================================
 
   /**
-   * Phase 2I は Evidence の真実を持たない。
+   * このmoduleが自分の結果集合から**正直に言えること**だけを述べる。
    *
-   * report全体としての事実だけを、public-safe な範囲で述べる。
-   * Phase 2F のlogicをここへ複製しない。複製すれば、
-   * どちらが正なのか分からない状態が生まれる。
+   * 以前ここには
+   *   verifiedCaseCount: 0 / projectSpecificPromotion: 'NONE' /
+   *   explicitUnresolvedItemCount: 4
+   * が固定値で入っていた。現在の案件のEvidence状態としては正しいが、
+   * **genericなReview coreの事実ではない**。
+   * 手入力だけのWorkspaceでも「未解決4件」と報告してしまう。
+   * 実測で確認したうえで外した。
+   *
+   * 案件のEvidence状態は Phase 2F が正であり、必要なら
+   * presentation層が public-safe な既存APIを条件付きで呼ぶ。
+   * ここへ写すと、正がどちらか分からなくなる。
    */
   function buildEvidenceSummary(allResults) {
     var bySourceKind = {};
@@ -528,11 +536,9 @@
       byVerification[vs] = (byVerification[vs] || 0) + 1;
     });
     return {
-      verifiedCaseCount: 0,
-      projectSpecificPromotion: 'NONE',
-      explicitUnresolvedItemCount: 4,
       bySourceKind: bySourceKind,
       byVerificationStatus: byVerification,
+      reportChangesVerification: false,
       note: 'このreportを出力しても検証状況は変わらない。検証状況はfactの出所に属する。'
     };
   }
