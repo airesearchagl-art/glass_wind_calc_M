@@ -8,9 +8,16 @@
 - Repository: airesearchagl-art/glass_wind_calc_M
 - Working branch: claude/phase2h-project-profile-scenario-matrix
 - Base SHA: e7d396621536acd21934fc92892087be0f47d8d6
-- Current artifact-sync head: Wave 7 convergence commit（本ファイルを含む commit。push後のbranch tip）
+- Current artifact-sync head: `RESOLVE_DYNAMICALLY`
+  （本ファイルを含むcommit。自己参照になるためSHAを内部へ書かない）
 - Implementation verification head: `5838141954d73e0d5463f21810e62c24df573a82`
-  （実装・test・UIの最終head。以降のcommitはRun Artifactのみ）
+  役割: **executable source / tests / UI implementation の最終head**。
+  このheadに対して 398 pass / 0 fail、browser 130 / 0 を実測し、
+  verifier指摘 F1-F7 の修理もここで完了している。
+- Documentation / Run Artifact convergence head: `51762c3d4857617b1756ae5261dddc6c85308c3b`
+  役割: README measured-result synchronization + Run Artifact convergence。
+  以降のcommitでは executable source / tests / UI implementation は変更していない。
+  README measured-result synchronization と Run Artifact convergence のみを行った。
 - Current wave: Wave 7 — convergence 完了 / Human Gate待ち
 - Task Packet ID: LRP-20260920-GLASS-P2H
 - Task Packet revision: 1

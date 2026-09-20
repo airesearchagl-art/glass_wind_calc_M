@@ -46,24 +46,49 @@ expected : >= 342 / 0 fail  → 一致
 | 4H | Boundary Closure（Required Fix A / B / C）+ artifact sync | `a329c8ff84cd69956c1910edac5f12081447c314` |
 | 5-6 | 攻撃・mutation campaign / full regression / README | `439c42647b2b7edb15b4afaa4bf07f3944e7b411` |
 | 7 | independent verifier 指摘（F2-F7）の修理 | `5838141954d73e0d5463f21810e62c24df573a82` |
-| 7 | Run Artifact convergence（本ファイルを含む） | 本commit（自己参照のため固定しない） |
+| 7 | README measured-result sync + Run Artifact convergence | `51762c3d4857617b1756ae5261dddc6c85308c3b` |
+| 7 | documentation state reconciliation（本ファイルを含む） | `RESOLVE_DYNAMICALLY`（自己参照のため固定しない） |
 
 自己参照commit SHAは固定しない。過去commitになったwaveは確定値へ置き換える。
 
 **Implementation verification head**: `5838141954d73e0d5463f21810e62c24df573a82`
-実装・test・UI・READMEの最終head。これ以降のcommitはRun Artifactのみで、
-検証結果（398 / 0、browser 130 / 0）はこのheadに対する実測値である。
 
-## 変更ファイル（base e7d3966 → implementation verification head）
+役割: **executable source / tests / UI implementation の最終head**。
+検証結果（398 pass / 0 fail、browser 130 / 0、protected valuesの再実測）は
+すべてこのheadに対する実測値である。
+
+**Documentation / Run Artifact convergence head**: `51762c3d4857617b1756ae5261dddc6c85308c3b`
+
+役割: README measured-result synchronization + Run Artifact convergence。
+実測では README.md（changelog行とtest表の2か所）と Run Artifact 6ファイルを変更しており、
+executable source / tests / calculation formulas / UI implementation / Evidence state は
+1バイトも変更していない。
+
+以降のcommitでも executable source / tests / UI implementation は変更していない。
+README measured-result synchronization と Run Artifact convergence のみを行った。
+
+したがって「実装headでREADMEも最終だった」という記述は成立しない。
+READMEの measured-result（398 / 130 / mutation内訳）が確定したのは
+`51762c3` であり、実装headではない。
+
+## 変更ファイル（base e7d3966 → 現在のbranch head）
+
+最終化されたheadを各ファイルに併記する。
+「実装headで全部が最終だった」という読み方ができないようにするため。
 
 ```text
-project-profile.js              新規
-tests/project-profile.test.js   新規
-workspace.js                    parseTsvTable抽出 / INVALID_RESULT_SOURCES に scenario_matrix 追加
-index.html                      Profile編集 / effective preview / Scenario Matrix / Scenario TSV / 診断見出し
-project-config/project-input.js assertPaneDimensionMm / assertExtraFactor を抽出しexport（判定内容は不変）
-README.md                       Phase 2H節 / file structure / test table / changelog
-.agent-run/LR-20260920-GLASS-P2H/*  Run Artifact 7ファイル
+executable source / tests / UI（最終化: 5838141 = implementation verification head）
+  project-profile.js              新規
+  tests/project-profile.test.js   新規
+  workspace.js                    parseTsvTable抽出 / INVALID_RESULT_SOURCES に scenario_matrix 追加
+  index.html                      Profile編集 / effective preview / Scenario Matrix / Scenario TSV / 診断見出し
+  project-config/project-input.js assertPaneDimensionMm / assertExtraFactor を抽出しexport（判定内容は不変）
+
+documentation（最終化: 5838141 より後）
+  README.md                       Phase 2H節 / file structure は 439c426、
+                                  measured-result（398 / 130 / mutation内訳）は 51762c3
+  .agent-run/LR-20260920-GLASS-P2H/*  Run Artifact 7ファイル。
+                                  convergence は 51762c3、head-role の文言訂正は本commit
 ```
 
 `calc.js` / `wind-pressure.js` / `project-config/miyoshi.js` /
