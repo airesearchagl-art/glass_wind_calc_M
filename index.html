@@ -2216,7 +2216,8 @@ function addScenariosToWorkspace() {
 
     var outcome = ProjectProfile.addScenariosToWorkspace(batchWorkspace, activeProfile, scenarios);
     batchInvalidDiagnostics = batchInvalidDiagnostics.concat(
-      WorkspaceCore.errorsToInvalidResults(outcome.errors, 'workspace_json')
+      // F2: これはJSON取り込みではなくScenario Matrix行の追加である。
+      WorkspaceCore.errorsToInvalidResults(outcome.errors, 'scenario_matrix')
     );
     profileChangedSinceLastAdd = false;
     batchUpdateCount();
@@ -2687,7 +2688,10 @@ function batchRender() {
       var note = document.createElement('span');
       note.style.fontSize = '10px';
       note.style.color = 'var(--text3)';
-      note.textContent = r.source === 'tsv' ? '取込エラー（TSV）' : '取込エラー（JSON）';
+      // 実際に通った経路を名乗る。起きていない取り込みの名前を出さない（F2）。
+      note.textContent = r.source === 'tsv' ? '取込エラー（TSV）'
+        : r.source === 'scenario_matrix' ? '追加エラー（シナリオ）'
+        : '取込エラー（JSON）';
       actionTd.appendChild(note);
       tr.appendChild(actionTd);
       tbody.appendChild(tr);

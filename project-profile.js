@@ -104,8 +104,25 @@
   var MAX_SCENARIO_ID_LENGTH = 64;
 
   var FORBIDDEN_RAW_KEYS = ['__proto__', 'constructor', 'prototype'];
+  // key位置（"key" の直後に : が来る形）だけを見る。値は対象外（F4）。
+  var FORBIDDEN_RAW_KEY_PATTERNS = FORBIDDEN_RAW_KEYS.map(function (key) {
+    return new RegExp('"' + key.replace(/[\\^$.*+?()[\]{}|]/g, '\\$&') + '"\\s*:');
+  });
 
   function isPlainObject(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
+
+  /**
+   * prototype chain に細工の無い素の object だけを通す（F6）。
+   *
+   * Object.create(...) で継承させたkeyは Object.keys にも hasOwnProperty にも
+   * 現れないため、「持っていない」ことを確かめる検査をすり抜ける。
+   */
+  function assertOrdinaryObject(value, label) {
+    var proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+      throw new Error(label + ' must be a plain object with no inherited properties');
+    }
+  }
 
   function byteLengthOf(text) {
     if (typeof TextEncoder === 'function') return new TextEncoder().encode(text).length;
@@ -253,9 +270,13 @@
     if (byteLengthOf(jsonText) > MAX_PROFILE_BYTES) {
       throw new Error('profile payload is too large (max ' + MAX_PROFILE_BYTES + ' bytes)');
     }
-    // parse前の生テキストでも危険キーを遮断する
+    // parse前の生テキストでも危険キーを遮断する。
+    //
+    // F4: ただし**key位置に限る**。JSONのkeyは必ず : が続くので、
+    // 値として現れた同じ文字列（label: "constructor" 等）まで拒否しない。
+    // 値まで弾くと、正当な入力が危険キー扱いで落ちる偽陽性になる。
     for (var i = 0; i < FORBIDDEN_RAW_KEYS.length; i++) {
-      if (jsonText.indexOf('"' + FORBIDDEN_RAW_KEYS[i] + '"') !== -1) {
+      if (FORBIDDEN_RAW_KEY_PATTERNS[i].test(jsonText)) {
         throw new Error('profile payload contains a forbidden key: ' + FORBIDDEN_RAW_KEYS[i]);
       }
     }
@@ -307,17 +328,23 @@
       }
     });
 
+    // F5: 寸法とextraFactorは Project Input Package の契約に**この場で**従わせる。
+    //
+    // 遅らせると、extraFactor 5.0 や W 999999 の行がMatrixに並び、
+    // scenarioIdを持ち、画面上は他の行と同じ顔で表示される。
+    // 落ちるのは「Workspaceへ追加」の段階で、そこにはもうTSVの行番号が無い。
+    // 契約の実装は ProjectInput 側に1つだけ置き、ここは**呼ぶ**。
     return Object.freeze({
       scenarioId: scenarioId,
       label: WorkspaceCore.normalizeLabel(input.label),
-      widthMm: requireFiniteNumber(input.widthMm, 'widthMm'),
-      heightMm: requireFiniteNumber(input.heightMm, 'heightMm'),
+      widthMm: ProjectInput.assertPaneDimensionMm(requireFiniteNumber(input.widthMm, 'widthMm'), 'widthMm'),
+      heightMm: ProjectInput.assertPaneDimensionMm(requireFiniteNumber(input.heightMm, 'heightMm'), 'heightMm'),
       evaluationHeightM: requireFiniteNumber(input.evaluationHeightM, 'evaluationHeightM'),
       zone: requireNonEmptyString(input.zone, 'zone'),
       glassType: requireNonEmptyString(input.glassType, 'glassType'),
       extraFactor: (input.extraFactor === undefined || input.extraFactor === null || input.extraFactor === '')
         ? 1.0
-        : requireFiniteNumber(input.extraFactor, 'extraFactor')
+        : ProjectInput.assertExtraFactor(requireFiniteNumber(input.extraFactor, 'extraFactor'))
     });
   }
 
@@ -382,6 +409,19 @@
     if (!isPlainObject(windDefaults)) {
       throw new Error(where + ' windDefaults must be an object');
     }
+    // F6: 継承したkeyを見落とさない。
+    //
+    // hasOwnProperty / Object.keys は prototype chain を見ないので、
+    // Object.create({evaluationHeightM: 99}) のような形で Z を持たせた object が
+    // 「Zを持たないprofile」として通ってしまう。
+    // 今の resolver がそれを読まないから安全、というのは**別の関数の事実**に
+    // 寄りかかった安全であって、D-007 が消すと決めた形そのものである。
+    // 素性の分かる object だけを通す。
+    // 継承keyの判定はここ1か所（assertOrdinaryObject）だけで行う。
+    // 以降の key 検査を `in` に変えると同じ判定が2か所になり、
+    // 前段が生きている限り後段は発火しない。D-006 と同じ形になるので採らない。
+    assertOrdinaryObject(profile, where);
+    assertOrdinaryObject(windDefaults, where + ' windDefaults');
     PROFILE_PER_SCENARIO_FIELDS.forEach(function (field) {
       if (Object.prototype.hasOwnProperty.call(windDefaults, field)) {
         throw new Error(where + ' must not carry ' + field + ': it belongs to each scenario');
@@ -468,6 +508,11 @@
         throw new Error(where + ' ' + field + ' must be an explicit non-empty string');
       }
     });
+    // F5: createScenario() と同じ契約を**結果側でも**確かめる。
+    // 手で組んだscenarioがMatrixへ入る経路もここを通る（RF-C）。
+    ProjectInput.assertPaneDimensionMm(scenario.widthMm, where + ' widthMm');
+    ProjectInput.assertPaneDimensionMm(scenario.heightMm, where + ' heightMm');
+    ProjectInput.assertExtraFactor(scenario.extraFactor);
     return scenario;
   }
 
@@ -921,6 +966,11 @@
         var pkg = scenarioToProjectInput(profile, scenario);
         added.push(workspace.addCase(pkg, { label: scenario.label }));
       } catch (e) {
+        // F2: この失敗は「JSONの取り込み」ではなくMatrix行の追加である。
+        // 行の身元は、利用者が画面で見ているもの＝scenarioId と Matrix上の位置。
+        // ここでTSVの行番号を名乗らない: form入力・generator由来の行には
+        // 対応する行が存在せず、あるように見せると嘘になる。
+        // TSV由来の不正値は parseScenarioTsv() の時点で、実際の行番号付きで落ちる。
         errors.push({
           index: index,
           caseId: scenario && scenario.scenarioId ? scenario.scenarioId : null,

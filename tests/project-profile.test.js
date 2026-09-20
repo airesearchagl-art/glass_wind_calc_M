@@ -955,3 +955,187 @@ test('§9: 上限判定は1か所だけ（発火しないguardを残さない）
   assert.equal((body.match(/existing \+ count >/g) || []).length, 1,
     '合計件数の判定は1か所だけにする');
 });
+
+// ============================================================
+// Independent verifier の指摘（F2 / F3 / F4 / F5 / F6 / F7）
+//
+// F3・F4a・F7 は「実行時には効いているが、消してもテストが通る」guardだった。
+// 効いていることと、守られていることは別である。消えても気づけないなら、
+// それは次の編集で静かに消える。以下はその発火点を固定する。
+// ============================================================
+
+test('F3a: matrix.add() 自身が絶対上限を持つ（RF-Aの後半）', () => {
+  const matrix = Profile.createScenarioMatrix();
+  for (let i = 0; i < Profile.MAX_SCENARIOS; i++) {
+    matrix.add(makeScenario({ scenarioId: 'S' + i }));
+  }
+  assert.equal(matrix.size(), Profile.MAX_SCENARIOS);
+  assert.throws(() => matrix.add(makeScenario({ scenarioId: 'OVER' })),
+    /scenario matrix is full \(max 1000\)/,
+    '1001件目はMatrix自身が拒む');
+  assert.equal(matrix.size(), Profile.MAX_SCENARIOS, '拒んだ結果が残らない');
+
+  // generator側の件数申告を信じない。嘘をつかれてもここで止まる。
+  assert.throws(
+    () => Profile.generateScenarioMatrix(
+      { widths: [1250], heights: [2050], evaluationHeights: [14.2],
+        zones: ['general'], glassTypes: ['fl_single'] },
+      { existingCaseCount: 0 }
+    ).forEach((s) => matrix.add(s)),
+    /scenario matrix is full/,
+    'existingCaseCount を 0 と偽られても Matrix の上限は動かない');
+});
+
+test('F3b: Scenario TSV は header列数を超えるセルを黙って捨てない', () => {
+  const parsed = Profile.parseScenarioTsv([
+    'scenario_id\twidth_mm\theight_mm\tevaluation_height_m\tzone\tglass_type',
+    'S1\t1250\t2050\t14.2\tgeneral\tfl_single\tEXTRA',
+    'S2\t1250\t2050\t14.2\tgeneral\tfl_single'
+  ].join('\n'));
+
+  assert.equal(parsed.rows.length, 1, '正常な行だけ通る');
+  assert.equal(parsed.rows[0].scenario.scenarioId, 'S2');
+  assert.equal(parsed.errors.length, 1);
+  assert.equal(parsed.errors[0].lineNumber, 2, '物理行番号で指す');
+  assert.match(parsed.errors[0].reason, /more cells than the header declares/);
+  // 余りセルの中身は診断に出さない
+  assert.equal(JSON.stringify(parsed.errors).includes('EXTRA'), false);
+});
+
+test('F4a: 深すぎる入れ子は構造検査の時点で止まる', () => {
+  let deep = { a: 1 };
+  for (let i = 0; i < 12; i++) deep = { n: deep };
+
+  // fieldの型検査より前に落ちる。再帰そのものを浅く保つためのguard。
+  assert.throws(
+    () => Profile.deserializeProfile(JSON.stringify({
+      schemaVersion: 1, profileType: 'runtime_wind_profile',
+      label: 'Profile A', windDefaults: Object.assign({}, WIND_DEFAULTS, { V0: deep })
+    })),
+    /nested too deeply \(max 6\)/);
+});
+
+test('F4b: 危険キーの事前走査はkey位置だけを見る（値は偽陽性にしない）', () => {
+  for (const label of ['constructor', 'prototype', '__proto__', 'my prototype building']) {
+    const json = JSON.stringify({
+      schemaVersion: 1, profileType: 'runtime_wind_profile',
+      label: label, windDefaults: WIND_DEFAULTS
+    });
+    assert.equal(Profile.deserializeProfile(json).label, label,
+      'label は値であってkeyではない: ' + label);
+  }
+  // key位置なら従来どおり止める
+  for (const key of ['__proto__', 'constructor', 'prototype']) {
+    const json = '{"schemaVersion":1,"profileType":"runtime_wind_profile","label":"Profile A",'
+      + '"' + key + '":{"x":1},"windDefaults":' + JSON.stringify(WIND_DEFAULTS) + '}';
+    assert.throws(() => Profile.deserializeProfile(json),
+      /forbidden key/, 'key位置の ' + key + ' は止める');
+  }
+  assert.equal({}.x, undefined, 'Object.prototype は汚れていない');
+
+  // 事前走査が parse より前に動いていること。
+  // JSONとして壊れている payload でも、危険キーの方を先に名指す。
+  // （後段の assertSafeStructure も同じキーを捕まえるので、
+  //   「先に動く」ことを見ないとこのguardの有無を区別できない）
+  assert.throws(
+    () => Profile.deserializeProfile('{"__proto__": {"x":1}, BROKEN'),
+    /forbidden key: __proto__/,
+    'parse不能でも事前走査が先に名指す');
+});
+
+test('F5: 寸法とextraFactorは入力された場所で契約に従う', () => {
+  assert.throws(() => makeScenario({ extraFactor: 5 }), /0 < value <= 1\.0/);
+  assert.throws(() => makeScenario({ extraFactor: 0 }), /0 < value <= 1\.0/);
+  assert.throws(() => makeScenario({ widthMm: 999999 }), /exceeds the allowed maximum/);
+  assert.throws(() => makeScenario({ widthMm: -5 }), /must be > 0/);
+  assert.throws(() => makeScenario({ heightMm: 0 }), /must be > 0/);
+
+  // 妥当な値と、TSV由来の文字列は従来どおり通る
+  assert.equal(makeScenario({ extraFactor: 1 }).extraFactor, 1);
+  assert.equal(makeScenario({ extraFactor: '0.9' }).extraFactor, 0.9);
+  assert.equal(makeScenario({ widthMm: '1250' }).widthMm, 1250);
+  assert.equal(makeScenario({}).extraFactor, 1.0, '未指定は1.0のまま');
+
+  // 契約の実装は ProjectInput 側の1つだけ。写し取らない。
+  const src = fs.readFileSync(PROFILE_SRC, 'utf8');
+  assert.equal(src.includes('100000'), false, '上限値をProfile側へ書き写さない');
+  assert.match(src, /ProjectInput\.assertExtraFactor\(/);
+  assert.match(src, /ProjectInput\.assertPaneDimensionMm\(/);
+});
+
+test('F5: 契約違反の行はMatrixへ入る前に、TSVの物理行番号付きで落ちる', () => {
+  const parsed = Profile.parseScenarioTsv([
+    'scenario_id\twidth_mm\theight_mm\tevaluation_height_m\tzone\tglass_type\textra_factor',
+    'GOOD\t1250\t2050\t14.2\tgeneral\tfl_single\t1',
+    'BADF\t1250\t2050\t14.2\tgeneral\tfl_single\t5',
+    'BIGW\t999999\t2050\t14.2\tgeneral\tfl_single\t1'
+  ].join('\n'));
+
+  assert.deepEqual(parsed.rows.map((r) => r.scenario.scenarioId), ['GOOD']);
+  assert.deepEqual(parsed.errors.map((e) => e.lineNumber), [3, 4],
+    '落ちる場所は、行番号が実在する段階');
+  assert.deepEqual(parsed.errors.map((e) => e.caseId), ['BADF', 'BIGW']);
+
+  // 結果側のgateも同じ契約を見る（手組みのscenarioでMatrixへ入れない）
+  const forged = { scenarioId: 'F1', label: null, widthMm: 1250, heightMm: 2050,
+    evaluationHeightM: 14.2, zone: 'general', glassType: 'fl_single', extraFactor: 5 };
+  assert.throws(() => Profile.assertCanonicalScenario(forged, 'probe'), /0 < value <= 1\.0/);
+  assert.throws(() => Profile.createScenarioMatrix().add(forged), /0 < value <= 1\.0/);
+});
+
+test('F6: 継承させたZ / zone / trust fieldもgateを通らない', () => {
+  const base = makeProfile();
+  const withProto = (protoExtras) => ({
+    schemaVersion: base.schemaVersion,
+    profileType: base.profileType,
+    verificationStatus: base.verificationStatus,
+    label: base.label,
+    windDefaults: Object.assign(Object.create(protoExtras), WIND_DEFAULTS)
+  });
+
+  for (const extras of [{ evaluationHeightM: 99 }, { zone: 'corner' },
+                        { verificationStatus: 'verified' }, { presetId: 'x' }]) {
+    assert.throws(() => Profile.assertRuntimeProfile(withProto(extras), 'probe'),
+      /plain object with no inherited properties/,
+      '継承keyは「持っていない」ことにならない: ' + Object.keys(extras)[0]);
+  }
+
+  // 正規のprofileは通る
+  assert.equal(Profile.assertRuntimeProfile(base, 'probe').label, 'Profile A');
+});
+
+test('F7: 必須項目の不足は「既定値を置かない」と言い切る', () => {
+  for (const field of Profile.SCENARIO_REQUIRED) {
+    assert.throws(
+      () => makeScenario({ [field]: undefined }),
+      new RegExp('scenario ' + field + ' is required \\(no default is assumed\\)'),
+      field + ' の不足理由を言い切る');
+  }
+});
+
+test('F2: Scenario Matrix の追加失敗は、起きていない取り込みを名乗らない', () => {
+  assert.equal(Workspace.INVALID_RESULT_SOURCES.includes('scenario_matrix'), true);
+
+  const workspace = Workspace.createWorkspace();
+  const profile = makeProfile();
+  // canonicalだがWorkspace側で落ちるscenario（未知のglassType）
+  const bad = makeScenario({ scenarioId: 'BADG', glassType: 'no_such_glass' });
+  const outcome = Profile.addScenariosToWorkspace(workspace, profile, [makeScenario({ scenarioId: 'OK1' }), bad]);
+
+  assert.equal(outcome.added.length, 1, '行単位の隔離は保たれる');
+  assert.equal(outcome.errors.length, 1);
+  assert.equal(outcome.errors[0].caseId, 'BADG', '画面で見えている身元で指す');
+  assert.equal(outcome.errors[0].index, 1);
+  assert.equal(outcome.errors[0].lineNumber, undefined,
+    'TSV行が無い経路で行番号を名乗らない');
+
+  const rows = Workspace.errorsToInvalidResults(outcome.errors, 'scenario_matrix');
+  assert.equal(rows[0].source, 'scenario_matrix');
+  assert.equal(rows[0].status, 'INVALID');
+  assert.equal(rows[0].designPressure, null, '診断行は計算値を持たない');
+
+  // UIはこのsourceを固有の見出しで出す（JSON取り込みと名乗らない）
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  assert.match(html, /errorsToInvalidResults\(outcome\.errors, 'scenario_matrix'\)/);
+  assert.match(html, /r\.source === 'scenario_matrix' \?/);
+});

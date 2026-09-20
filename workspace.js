@@ -538,7 +538,9 @@
   // Invalid診断レイヤ（Required Fix 2 / §4 / §5）
   // ============================================================
 
-  var INVALID_RESULT_SOURCES = ['tsv', 'workspace_json'];
+  // 診断行の出所。UIはこの値で見出しを選ぶので、実際に通った経路を名乗る。
+  // 'scenario_matrix' は Phase 2H の Scenario Matrix → Workspace 追加（F2）。
+  var INVALID_RESULT_SOURCES = ['tsv', 'workspace_json', 'scenario_matrix'];
 
 
   /**
