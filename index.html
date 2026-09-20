@@ -459,6 +459,17 @@
         <div style="font-size:11px;color:var(--text3);margin-top:5px;" id="preset-identity-note"></div>
       </div>
 
+      <div class="mode-field mode-field-miyoshi form-group" style="margin-bottom:16px;">
+        <label>Evidence status（案件factの検証状況）</label>
+        <div id="evidence-status-table"></div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px;">
+          検証状況は <code>project-config</code> のEvidence metadataから読み出しています（UI側の固定値ではありません）。
+          公開リポジトリのため、社内資料の名称・URL・IDは表示しません。
+        </div>
+        <div id="verified-case-selector-area"></div>
+        <div id="reconciliation-area"></div>
+      </div>
+
       <div class="mode-field mode-field-manual form-group" style="margin-bottom:16px;">
         <div class="meta-chip" style="display:inline-block;">
           入力モード: <span id="manual-mode-label">手入力 (Manual / Generic)</span>
@@ -730,6 +741,7 @@
 <script src="calc.js"></script>
 <script src="wind-pressure.js"></script>
 <script src="project-config/evidence.js"></script>
+<script src="project-config/evidence-ledger.js"></script>
 <script src="project-config/miyoshi.js"></script>
 <script src="project-config/manual.js"></script>
 <script src="project-config/registry.js"></script>
@@ -749,6 +761,162 @@
 /* ============================================================
    入力モード切替
 ============================================================ */
+
+/* ============================================================
+   Evidence status / Verified Case / reconciliation（Phase 2F）
+
+   表示はすべて project-config のEvidence metadata と
+   EvidenceLedger の判定結果から導出する。UI側に検証状況を
+   ハードコードしない（UIが「真実」を持たない）。
+============================================================ */
+
+// 公開表示用のラベル。検証状況そのものを言い換えて強く見せない。
+function evidenceStatusLabel(verificationStatus) {
+  if (verificationStatus === 'verified') return 'Verified';
+  if (verificationStatus === 'partially_verified') return 'Partially Verified';
+  return 'Unverified';
+}
+function evidenceLevelLabel(level) {
+  if (level === 'primary') return 'Primary';
+  if (level === 'indirect') return 'Indirect';
+  return 'None';
+}
+function statusClass(verificationStatus) {
+  if (verificationStatus === 'verified') return 'ok';
+  if (verificationStatus === 'partially_verified') return 'warn';
+  return 'ng';
+}
+
+// 案件のEvidence Ledgerを組み立てる。
+//
+// **重要**: private Evidenceが利用できないため、verified entryは1件も作らない。
+// ここでpresetの値をverifiedとして登録すると、Evidence Gateを迂回したことになる。
+// 登録するのは「現在の検証状況そのまま」であり、昇格は行わない。
+function buildProjectEvidenceLedger(config) {
+  var ledger = EvidenceLedger.createLedger();
+  var dims = config.dimensions;
+
+  // 寸法: sample_default / unverified のまま
+  ledger.add({
+    factKey: 'pane_width_mm',
+    value: dims.defaultW.value,
+    unit: 'mm',
+    verificationStatus: dims.defaultW.verificationStatus,
+    evidence: dims.defaultW.evidence
+  });
+  ledger.add({
+    factKey: 'pane_height_mm',
+    value: dims.defaultH.value,
+    unit: 'mm',
+    verificationStatus: dims.defaultH.verificationStatus,
+    evidence: dims.defaultH.evidence
+  });
+  return ledger;
+}
+
+function renderEvidenceStatus(config) {
+  var host = document.getElementById('evidence-status-table');
+  if (!host) return;
+
+  var dims = config.dimensions;
+  var rows = [
+    ['案件識別情報', config.identity.verificationStatus, config.identity.evidence.level,
+     '公開リポジトリのため固有名詞は非表示（redacted）'],
+    ['基準風速 V0', config.wind.V0.verificationStatus, config.wind.V0.evidence.level,
+     config.wind.V0.value + ' ' + (config.wind.V0.unit || '')],
+    ['地表面粗度区分', config.wind.roughnessCategory.verificationStatus,
+     config.wind.roughnessCategory.evidence.level, String(config.wind.roughnessCategory.value)],
+    ['ガラス見付寸法', dims.status, dims.defaultW.evidence.level,
+     dims.defaultW.value + ' × ' + dims.defaultH.value + ' mm（' + dims.mode + '）'],
+    ['階別正圧プリセット', config.wind.status, 'indirect', '1F / 2F / 3F / RF'],
+    ['部位別負圧プリセット', config.wind.status, 'indirect', '一般部 / 隅角部']
+  ];
+
+  var body = rows.map(function (r) {
+    return '<tr>' +
+      '<td>' + escHtml(r[0]) + '</td>' +
+      '<td class="' + statusClass(r[1]) + '">' + escHtml(evidenceStatusLabel(r[1])) + '</td>' +
+      '<td>' + escHtml(evidenceLevelLabel(r[2])) + '</td>' +
+      '<td style="font-size:11px;color:var(--text3);">' + escHtml(r[3]) + '</td>' +
+      '</tr>';
+  }).join('');
+
+  host.innerHTML =
+    '<table><thead><tr><th>項目</th><th>検証状況</th><th>Evidence</th><th>値 / 注記</th></tr></thead>' +
+    '<tbody>' + body + '</tbody></table>' +
+    '<div class="meta-chip" style="display:inline-block;margin-top:8px;">' +
+    'Verified Cases: <span>' + config.verifiedCases.length + '</span></div>';
+}
+
+// Verified Case selector は、caseが実在するときだけ描画する。
+// 0件のときにselectorを出すと「選べる何かがある」という誤解を生むため、
+// 見せかけのUIを作らない。
+function renderVerifiedCaseSelector(config) {
+  var host = document.getElementById('verified-case-selector-area');
+  if (!host) return;
+  if (!config.verifiedCases || config.verifiedCases.length === 0) {
+    host.innerHTML =
+      '<div style="font-size:11px;color:var(--text3);margin-top:8px;">' +
+      'Verified Case は現在 0 件です。案件一次資料によるEvidenceが未取得のため、' +
+      'case selectorは表示しません（空のselectorを作りません）。</div>';
+    return;
+  }
+  var options = config.verifiedCases.map(function (c) {
+    return '<option value="' + escHtml(c.caseId) + '">' + escHtml(c.caseId) + '</option>';
+  }).join('');
+  host.innerHTML =
+    '<label style="margin-top:8px;display:block;">Verified Case</label>' +
+    '<select id="inp-verified-case">' + options + '</select>';
+}
+
+// preset値とEvidenceの突き合わせ（read-only）。
+// presetを変更しない。数値一致を検証済みと読み替えない。
+function renderReconciliation(config) {
+  var host = document.getElementById('reconciliation-area');
+  if (!host) return;
+
+  var ledger = buildProjectEvidenceLedger(config);
+  var items = [
+    ['ガラス見付幅', 'pane_width_mm', config.dimensions.defaultW.value],
+    ['ガラス見付高さ', 'pane_height_mm', config.dimensions.defaultH.value],
+    ['階別正圧（2F 一般部）', 'positive_pressure', config.getPositivePressure('2')],
+    ['部位別負圧（一般部）', 'negative_pressure', config.getNegativePressure('general')],
+    ['評価高さ Z / 階の対応', 'evaluation_height', null]
+  ];
+
+  var body = items.map(function (it) {
+    var result = EvidenceLedger.reconcileFact(it[2], ledger.find(it[1]));
+    var cls = result.status === 'MATCH' ? 'ok' : (result.status === 'MISMATCH' ? 'ng' : 'warn');
+    return '<tr>' +
+      '<td>' + escHtml(it[0]) + '</td>' +
+      '<td>' + (it[2] === null ? '—' : escHtml(String(it[2]))) + '</td>' +
+      '<td>' + (result.evidenceValue === null ? '—' : escHtml(String(result.evidenceValue))) + '</td>' +
+      '<td class="' + cls + '">' + escHtml(result.status) + '</td>' +
+      '</tr>';
+  }).join('');
+
+  host.innerHTML =
+    '<div class="sec-title" style="margin-top:14px;">Evidence照合（read-only）</div>' +
+    '<table><thead><tr><th>項目</th><th>preset値</th><th>Evidence値</th><th>照合結果</th></tr></thead>' +
+    '<tbody>' + body + '</tbody></table>' +
+    '<div class="notice" style="margin-top:8px;border-color:rgba(245,158,11,0.4);">' +
+    '<strong style="color:var(--warn);">数値的一致は検証済みを意味しません。</strong><br>' +
+    '照合はEvidenceの検証状況を先に見ます。Evidenceがverifiedでなければ、' +
+    'preset値と数値が完全に一致していても <code>INSUFFICIENT_EVIDENCE</code> と表示します。' +
+    'また告示風圧計算の結果がpreset値に近いことも、検証の根拠にはなりません。' +
+    '本表示はread-onlyで、presetを書き換えることはありません。</div>';
+}
+
+function renderProjectEvidencePanels() {
+  if (typeof MiyoshiProjectConfig === 'undefined' || typeof EvidenceLedger === 'undefined') return;
+  try {
+    renderEvidenceStatus(MiyoshiProjectConfig);
+    renderVerifiedCaseSelector(MiyoshiProjectConfig);
+    renderReconciliation(MiyoshiProjectConfig);
+  } catch (e) {
+    /* 表示に失敗しても計算機能は止めない */
+  }
+}
 
 function getInputMode() {
   return document.getElementById('inp-mode').value;
@@ -1449,6 +1617,10 @@ window.addEventListener('DOMContentLoaded', function() {
     runCalc();
   });
   applyModeVisibility();
+
+  // Evidence status / Verified Case / reconciliation は入力に依存しないため
+  // 初期化時に一度だけ描画する。
+  renderProjectEvidencePanels();
 
   runCalc();
 });

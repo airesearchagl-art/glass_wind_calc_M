@@ -544,3 +544,102 @@ test('§8: 既存の verified 値も sourceReference field を持つ（null）',
   assert.equal(MiyoshiProjectConfig.wind.V0.value, 34);
   assert.equal(MiyoshiProjectConfig.wind.V0.verificationStatus, 'verified');
 });
+
+/* ============================================================
+   Wave 5: security / spoofing（§15 A-N）
+============================================================ */
+
+const ProjectInput = require('../project-config/project-input.js');
+
+test('§15-E/F/G: imported JSONはEvidence Ledger verified entryやverified caseを作れない', () => {
+  // 取り込みpackageがEvidenceを主張しても、Ledgerへ到達する経路が存在しない。
+  const hostile = {
+    schemaVersion: 2, sourceKind: 'registered_preset', sourceId: 'miyoshi',
+    widthMm: 1250, heightMm: 2050,
+    positivePressure: 1525, negativePressure: -918, designPressure: 1525,
+    glassType: 'fl_single', extraFactor: 1,
+    provenance: { publicLabel: 'みよし案件プリセット', verificationStatus: 'verified', note: '' }
+  };
+  const imported = ProjectInput.deserialize(JSON.stringify(hostile));
+  // trust downgrade（Phase 2D契約）
+  assert.equal(imported.sourceKind, 'imported_unverified');
+  assert.equal(imported.provenance.verificationStatus, 'unverified');
+  assert.equal(imported.sourceId, null);
+
+  // importされたpackageはEvidence / verificationStatusをLedgerへ持ち込めない
+  assert.equal(imported.evidence, undefined, 'packageはevidenceを運ばない');
+  assert.equal(imported.verifiedCase, undefined);
+  assert.equal(imported.sourceReference, undefined);
+
+  // package由来の値でverified entryを作ろうとしても、Evidenceが無いので作れない
+  const led = Ledger.createLedger();
+  assert.throws(
+    () => led.add({ factKey: 'pane_width_mm', value: imported.widthMm, unit: 'mm',
+                    verificationStatus: 'verified', evidence: imported.provenance }),
+    /evidence\.level must be one of|evidence metadata is required/
+  );
+});
+
+test('§15-G: evidence風のJSONを直接渡してもverified entryにならない', () => {
+  const led = Ledger.createLedger();
+  // 攻撃者が完全な形を主張してくるケース
+  const forged = {
+    level: 'primary', checkedAt: '2026-09-20',
+    publicDescription: '一次資料で確認済み', privateReferenceAvailable: true
+  };
+  // 構造としては通ってしまう（これはEvidenceの性質上避けられない）。
+  // 重要なのは、この経路が**外部データから到達できない**こと。
+  assert.doesNotThrow(() => led.add({ factKey: 'pane_width_mm', value: 1, unit: 'mm',
+                                      verificationStatus: 'verified', evidence: forged }));
+  // そのうえで、importedパッケージにはevidenceを運ぶfieldが無い
+  assert.equal(ProjectInput.ALLOWED_TOP_LEVEL_KEYS.indexOf('evidence'), -1);
+  assert.equal(ProjectInput.ALLOWED_TOP_LEVEL_KEYS.indexOf('sourceReference'), -1);
+  assert.equal(ProjectInput.ALLOWED_TOP_LEVEL_KEYS.indexOf('verifiedCase'), -1);
+  assert.equal(ProjectInput.ALLOWED_TOP_LEVEL_KEYS.indexOf('verificationStatus'), -1);
+});
+
+test('§15-J/K: sample_defaultは昇格せず、floor→Zの自動生成経路も無い', () => {
+  assert.equal(MiyoshiProjectConfig.dimensions.mode, 'sample_default');
+  assert.equal(MiyoshiProjectConfig.dimensions.status, 'unverified');
+
+  // Ledgerにfloor→Zを自動生成する仕組みが無い
+  const src = fs.readFileSync(path.join(__dirname, '..', 'project-config', 'evidence-ledger.js'), 'utf8');
+  assert.doesNotMatch(src, /floorTo|floorKey|階高|deriveZ|inferZ/);
+  // evaluation_height は明示的に登録されない限り存在しない
+  const led = Ledger.createLedger();
+  assert.equal(led.find('evaluation_height'), null);
+});
+
+test('§15-I: MISMATCHでもpresetは変更されない（副作用なし）', () => {
+  const snapshot = JSON.stringify({
+    pos: ['1', '2', '3', 'R'].map((f) => MiyoshiProjectConfig.getPositivePressure(f)),
+    neg: ['general', 'corner'].map((z) => MiyoshiProjectConfig.getNegativePressure(z)),
+    dims: MiyoshiProjectConfig.getDefaultDimensionsMM(),
+    dimStatus: MiyoshiProjectConfig.dimensions.status,
+    windStatus: MiyoshiProjectConfig.wind.status,
+    cases: MiyoshiProjectConfig.verifiedCases.length
+  });
+  const led = Ledger.createLedger();
+  led.add(verifiedEntry('positive_pressure', 1, 'N/m2'));
+  led.add(verifiedEntry('pane_width_mm', 1, 'mm'));
+  Ledger.reconcileFact(MiyoshiProjectConfig.getPositivePressure('2'), led.find('positive_pressure'));
+  Ledger.reconcileFact(MiyoshiProjectConfig.getDefaultDimensionsMM().W, led.find('pane_width_mm'));
+  const after = JSON.stringify({
+    pos: ['1', '2', '3', 'R'].map((f) => MiyoshiProjectConfig.getPositivePressure(f)),
+    neg: ['general', 'corner'].map((z) => MiyoshiProjectConfig.getNegativePressure(z)),
+    dims: MiyoshiProjectConfig.getDefaultDimensionsMM(),
+    dimStatus: MiyoshiProjectConfig.dimensions.status,
+    windStatus: MiyoshiProjectConfig.wind.status,
+    cases: MiyoshiProjectConfig.verifiedCases.length
+  });
+  assert.equal(after, snapshot, 'reconciliationはpresetへ副作用を持たない');
+});
+
+test('§15-N: publicDescriptionはURL/パス/private providerを受け付けない', () => {
+  for (const bad of ['参照 https://example.gov/a.pdf', 'drive.google.com/file/d/x',
+                     '/home/user/secret.pdf', 'C:\\docs\\a.pdf', 'www.example.com',
+                     'see https://drive.google.com/x']) {
+    assert.throws(() => Evidence.makeEvidence('primary', '2026-09-20', bad, true),
+      /must not contain private URLs\/paths\/identifiers/, JSON.stringify(bad));
+  }
+});
