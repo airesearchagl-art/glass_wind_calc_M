@@ -403,6 +403,47 @@
   .batch-count { font-size: 12px; color: var(--text3); }
   .batch-status { font-size: 11px; margin-top: 8px; white-space: pre-wrap; }
   .batch-status.is-error { color: var(--warn); }
+  .review-select-list {
+    max-height: 180px; overflow-y: auto; border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px; display: grid; gap: 4px;
+  }
+  .review-select-list label { font-size: 12px; display: flex; gap: 6px; align-items: center; }
+  .review-section { margin-top: 18px; }
+  .review-section h3 { font-size: 14px; margin: 0 0 8px; }
+  .review-interpretation {
+    border: 1px solid var(--warn); border-radius: 8px; padding: 10px 12px;
+    font-size: 12px; line-height: 1.7;
+  }
+  .review-interpretation ul { margin: 6px 0 0; padding-left: 18px; }
+  .review-meta { font-size: 11px; color: var(--text3); }
+  .review-detail-card {
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    margin-bottom: 10px; font-size: 12px; line-height: 1.7;
+  }
+  .review-kv { margin: 0; font-size: 12px; }
+
+  @media print {
+    /* Reportだけを残す。操作要素は1つも印刷しない。 */
+    body { background: #fff; color: #000; }
+    .app-header, .view-switch, .main-wrap, #review-config-card,
+    #batch-summary-card, #batch-results-card, button, select, textarea, input {
+      display: none !important;
+    }
+    .batch-wrap { display: block; padding: 0; max-width: none; }
+    #review-report {
+      display: block !important; border: none; padding: 0; margin: 0;
+      background: #fff; color: #000; box-shadow: none;
+    }
+    #review-report .batch-table { font-size: 10px; }
+    #review-report .batch-table th, #review-report .batch-table td {
+      border: 1px solid #999; color: #000; white-space: normal;
+    }
+    #review-report .review-interpretation { border: 1px solid #000; }
+    /* 小さなカードはページ跨ぎで割らない。長い一覧表は自然に流す。 */
+    .review-detail-card, .review-interpretation { break-inside: avoid; }
+    .review-section h3 { break-after: avoid; }
+  }
+
   .batch-table { width: 100%; border-collapse: collapse; font-size: 12px; }
   .batch-table th, .batch-table td {
     border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: left;
@@ -983,7 +1024,7 @@
 
     <div class="batch-toolbar">
       <button type="button" class="btn-secondary" onclick="batchAddCurrent()">＋ 現在の入力条件を追加</button>
-      <button type="button" class="btn-secondary" onclick="batchEvaluate()">▶ 一括計算</button>
+      <button type="button" id="btn-batch-eval" class="btn-secondary" onclick="batchEvaluate()">▶ 一括計算</button>
       <button type="button" class="btn-secondary" onclick="batchClear()">✕ すべて削除</button>
       <span class="batch-count" id="batch-count">0 件</span>
     </div>
@@ -1001,7 +1042,7 @@
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
       <button type="button" class="btn-secondary" onclick="batchInsertTsvTemplate('manual')">列見本（manual）</button>
       <button type="button" class="btn-secondary" onclick="batchInsertTsvTemplate('notification')">列見本（notification）</button>
-      <button type="button" class="btn-secondary" onclick="batchImportTsv()">⬆ TSVを取り込む</button>
+      <button type="button" id="btn-batch-tsv-import" class="btn-secondary" onclick="batchImportTsv()">⬆ TSVを取り込む</button>
     </div>
     <textarea id="batch-tsv" rows="6" spellcheck="false"
       placeholder="ExcelでコピーしたセルをそのままCtrl+Vで貼り付けてください（タブ区切り）。"></textarea>
@@ -1059,6 +1100,87 @@
     <div id="batch-table"></div>
   </div>
 
+  <!-- ========================================================
+       設計レビュー資料（Phase 2I）
+
+       ここは Workspace の状態から作る derived snapshot である。
+       生成後のpreview / print / export は activeReview だけを読む。
+       Workspaceを直接読み直すと、画面とexportが静かにずれる。
+       ======================================================== -->
+  <div class="card" id="review-config-card">
+    <h2 class="card-title">設計レビュー資料</h2>
+    <p class="card-note">
+      現在のWorkspaceから、レビューで読める資料を1つ作る。
+      生成した時点で内容は固定され、あとでWorkspaceや設定を変えても勝手には変わらない。
+    </p>
+
+    <div class="form-grid">
+      <div class="form-group">
+        <label for="rep-title">表題</label>
+        <input type="text" id="rep-title" maxlength="200" placeholder="例: 外装ガラス 設計レビュー">
+      </div>
+      <div class="form-group">
+        <label for="rep-subtitle">副題（任意）</label>
+        <input type="text" id="rep-subtitle" maxlength="300" placeholder="例: 第2版">
+      </div>
+      <div class="form-group">
+        <label for="rep-privacy">公開範囲</label>
+        <select id="rep-privacy">
+          <option value="full">Full（ラベル・備考を含む）</option>
+          <option value="redacted">Redacted（自由記述を伏せる）</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group" style="margin-top:8px;">
+      <label for="rep-note">備考（任意）</label>
+      <textarea id="rep-note" rows="2" maxlength="2000" spellcheck="false"
+        placeholder="レビューで共有したい補足。承認の記録ではない。"></textarea>
+    </div>
+
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">
+      <label>詳細を載せるケース</label>
+      <div class="batch-toolbar" style="margin:8px 0;">
+        <button type="button" id="btn-rep-detail-none" class="btn-secondary"
+          onclick="reportSelectDetails('none')">選択解除</button>
+        <button type="button" id="btn-rep-detail-governing" class="btn-secondary"
+          onclick="reportSelectDetails('governing')">支配ケース</button>
+        <button type="button" id="btn-rep-detail-ok" class="btn-secondary"
+          onclick="reportSelectDetails('ok')">OKすべて</button>
+        <span class="batch-count" id="rep-detail-count">0 件</span>
+      </div>
+      <div id="rep-detail-list" class="review-select-list"></div>
+    </div>
+
+    <div class="form-grid" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">
+      <div class="form-group">
+        <label for="rep-cmp-a">比較 A</label>
+        <select id="rep-cmp-a"></select>
+      </div>
+      <div class="form-group">
+        <label for="rep-cmp-b">比較 B</label>
+        <select id="rep-cmp-b"></select>
+      </div>
+    </div>
+    <p class="card-note">比較は事実の差（B − A）だけを出す。どちらが良いかは判定しない。</p>
+
+    <div class="batch-toolbar" style="margin-top:14px;">
+      <button type="button" id="btn-rep-generate" class="btn-primary"
+        onclick="generateReview()">資料を作成 / 再作成</button>
+      <button type="button" id="btn-rep-markdown" class="btn-secondary"
+        onclick="exportReviewMarkdown()">Markdown</button>
+      <button type="button" id="btn-rep-json" class="btn-secondary"
+        onclick="exportReviewJson()">Review JSON</button>
+      <button type="button" id="btn-rep-print" class="btn-secondary"
+        onclick="printReview()">印刷 / PDF</button>
+    </div>
+    <div class="batch-status" id="rep-freshness"></div>
+    <textarea id="rep-export-out" rows="6" spellcheck="false" readonly
+      style="margin-top:10px;" hidden></textarea>
+  </div>
+
+  <!-- 印刷対象。ここだけが @media print で残る -->
+  <div class="card" id="review-report" hidden></div>
+
 </div>
 
 <script src="calc.js"></script>
@@ -1071,6 +1193,7 @@
 <script src="project-config/project-input.js"></script>
 <script src="workspace.js"></script>
 <script src="project-profile.js"></script>
+<script src="review-package.js"></script>
 <script>
 /* ============================================================
    計算ロジックは calc.js（GlassCalc、案件非依存の汎用計算コア）に、
@@ -2352,6 +2475,12 @@ function batchSetStatus(elementId, message, isError) {
 function batchUpdateCount() {
   var el = document.getElementById('batch-count');
   if (el) el.textContent = (batchWorkspace ? batchWorkspace.size() : 0) + ' 件';
+  // レビュー資料の選択肢を追従させる（表示の便宜）。
+  // 鮮度そのものはここで決めない。export / print の時点で計算し直す。
+  if (typeof refreshReportSelectors === 'function' &&
+      document.getElementById('rep-detail-list')) {
+    refreshReportSelectors();
+  }
 }
 
 /** §37: import errorは行番号・安全なcaseId・field・理由だけを出す。生データは出さない。 */
@@ -2715,6 +2844,473 @@ function batchRender() {
   });
   table.appendChild(tbody);
   host.appendChild(table);
+}
+
+// ============================================================
+// 設計レビュー資料（Phase 2I / Wave 4）
+//
+// 状態は1つだけ: activeReview。
+// 作れるのは ReviewPackage.buildReviewPackage() だけで、
+// preview / Markdown / JSON / print はすべてこれを読む。
+//
+// 生成後にWorkspaceを読み直さないのが要点である。
+// 読み直すと、画面に出ている資料とexportした資料が静かにずれる。
+// ============================================================
+
+var activeReview = null;
+var activeReportSettingsSnapshot = null;
+
+var REVIEW_FRESHNESS = {
+  NO_REPORT: 'NO_REPORT',
+  FRESH: 'FRESH',
+  WORKSPACE_STALE: 'WORKSPACE_STALE',
+  SETTINGS_DIRTY: 'SETTINGS_DIRTY',
+  BOTH_STALE: 'BOTH_STALE'
+};
+
+/** 画面の現在値をそのまま読む。判定の基準はここ1か所。 */
+function readCurrentReportSettings() {
+  var detailIds = [];
+  var boxes = document.querySelectorAll('#rep-detail-list input[type="checkbox"]');
+  for (var i = 0; i < boxes.length; i++) {
+    if (boxes[i].checked) detailIds.push(boxes[i].value);
+  }
+  var a = document.getElementById('rep-cmp-a').value;
+  var b = document.getElementById('rep-cmp-b').value;
+  var comparison = (a && b) ? [a, b] : [];
+  return {
+    title: document.getElementById('rep-title').value,
+    subtitle: document.getElementById('rep-subtitle').value,
+    note: document.getElementById('rep-note').value,
+    privacyMode: document.getElementById('rep-privacy').value,
+    detailCaseIds: detailIds,
+    comparisonCaseIds: comparison
+  };
+}
+
+/** 決定的な文字列化。弱いhashは作らない（厳密比較で足りる）。 */
+function serializeReportSettings(settings) {
+  return JSON.stringify([
+    settings.title, settings.subtitle, settings.note, settings.privacyMode,
+    settings.detailCaseIds, settings.comparisonCaseIds
+  ]);
+}
+
+/**
+ * 資料の鮮度を**その場で計算し直す**。
+ *
+ * 「変更イベントで旗を立てる」方式に寄りかからない。
+ * listenerを1つ付け忘れると、古いprivacy設定のままexportできてしまう。
+ * listenerは表示を早く更新するための便宜であって、境界ではない。
+ */
+function getReviewFreshness() {
+  if (!activeReview) return REVIEW_FRESHNESS.NO_REPORT;
+  var workspaceStale = ReviewPackage.isReviewStale(
+    activeReview, batchWorkspace, batchInvalidDiagnostics);
+  var settingsDirty =
+    serializeReportSettings(readCurrentReportSettings()) !== activeReportSettingsSnapshot;
+  if (workspaceStale && settingsDirty) return REVIEW_FRESHNESS.BOTH_STALE;
+  if (workspaceStale) return REVIEW_FRESHNESS.WORKSPACE_STALE;
+  if (settingsDirty) return REVIEW_FRESHNESS.SETTINGS_DIRTY;
+  return REVIEW_FRESHNESS.FRESH;
+}
+
+var REVIEW_FRESHNESS_TEXT = {
+  NO_REPORT: '資料はまだ作成されていません。',
+  FRESH: '資料は現在のWorkspaceと設定に一致しています。',
+  WORKSPACE_STALE: 'Workspaceが変更されています。資料を再作成してください。',
+  SETTINGS_DIRTY: '資料の設定が変更されています。資料を再作成してください。',
+  BOTH_STALE: 'Workspaceと設定の両方が変更されています。資料を再作成してください。'
+};
+
+function renderReviewFreshness() {
+  var state = getReviewFreshness();
+  var host = document.getElementById('rep-freshness');
+  host.textContent = REVIEW_FRESHNESS_TEXT[state];
+  host.className = 'batch-status' + (state === 'FRESH' || state === 'NO_REPORT' ? '' : ' is-error');
+  return state;
+}
+
+/** 詳細候補・比較候補は authoritative Workspace のcaseだけ。診断は載せない。 */
+function refreshReportSelectors() {
+  if (!batchWorkspace) return;
+  var cases = batchWorkspace.listCases();
+  var previous = {};
+  var boxes = document.querySelectorAll('#rep-detail-list input[type="checkbox"]');
+  for (var i = 0; i < boxes.length; i++) {
+    if (boxes[i].checked) previous[boxes[i].value] = true;
+  }
+
+  var list = document.getElementById('rep-detail-list');
+  list.textContent = '';
+  cases.forEach(function (c) {
+    var label = document.createElement('label');
+    var box = document.createElement('input');
+    box.type = 'checkbox';
+    box.value = c.caseId;
+    box.checked = !!previous[c.caseId];
+    box.addEventListener('change', function () {
+      updateReportDetailCount();
+      renderReviewFreshness();
+    });
+    var text = document.createElement('span');
+    text.textContent = c.label ? (c.caseId + ' — ' + c.label) : c.caseId;
+    label.appendChild(box);
+    label.appendChild(text);
+    list.appendChild(label);
+  });
+
+  ['rep-cmp-a', 'rep-cmp-b'].forEach(function (id) {
+    var sel = document.getElementById(id);
+    var keep = sel.value;
+    sel.textContent = '';
+    var none = document.createElement('option');
+    none.value = '';
+    none.textContent = '（比較しない）';
+    sel.appendChild(none);
+    cases.forEach(function (c) {
+      var opt = document.createElement('option');
+      opt.value = c.caseId;
+      opt.textContent = c.label ? (c.caseId + ' — ' + c.label) : c.caseId;
+      sel.appendChild(opt);
+    });
+    sel.value = batchWorkspace.has(keep) ? keep : '';
+  });
+
+  updateReportDetailCount();
+  renderReviewFreshness();
+}
+
+function updateReportDetailCount() {
+  var n = readCurrentReportSettings().detailCaseIds.length;
+  var host = document.getElementById('rep-detail-count');
+  host.textContent = n + ' 件';
+  if (n > ReviewPackage.MAX_DETAIL_CASES) {
+    host.textContent = n + ' 件（上限 ' + ReviewPackage.MAX_DETAIL_CASES + ' 件）';
+  }
+}
+
+function reportSelectDetails(mode) {
+  var boxes = document.querySelectorAll('#rep-detail-list input[type="checkbox"]');
+  var wanted = {};
+  if (mode === 'governing' || mode === 'ok') {
+    var results = WorkspaceCore.evaluateWorkspace(batchWorkspace);
+    if (mode === 'governing') {
+      var g = WorkspaceCore.summarize(results).governingCaseId;
+      if (g) wanted[g] = true;
+    } else {
+      results.forEach(function (r) { if (r.status === 'OK') wanted[r.caseId] = true; });
+    }
+  }
+  for (var i = 0; i < boxes.length; i++) boxes[i].checked = !!wanted[boxes[i].value];
+  updateReportDetailCount();
+  renderReviewFreshness();
+}
+
+function generateReview() {
+  var settings = readCurrentReportSettings();
+  try {
+    activeReview = ReviewPackage.buildReviewPackage({
+      workspace: batchWorkspace,
+      diagnostics: batchInvalidDiagnostics,
+      metadata: {
+        title: settings.title,
+        subtitle: settings.subtitle,
+        note: settings.note
+      },
+      detailCaseIds: settings.detailCaseIds,
+      comparisonCaseIds: settings.comparisonCaseIds,
+      privacyMode: settings.privacyMode
+    });
+    activeReportSettingsSnapshot = serializeReportSettings(settings);
+    renderReviewReport();
+    document.getElementById('rep-export-out').hidden = true;
+  } catch (e) {
+    activeReview = null;
+    activeReportSettingsSnapshot = null;
+    document.getElementById('review-report').hidden = true;
+    var host = document.getElementById('rep-freshness');
+    host.className = 'batch-status is-error';
+    host.textContent = '資料を作成できませんでした: ' + (e && e.message ? e.message : String(e));
+    return;
+  }
+  renderReviewFreshness();
+}
+
+/**
+ * export / print の直前に必ず通す関門。
+ *
+ * 旗ではなく、その場で計算し直した鮮度で判断する。
+ * 特に Full で作った資料を Redacted へ切り替えただけの状態で
+ * exportできてしまうと、伏せたつもりの資料が外へ出る。
+ */
+function assertReviewExportable(action) {
+  var state = renderReviewFreshness();
+  if (state === REVIEW_FRESHNESS.NO_REPORT) {
+    alert('先に資料を作成してください。');
+    return false;
+  }
+  if (state !== REVIEW_FRESHNESS.FRESH) {
+    alert('Reportの元データまたは設定が変更されています。再生成してください。');
+    return false;
+  }
+  return true;
+}
+
+function showExportOutput(text) {
+  var out = document.getElementById('rep-export-out');
+  out.value = text;
+  out.hidden = false;
+  out.focus();
+  out.select();
+}
+
+function exportReviewMarkdown() {
+  if (!assertReviewExportable('markdown')) return;
+  showExportOutput(ReviewPackage.toMarkdown(activeReview));
+}
+
+function exportReviewJson() {
+  if (!assertReviewExportable('json')) return;
+  showExportOutput(ReviewPackage.serializeReviewPackage(activeReview));
+}
+
+function printReview() {
+  if (!assertReviewExportable('print')) return;
+  window.print();
+}
+
+// ── preview renderer（値はすべて textContent） ──────────────
+
+function revEl(tag, text, cls) {
+  var el = document.createElement(tag);
+  if (text !== undefined && text !== null) el.textContent = String(text);
+  if (cls) el.className = cls;
+  return el;
+}
+
+function revNum(value, digits) {
+  if (typeof value !== 'number' || !isFinite(value)) return '—';
+  return value.toFixed(digits === undefined ? 2 : digits);
+}
+
+function revText(value) {
+  return (value === null || value === undefined || value === '') ? '—' : String(value);
+}
+
+function revSection(host, title) {
+  var sec = document.createElement('div');
+  sec.className = 'review-section';
+  sec.appendChild(revEl('h3', title));
+  host.appendChild(sec);
+  return sec;
+}
+
+function revTable(host, headers, rows, aligns) {
+  var table = document.createElement('table');
+  table.className = 'batch-table';
+  var thead = document.createElement('thead');
+  var htr = document.createElement('tr');
+  headers.forEach(function (h) { htr.appendChild(revEl('th', h)); });
+  thead.appendChild(htr);
+  table.appendChild(thead);
+  var tbody = document.createElement('tbody');
+  rows.forEach(function (cells) {
+    var tr = document.createElement('tr');
+    cells.forEach(function (c) { tr.appendChild(revEl('td', c)); });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  host.appendChild(table);
+}
+
+function renderReviewReport() {
+  var host = document.getElementById('review-report');
+  host.textContent = '';
+  host.hidden = false;
+  if (!activeReview) { host.hidden = true; return; }
+  var rev = activeReview;
+
+  // 1. 表題
+  host.appendChild(revEl('h2', rev.metadata.title, 'card-title'));
+  if (rev.metadata.subtitle) host.appendChild(revEl('p', rev.metadata.subtitle, 'card-note'));
+  // 公開範囲は「今のトグル」ではなく、この資料が作られたときの値を出す。
+  host.appendChild(revEl('p',
+    '公開範囲: ' + (rev.privacyMode === 'redacted' ? 'Redacted（自由記述を伏せる）' : 'Full'),
+    'review-meta'));
+
+  // 2. 固定の解釈注意書き（metadataで置き換えられない）
+  var warn = document.createElement('div');
+  warn.className = 'review-interpretation';
+  warn.appendChild(revEl('strong', 'この資料の読み方'));
+  var ul = document.createElement('ul');
+  [rev.interpretation.okMeaning, rev.interpretation.notApproval,
+   rev.interpretation.notVerified, rev.interpretation.unverifiedInputNote]
+    .forEach(function (t) { ul.appendChild(revEl('li', t)); });
+  warn.appendChild(ul);
+  host.appendChild(warn);
+
+  if (rev.metadata.note) {
+    var noteSec = revSection(host, '備考');
+    noteSec.appendChild(revEl('p', rev.metadata.note, 'review-kv'));
+  }
+
+  // 3. 集計
+  var s = rev.summary;
+  var sumSec = revSection(host, '集計');
+  [['総ケース数', revNum(s.totalCases, 0)],
+   ['OK / 候補なし / 入力エラー',
+    revNum(s.okCount, 0) + ' / ' + revNum(s.noSolutionCount, 0) + ' / ' + revNum(s.invalidCount, 0)],
+   ['適用範囲外を含むケース', revNum(s.outOfScopePresentCount, 0)],
+   ['最大設計風圧 (N/m²)', revNum(s.maxDesignPressure, 2)],
+   ['最大見付面積 (m²)', revNum(s.maxAreaM2, 4)]
+  ].forEach(function (kv) {
+    sumSec.appendChild(revEl('p', kv[0] + ': ' + kv[1], 'review-kv'));
+  });
+
+  // 4. 推奨構成ごとの件数
+  var grpSec = revSection(host, '推奨構成ごとの件数');
+  revTable(grpSec, ['推奨構成', '件数'],
+    rev.groups.map(function (g) { return [revText(g.key), revNum(g.count, 0)]; }));
+
+  // 5. ケース一覧（INVALID診断も含む。操作ボタンは置かない＝これは編集画面ではない）
+  var caseSec = revSection(host, 'ケース一覧');
+  revTable(caseSec,
+    ['ケースID', 'ラベル', '出所', '検証状況', 'W (mm)', 'H (mm)', '面積 (m²)',
+     '設計風圧 (N/m²)', 'ガラス種別', '推奨構成', '許容耐力 (N/m²)', '余裕率',
+     '余裕圧 (N/m²)', '判定', '備考'],
+    rev.cases.map(function (c) {
+      return [
+        revText(c.caseId), revText(c.label),
+        c.isDiagnostic ? '（取り込みエラー）' : revText(c.sourceKind),
+        c.isDiagnostic ? '—' : revText(c.verificationStatus),
+        revNum(c.widthMm, 0), revNum(c.heightMm, 0), revNum(c.areaM2, 4),
+        revNum(c.designPressure, 2), revText(c.glassType), revText(c.recommendedLabel),
+        revNum(c.allowablePressure, 2), revNum(c.marginRatio, 4), revNum(c.marginPressure, 2),
+        revText(c.status),
+        c.isDiagnostic ? revText(c.error) : '—'
+      ];
+    }));
+
+  // 6. 支配ケース（探し直さない）
+  var govSec = revSection(host, '支配ケース');
+  if (rev.governingCase === null) {
+    govSec.appendChild(revEl('p', '支配ケースなし（計算できたケースがない）', 'review-kv'));
+  } else {
+    govSec.appendChild(revEl('p', 'ケースID: ' + revText(rev.governingCase.caseId), 'review-kv'));
+    govSec.appendChild(revEl('p', '選定根拠: ' + revText(rev.governingCase.basis), 'review-kv'));
+  }
+
+  // 7. 選択ケースの詳細
+  if (rev.selectedDetails.length > 0) {
+    var detSec = revSection(host, '選択ケースの詳細');
+    rev.selectedDetails.forEach(function (d) {
+      var card = document.createElement('div');
+      card.className = 'review-detail-card';
+      card.appendChild(revEl('strong', revText(d.caseId) + ' — ' + revText(d.label)));
+      card.appendChild(revEl('p',
+        '出所: ' + revText(d.input.sourceKind) +
+        ' / 検証状況: ' + revText(d.input.verificationStatus), 'review-kv'));
+      card.appendChild(revEl('p',
+        'W × H: ' + revNum(d.input.widthMm, 0) + ' × ' + revNum(d.input.heightMm, 0) +
+        ' mm / ガラス種別: ' + revText(d.input.glassType) +
+        ' / 追加係数: ' + revNum(d.input.extraFactor, 3), 'review-kv'));
+      card.appendChild(revEl('p',
+        '正圧 / 負圧 / 設計風圧: ' + revNum(d.input.positivePressure, 2) + ' / ' +
+        revNum(d.input.negativePressure, 2) + ' / ' +
+        revNum(d.input.designPressure, 2) + ' N/m²', 'review-kv'));
+
+      if (!d.traceAvailable) {
+        // 空欄のまま風条件の枠だけ出さない。無い理由をそのまま書く。
+        card.appendChild(revEl('p', '風条件の内訳: ' + revText(d.traceUnavailableReason),
+          'review-kv'));
+      } else {
+        var t = d.windTrace;
+        card.appendChild(revEl('p',
+          'V0 / 粗度区分: ' + revNum(t.inputs.V0, 1) + ' m/s / ' +
+          revText(t.inputs.inputRoughnessCategory), 'review-kv'));
+        card.appendChild(revEl('p',
+          '建物高さ / 軒高 / 評価高さ Z: ' + revNum(t.inputs.buildingHeightM, 2) + ' / ' +
+          revNum(t.inputs.eavesHeightM, 2) + ' / ' +
+          revNum(t.inputs.evaluationHeightM, 2) + ' m', 'review-kv'));
+        card.appendChild(revEl('p',
+          '建物タイプ / 部位: ' + revText(t.inputs.buildingType) + ' / ' +
+          revText(t.inputs.zone) + ' / 算定基準: ' + revText(t.basis.type), 'review-kv'));
+        card.appendChild(revEl('p',
+          'Er / qBar: ' + t.positive.Er + ' / ' + t.positive.qBar, 'review-kv'));
+        // 内部文字列にも < が入る（5<Z<40）。textContentなので literal に出る。
+        card.appendChild(revEl('p', 'Gpe分岐: ' + revText(t.positive.GpeBranch), 'review-kv'));
+        card.appendChild(revEl('p',
+          '正圧 / 負圧: ' + revNum(t.positive.pressure, 2) + ' / ' +
+          revNum(t.negative.pressure, 2) + ' N/m²', 'review-kv'));
+        // 式の検証と入力の検証は別々に出す。1つのbadgeへ潰さない。
+        card.appendChild(revEl('p',
+          '式の検証: ' + revText(t.provenance.formulaVerificationStatus), 'review-kv'));
+        card.appendChild(revEl('p',
+          '入力の検証: ' + revText(t.provenance.inputVerificationStatus), 'review-kv'));
+      }
+
+      card.appendChild(revEl('p',
+        '推奨構成: ' + revText(d.result.recommendedLabel) +
+        ' / 許容耐力: ' + revNum(d.result.allowablePressure, 2) + ' N/m²', 'review-kv'));
+      card.appendChild(revEl('p',
+        '余裕率 / 余裕圧: ' + revNum(d.result.marginRatio, 4) + ' / ' +
+        revNum(d.result.marginPressure, 2) + ' N/m² / 判定: ' + revText(d.result.status),
+        'review-kv'));
+      detSec.appendChild(card);
+    });
+  }
+
+  // 8. 比較（事実の差のみ）
+  if (rev.comparison !== null) {
+    var c = rev.comparison;
+    var cmpSec = revSection(host, '2ケース比較');
+    cmpSec.appendChild(revEl('p',
+      'A: ' + revText(c.aCaseId) + ' — ' + revText(c.aLabel), 'review-kv'));
+    cmpSec.appendChild(revEl('p',
+      'B: ' + revText(c.bCaseId) + ' — ' + revText(c.bLabel), 'review-kv'));
+    revTable(cmpSec, ['項目', 'A', 'B', '差分 (B − A)'],
+      c.fields.map(function (f) {
+        var numeric = typeof f.a === 'number' || typeof f.b === 'number';
+        return [
+          revText(f.field),
+          numeric ? revNum(f.a, 4) : revText(f.a),
+          numeric ? revNum(f.b, 4) : revText(f.b),
+          f.delta === null ? '—' : revNum(f.delta, 4)
+        ];
+      }));
+    cmpSec.appendChild(revEl('p', '差分は事実の差であり、優劣の判定ではない。', 'review-meta'));
+  }
+
+  // 9. 出所と検証状況（generic。案件固有のEvidence状態は持ち込まない）
+  var evSec = revSection(host, '出所と検証状況');
+  revTable(evSec, ['出所', '件数'],
+    Object.keys(rev.evidenceSummary.bySourceKind).map(function (k) {
+      return [revText(k), revNum(rev.evidenceSummary.bySourceKind[k], 0)];
+    }));
+  revTable(evSec, ['検証状況', '件数'],
+    Object.keys(rev.evidenceSummary.byVerificationStatus).map(function (k) {
+      return [revText(k), revNum(rev.evidenceSummary.byVerificationStatus[k], 0)];
+    }));
+  evSec.appendChild(revEl('p', rev.evidenceSummary.note, 'review-meta'));
+
+  // 10. footer
+  host.appendChild(revEl('p',
+    'ガラス耐風圧 簡易検討ツールで作成した検討資料。表示は丸めた値であり、' +
+    'full precision は Review JSON を参照。', 'review-meta'));
+}
+
+// 設定変更は表示をすぐ更新する。ただし判定の根拠ではない（export/print時に再計算する）。
+['rep-title', 'rep-subtitle', 'rep-note', 'rep-privacy', 'rep-cmp-a', 'rep-cmp-b']
+  .forEach(function (id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', renderReviewFreshness);
+    el.addEventListener('change', renderReviewFreshness);
+  });
+
+if (typeof ReviewPackage !== 'undefined' && document.getElementById('rep-detail-list')) {
+  refreshReportSelectors();
 }
 
 </script>

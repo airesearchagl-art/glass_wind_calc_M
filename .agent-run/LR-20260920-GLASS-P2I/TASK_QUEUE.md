@@ -8,7 +8,7 @@
 | 1 | architecture inventory / Review Package contract / privacy contract | PENDING |
 | 2 | review-package.js / snapshot / summary / case table / detail selection | DONE |
 | 3 | comparison / Evidence・trust display / Markdown / JSON | DONE |
-| 4 | Review UI / print view / print CSS / redacted mode / stale warning | PENDING |
+| 4 | Review UI / print view / print CSS / redacted mode / stale warning | DONE |
 | 5 | security / privacy / injection / mutation / size limits | PENDING |
 | 6 | full regression / browser / independent verifier / repair | PENDING |
 | 7 | README / Run Artifact convergence / Draft PR / Completion Report | PENDING |
@@ -31,12 +31,12 @@
 | AC-12 | formula/input verification分離 | PASS | formulaVerificationStatus と inputVerificationStatus を別々に保持。統合badgeを作らない |
 | AC-13 | Evidence status非退行 | PENDING | |
 | AC-14 | two-case factual comparison成立 | PASS | 2ケースの事実差分のみ。delta = B - A。winner/better/safer を model / JSON / Markdown のどこにも持たない |
-| AC-15 | print preview成立 | PENDING | |
-| AC-16 | print CSS成立 | PENDING | |
+| AC-15 | print preview成立 | PASS | Review Report Preview を Batch view に追加。描画元は activeReview のみ（mutation U6 KILLED） |
+| AC-16 | print CSS成立 | PASS | @media print で操作要素を全て隠し #review-report だけ残す。break-inside: avoid（mutation U9 KILLED） |
 | AC-17 | Markdown export成立 | PASS | toMarkdown() 成立。table / heading / code fence / link / script / 改行 いずれの注入も不活性 |
 | AC-18 | Review JSON export成立 | PASS | serializeReviewPackage() 成立。key順固定・決定的・sourceSnapshot非出力 |
 | AC-19 | Redacted mode成立 | PASS | redacted は model 側で伏せ、JSON と Markdown の両方で marker が出ないことを実測 |
-| AC-20 | stale detection成立 | PENDING | |
+| AC-20 | stale detection成立 | PASS | NO_REPORT / FRESH / WORKSPACE_STALE / SETTINGS_DIRTY / BOTH_STALE。自動再生成なし。export / print はFRESHのみ |
 | AC-21 | diagnostic privacy成立 | PASS | Phase 2G が伏せた秘密らしき値は JSON / Markdown のどちらにも出ない |
 | AC-22 | HTML/Markdown injection防止 | PASS | escapeは出所で分岐しない。内部traceの 5<Z<40 も同じ扱い |
 | AC-23 | no storage/network | PASS | network / storage API を1つも持たない（source contract） |
@@ -46,8 +46,8 @@
 ## Next Action
 
 ```text
-Wave 4: Review UI / print preview / @media print /
-redacted toggle / stale warning / regeneration
+Wave 5: security / privacy / injection / mutation / size limits
+（Wave 4で先行実施した分は RUN_STATE に実測済み）
 ```
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管 / §47）。

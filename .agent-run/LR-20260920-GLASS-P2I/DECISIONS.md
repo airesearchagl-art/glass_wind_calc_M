@@ -162,3 +162,50 @@ Phase 2D〜2Hと同一。Resume時に再計算して一致を確認する。
   加えて `Math.pow(` / `Math.sqrt(` / `Math.log(` / `Math.exp(` の不在も確認する。
 - 実際に `recomputeEr()` を仕込んで、この narrowed scan が落ちることを確認してから
   採用した（広すぎず、狭すぎないことを実測した）。
+
+## D-012 — 鮮度は旗で持たず、その場で計算し直す（§30 / §31）
+
+- 変更listenerで `reportSettingsDirty = true` を立てる方式にしない。
+  listenerを1つ付け忘れた瞬間、**Fullで作った資料をRedactedへ切り替えただけの状態で
+  exportできてしまう**。これは §44 の Redacted mode leak に直結する。
+- **決定**: `getReviewFreshness()` が呼ばれるたびに
+  - Workspace側は `ReviewPackage.isReviewStale()` を呼ぶ（UIで再実装しない）
+  - 設定側は `readCurrentReportSettings()` を読み直して厳密比較する
+  listenerは表示を早く更新するための便宜であって、境界ではない。
+- **実測（mutation U3）**: `settingsDirty = false` に落とすと、browserで
+  Full資料のmarkerがRedacted切り替え後にexportされた。
+  guardを戻すと export はブロックされmarkerは出ない。
+  source contractだけでなく、挙動でも確かめた。
+
+## D-013 — 生成後はWorkspaceを読み直さない（§4）
+
+- preview / Markdown / JSON / print はすべて `activeReview` だけを読む。
+  `batchResults` / `batchWorkspace` / `activeProfile` / `scenarioMatrix` を
+  report描画に使わない（test UI-4 で固定）。
+- 読み直すと、画面に出ている資料とexportした資料が静かに食い違う。
+  Workspaceを使うのは「新しく作るとき」と「古いかどうか調べるとき」だけ。
+
+## D-014 — 印刷は現在のページのsafe DOMだけを使う（§25 / §27）
+
+- PDF libraryを入れない。standalone HTMLも書き出さない。
+  `@media print` で操作要素を全部隠し、`#review-report` だけを残す。
+  ブラウザの「印刷 → PDFとして保存」がそのまま成果物になる。
+- 小さなdetail cardは `break-inside: avoid`、長いケース一覧は自然に流す。
+  全行を1ページずつに割らない。
+
+## D-015 — Wave 4のtestで見つけた自分の欠陥2件
+
+```text
+1. innerText はCSSの text-transform を反映する
+   .card-title が大文字化するため、preview の literal 検査が
+   '<script>' に一致しなかった。DOMの中身は正しい。
+   → 文字列の検査は textContent で行う。
+
+2. 攻撃testが redacted の資料に対して実行されており、何も確かめていなかった
+   直前の節で privacy を redacted にしたまま攻撃文字列を入れたため、
+   title/note が既定値へ置き換わり、攻撃文字列が資料へ到達していなかった。
+   diagnosticsを足して初めて分かった（Markdownの表題が既定値だった）。
+   → 攻撃前に privacy を full へ戻す。
+     「攻撃が届いたこと」自体をassertする行を足した。
+   Phase 2G / Wave 3 と同じ「通ってしまうtest」の系列なので、経緯ごと残す。
+```

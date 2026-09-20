@@ -10,7 +10,7 @@
 - Base SHA: 6a5232f65d02e2a8bfa8c2c87049b5865c584855
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 3 — exporters（JSON / Markdown）完了
+- Current wave: Wave 4 — Review UI / print / stale boundary 完了
 - Task Packet ID: LRP-20260920-GLASS-P2I
 - Task Packet revision: 1
 - Task Packet SHA-256: 901afdc2317e0b38ca90dcb69ba1fb8d8b271b1e073acd40e20d0e784c8f229e
@@ -235,6 +235,59 @@ KILLED 12 → 14 / SURVIVED 3 → 1 / PATCH-MISS 0
      「漏れを迂回するtest」と同じ轍だったため、経緯ごと残す。
 ```
 
+## Wave 4 — Review UI / print / stale boundary（実測）
+
+```text
+npm test : 472 pass / 0 fail（Wave 3 457 → +15）
+browser  : 48 checks / 0 fail / pageError 0 / consoleError 0（Wave 4 flow）
+回帰      : p2h 29 / p2g 84 / p2h-repair 17 いずれも 0 fail
+```
+
+### mutation（UI guard 10件）
+
+```text
+KILLED 10 / SURVIVED 0 / PATCH-MISS 0
+
+  U1  markdown export が鮮度ゲートを飛ばす        KILLED
+  U2  print が鮮度ゲートを飛ばす                  KILLED
+  U3  設定変更を鮮度に含めない（privacy Hard Gate）KILLED
+  U4  stale判定をUIで握りつぶす                   KILLED
+  U5  公開範囲を現在のトグルから表示              KILLED
+  U6  previewが現在のWorkspace結果を読み直す      KILLED
+  U7  JSON exportがcanonical exporterを迂回        KILLED
+  U8  report値をinnerHTMLへ                        KILLED
+  U9  print CSSが操作要素を隠さない                KILLED
+  U10 activeReviewにbuilder以外のobjectを代入      KILLED
+```
+
+### privacy Hard Gate の挙動確認（source contractだけで済ませない）
+
+```text
+U3を適用した状態でbrowserを走らせた実測:
+  freshness      : FRESH（誤り）
+  export blocked : false
+  marker exported: true   ← Fullの資料がRedacted切替後に出てしまう
+
+guardを戻した実測:
+  freshness      : SETTINGS_DIRTY
+  export blocked : true
+  marker exported: false
+```
+
+### Wave 4 packet の欠落について
+
+```text
+受け取った Wave 4 指示は §41「Attack: title:」の途中で切れていた。
+§1-§40 は完結していたためそのまま実施し、§41 の攻撃セットは
+**bound Task Packet（digest 901afdc2…）の §40 に完全な形で存在する**ため
+そちらを使った。推測で補っていない。
+実施した攻撃: <script> / <img onerror> / 5<Z<40 / | / ` / # heading /
+javascript: / file path風 / URL風 / 秘密らしき診断値 / prototype key /
+unknown・duplicate・INVALID の detail選択 / 生成後のWorkspace変更 /
+redaction漏れ / report JSONの再取り込み。
+§41 の意図が上記と異なる場合は、残りを送ってもらえれば差分を実施する。
+```
+
 ## Quality Debt
 
 QUALITY_DEBT.md 参照（Wave 0時点で none）。
@@ -253,8 +306,8 @@ Wave 1-7（TASK_QUEUE.md参照）
 
 ## Next action
 
-Wave 4: Review UI、print preview、@media print、
-redacted toggle、stale warning と再生成。
+Wave 5: security / privacy / injection / mutation / size limits。
+Wave 4で先行実施した攻撃・mutationの結果は本ファイルに実測済み。
 
 ## Stop conditions status
 
