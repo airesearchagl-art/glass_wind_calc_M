@@ -362,6 +362,48 @@
   .badge-ok { color: var(--ok); font-weight: 700; }
   .badge-ng { color: var(--ng); font-weight: 700; }
   .badge-warn { color: var(--warn); font-weight: 700; }
+
+  /* ===== Phase 2G: view switch / batch workspace ===== */
+
+  /* `display: grid` は [hidden] の既定 `display: none` に勝ってしまう。
+     view切替を hidden 属性で行う以上、ここを明示しないと
+     両方のviewが同時に描画される（初期表示でSingleの下にBatchが出る）。 */
+  .main-wrap[hidden], .batch-wrap[hidden] { display: none; }
+
+  .view-switch {
+    display: flex; gap: 8px; max-width: 1400px;
+    margin: 18px auto 0; padding: 0 20px;
+  }
+  .view-tab {
+    background: var(--card); color: var(--text2);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .view-tab.is-active { color: var(--text1); border-color: var(--accent); }
+  .batch-wrap { max-width: 1400px; margin: 0 auto; padding: 20px; display: grid; gap: 16px; }
+  .batch-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .batch-count { font-size: 12px; color: var(--text3); }
+  .batch-status { font-size: 11px; margin-top: 8px; white-space: pre-wrap; }
+  .batch-status.is-error { color: var(--warn); }
+  .batch-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .batch-table th, .batch-table td {
+    border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: left;
+    white-space: nowrap;
+  }
+  .batch-table th { color: var(--text3); font-weight: 600; }
+  .batch-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .batch-table td.label-cell { white-space: normal; max-width: 220px; word-break: break-word; }
+  .status-ok { color: var(--ok); font-weight: 700; }
+  .status-no-solution { color: var(--warn); font-weight: 700; }
+  .status-invalid { color: var(--ng); font-weight: 700; }
+  .summary-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+  .summary-item {
+    border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; min-width: 120px;
+  }
+  .summary-item .k { font-size: 11px; color: var(--text3); }
+  .summary-item .v { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .group-row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0;
+    border-bottom: 1px solid var(--border); font-size: 12px; }
   .glass-name { font-family: var(--font-mono); color: var(--text); font-size: 12px; }
   .pval { font-family: var(--font-mono); }
 
@@ -429,7 +471,17 @@
   </div>
 </header>
 
-<div class="main-wrap">
+<!-- ===== View切替（Phase 2G）=====
+     Single が既定。Batchは同じ計算コアを複数ケースへ適用するorchestrationであり、
+     Single calculatorの挙動・結果を変えない。 -->
+<div class="view-switch" role="tablist" aria-label="表示モード">
+  <button type="button" id="view-tab-single" class="view-tab is-active" role="tab"
+          aria-selected="true" onclick="setView('single')">単一ケース</button>
+  <button type="button" id="view-tab-batch" class="view-tab" role="tab"
+          aria-selected="false" onclick="setView('batch')">一括検討（Workspace）</button>
+</div>
+
+<div class="main-wrap" id="view-single">
 
   <!-- ===== 左カラム：入力 ===== -->
   <div>
@@ -738,6 +790,101 @@
 
 </div>
 
+<!-- ===== Batch / Scenario Workspace（Phase 2G） ===== -->
+<div class="batch-wrap" id="view-batch" hidden>
+
+  <div class="card">
+    <div class="card-title">一括検討 Workspace</div>
+
+    <div class="notice" style="margin-bottom:14px;border-color:rgba(245,158,11,0.4);">
+      <strong>⚠ この画面について</strong><br>
+      各ケースは単一ケース計算とまったく同じ計算コアを通ります。一括表示のための別計算は行いません。<br>
+      Workspaceは<strong>この画面を閉じると消えます</strong>（ブラウザにもサーバーにも保存しません）。
+      残す場合は「Workspace JSONをExport」してください。<br>
+      貼り付け・読み込んだデータは常に<strong>未検証の取り込みデータ</strong>として扱われ、
+      案件プリセットや検証済みEvidenceにはなりません。
+    </div>
+
+    <div class="batch-toolbar">
+      <button type="button" class="btn-secondary" onclick="batchAddCurrent()">＋ 現在の入力条件を追加</button>
+      <button type="button" class="btn-secondary" onclick="batchEvaluate()">▶ 一括計算</button>
+      <button type="button" class="btn-secondary" onclick="batchClear()">✕ すべて削除</button>
+      <span class="batch-count" id="batch-count">0 件</span>
+    </div>
+    <div class="batch-status" id="batch-status"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Excelから貼り付け（TSV）</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px;">
+      1行目に列名、2行目以降にデータを貼り付けます。<code>mode</code> は
+      <code>manual</code> または <code>notification</code> のみです。
+      設計風圧・推奨ガラス・検証状況といった<strong>計算結果側の列は受け付けません</strong>
+      （常に入力から計算し直します）。未知の列は読み飛ばさずエラーにします。
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+      <button type="button" class="btn-secondary" onclick="batchInsertTsvTemplate('manual')">列見本（manual）</button>
+      <button type="button" class="btn-secondary" onclick="batchInsertTsvTemplate('notification')">列見本（notification）</button>
+      <button type="button" class="btn-secondary" onclick="batchImportTsv()">⬆ TSVを取り込む</button>
+    </div>
+    <textarea id="batch-tsv" rows="6" spellcheck="false"
+      placeholder="ExcelでコピーしたセルをそのままCtrl+Vで貼り付けてください（タブ区切り）。"></textarea>
+    <div class="batch-status" id="batch-tsv-status"></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Workspace JSON / 結果CSV</div>
+    <div style="font-size:11px;color:var(--text3);margin-bottom:8px;">
+      Workspace JSONが保存するのは<strong>入力だけ</strong>です。計算結果は保存せず、読み込み時に必ず計算し直します
+      （古い結果が正本になる経路を作りません）。CSVは結果の出力専用で、読み戻しはできません。
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+      <button type="button" class="btn-secondary" onclick="batchExportJson()">⬇ Workspace JSONをExport</button>
+      <button type="button" class="btn-secondary" onclick="batchImportJson()">⬆ Workspace JSONをImport</button>
+      <button type="button" class="btn-secondary" onclick="batchExportCsv()">⬇ 結果CSVを出力</button>
+    </div>
+    <textarea id="batch-json" rows="6" spellcheck="false"
+      placeholder="ここにWorkspace JSON / 結果CSVが出力されます。Importする場合はWorkspace JSONを貼り付けてください。"></textarea>
+    <div class="batch-status" id="batch-json-status"></div>
+  </div>
+
+  <div class="card" id="batch-summary-card" hidden>
+    <div class="card-title">サマリ</div>
+    <div id="batch-summary"></div>
+    <div id="batch-groups" style="margin-top:14px;"></div>
+  </div>
+
+  <div class="card" id="batch-results-card" hidden>
+    <div class="card-title">検討結果</div>
+    <div class="batch-toolbar" style="margin-bottom:10px;">
+      <label style="font-size:12px;">表示
+        <select id="batch-filter" onchange="batchRender()">
+          <option value="ALL">すべて</option>
+          <option value="OK">OK のみ</option>
+          <option value="NO_SOLUTION">解なし のみ</option>
+          <option value="INVALID">入力エラー のみ</option>
+        </select>
+      </label>
+      <label style="font-size:12px;">並び順
+        <select id="batch-sort" onchange="batchRender()">
+          <option value="caseId">ケースID</option>
+          <option value="designPressure">設計風圧</option>
+          <option value="areaM2">面積</option>
+          <option value="marginRatio">余裕比</option>
+        </select>
+      </label>
+      <label style="font-size:12px;">方向
+        <select id="batch-sort-dir" onchange="batchRender()">
+          <option value="asc">昇順</option>
+          <option value="desc">降順</option>
+        </select>
+      </label>
+    </div>
+    <div id="batch-table"></div>
+  </div>
+
+</div>
+
 <script src="calc.js"></script>
 <script src="wind-pressure.js"></script>
 <script src="project-config/evidence.js"></script>
@@ -746,6 +893,7 @@
 <script src="project-config/manual.js"></script>
 <script src="project-config/registry.js"></script>
 <script src="project-config/project-input.js"></script>
+<script src="workspace.js"></script>
 <script>
 /* ============================================================
    計算ロジックは calc.js（GlassCalc、案件非依存の汎用計算コア）に、
@@ -1534,7 +1682,8 @@ function runCalc() {
   }
 
   // 面積計算（m²）：W・Hはガラス見付寸法
-  const area = (pkg.widthMm * pkg.heightMm) / 1_000_000;
+  // Phase 2G: Batch layerと同じ関数を呼ぶ（式を2か所に持たない）
+  const area = GlassCalc.paneAreaM2(pkg.widthMm, pkg.heightMm);
 
   // 表示用にposP/negPは正圧・負圧それぞれの絶対値として揃える
   // （モード間で renderResults() の表示ロジックを共用するため）。
@@ -1643,7 +1792,417 @@ window.addEventListener('DOMContentLoaded', function() {
   renderProjectEvidencePanels();
 
   runCalc();
+
+  // Phase 2G: Batch viewの初期件数表示。Single viewが既定のまま。
+  if (typeof batchUpdateCount === 'function') batchUpdateCount();
 });
+
+/* ============================================================
+   Phase 2G: Batch / Scenario Workspace
+   ------------------------------------------------------------
+   このブロックは計算を持たない。すべて workspace.js 経由で、
+   workspace.js もまた calc.js / project-input.js を呼ぶだけである。
+
+   描画は textContent / createElement で行い、
+   ユーザー由来の文字列を innerHTML へ差し込まない（AC-19）。
+   Workspaceはmemory-onlyで、localStorage等へ保存しない（AC-21）。
+============================================================ */
+
+var batchWorkspace = (typeof WorkspaceCore !== 'undefined') ? WorkspaceCore.createWorkspace() : null;
+var batchResults = [];
+
+// Required Fix 2: import時に弾かれた行の**表示専用**診断レコード。
+// Workspaceが持つ入力は常に妥当なPIP v2だけであり（AC-03）、
+// 壊れた行はここに隔離する。serializeWorkspace / ProjectInput / GlassCalc
+// のいずれにも渡らない。
+var batchInvalidDiagnostics = [];
+
+function setView(view) {
+  var single = document.getElementById('view-single');
+  var batch = document.getElementById('view-batch');
+  var tabSingle = document.getElementById('view-tab-single');
+  var tabBatch = document.getElementById('view-tab-batch');
+  var isBatch = view === 'batch';
+
+  single.hidden = isBatch;
+  batch.hidden = !isBatch;
+  tabSingle.classList.toggle('is-active', !isBatch);
+  tabBatch.classList.toggle('is-active', isBatch);
+  tabSingle.setAttribute('aria-selected', String(!isBatch));
+  tabBatch.setAttribute('aria-selected', String(isBatch));
+}
+
+function batchSetStatus(elementId, message, isError) {
+  var host = document.getElementById(elementId);
+  if (!host) return;
+  host.textContent = message || '';
+  host.classList.toggle('is-error', !!isError);
+}
+
+function batchUpdateCount() {
+  var el = document.getElementById('batch-count');
+  if (el) el.textContent = (batchWorkspace ? batchWorkspace.size() : 0) + ' 件';
+}
+
+/** §37: import errorは行番号・安全なcaseId・field・理由だけを出す。生データは出さない。 */
+function batchFormatErrors(errors) {
+  return errors.map(function (e) {
+    var parts = [];
+    if (e.lineNumber !== undefined) parts.push(e.lineNumber + '行目');
+    if (e.index !== undefined) parts.push('case[' + e.index + ']');
+    if (e.caseId) parts.push(e.caseId);
+    if (e.field) parts.push(e.field);
+    parts.push(e.reason);
+    return '・' + parts.join(' / ');
+  }).join('\n');
+}
+
+/**
+ * 現在の単一ケース入力をWorkspaceへ追加する（§14）。
+ * 画面表示の丸め値ではなく、内部のnormalized packageを使う。
+ */
+function batchAddCurrent() {
+  try {
+    var pkg = buildCurrentProjectInput();
+    var caseId = batchWorkspace.addCase(pkg);
+    batchUpdateCount();
+    batchSetStatus('batch-status', caseId + ' を追加しました（' + pkg.sourceKind + '）。', false);
+  } catch (e) {
+    batchSetStatus('batch-status', '追加できませんでした: ' + e.message, true);
+  }
+}
+
+function batchDuplicate(caseId) {
+  try {
+    var newId = batchWorkspace.duplicateCase(caseId);
+    batchUpdateCount();
+    batchEvaluate();
+    batchSetStatus('batch-status', caseId + ' を ' + newId + ' として複製しました。', false);
+  } catch (e) {
+    batchSetStatus('batch-status', '複製できませんでした: ' + e.message, true);
+  }
+}
+
+function batchRemove(caseId) {
+  batchWorkspace.removeCase(caseId);
+  batchUpdateCount();
+  batchEvaluate();
+  batchSetStatus('batch-status', caseId + ' を削除しました。', false);
+}
+
+/** §16: ブラウザ上のruntime stateだけを空にする。preset / Evidenceには触れない。 */
+function batchClear() {
+  var removed = batchWorkspace.clear();
+  batchInvalidDiagnostics = [];
+  batchResults = [];
+  batchUpdateCount();
+  batchRender();
+  batchSetStatus('batch-status', removed + ' 件を削除しました（この画面の一覧のみ）。', false);
+}
+
+function batchEvaluate() {
+  try {
+    // 妥当caseの評価 + import診断のINVALID行 をまとめて表示用listにする。
+    // INVALID行を作るのは workspace.js 側の canonical helper であり、
+    // ここでその場しのぎの行を組み立てない（§5）。
+    batchResults = WorkspaceCore.mergeEvaluationResults(
+      WorkspaceCore.evaluateWorkspace(batchWorkspace),
+      batchInvalidDiagnostics
+    );
+    batchRender();
+    var summary = WorkspaceCore.summarize(batchResults);
+    batchSetStatus('batch-status',
+      summary.totalCases + ' 件を表示しています（OK ' + summary.okCount +
+      ' / 解なし ' + summary.noSolutionCount + ' / 入力エラー ' + summary.invalidCount + '）。', false);
+  } catch (e) {
+    batchSetStatus('batch-status', '計算できませんでした: ' + e.message, true);
+  }
+}
+
+function batchInsertTsvTemplate(mode) {
+  var header = mode === 'notification'
+    ? 'case_id\tlabel\tmode\twidth_mm\theight_mm\tglass_type\textra_factor\tv0\troughness\tbuilding_height_m\teaves_height_m\tevaluation_height_m\tbuilding_type\tzone\tbasis'
+    : 'case_id\tlabel\tmode\twidth_mm\theight_mm\tglass_type\textra_factor\tpositive_pressure\tnegative_pressure';
+  var sample = mode === 'notification'
+    ? 'Sample-001\t\tnotification\t1250\t2050\tfl_single\t1.00\t34\tIII\t14.2\t14.2\t14.2\tclosed\tgeneral\tnotification_baseline'
+    : 'Sample-001\t\tmanual\t1250\t2050\tfl_single\t1.00\t1500\t-900';
+  document.getElementById('batch-tsv').value = header + '\n' + sample;
+  batchSetStatus('batch-tsv-status',
+    '列見本を入れました。case_id / label は空欄でも構いません（case_id は自動採番されます）。', false);
+}
+
+function batchImportTsv() {
+  var text = document.getElementById('batch-tsv').value;
+  try {
+    var parsed = WorkspaceCore.parseTsv(text);
+    var outcome = WorkspaceCore.addTsvRows(batchWorkspace, parsed);
+    // TSVはWorkspaceへ**追加**するので、診断も追加する
+    batchInvalidDiagnostics = batchInvalidDiagnostics.concat(
+      WorkspaceCore.errorsToInvalidResults(outcome.errors, 'tsv')
+    );
+    batchUpdateCount();
+    batchEvaluate();
+
+    var message = outcome.added.length + ' 件を取り込みました。';
+    if (outcome.errors.length > 0) {
+      message += '\n取り込めなかった行（' + outcome.errors.length + '件）は'
+        + '「入力エラー」として一覧に残ります:\n'
+        + batchFormatErrors(outcome.errors);
+    }
+    batchSetStatus('batch-tsv-status', message, outcome.errors.length > 0);
+  } catch (e) {
+    batchSetStatus('batch-tsv-status', '取り込めませんでした: ' + e.message, true);
+  }
+}
+
+function batchExportJson() {
+  try {
+    document.getElementById('batch-json').value = WorkspaceCore.serializeWorkspace(batchWorkspace);
+    batchSetStatus('batch-json-status',
+      'Workspace JSONを出力しました（入力のみ。計算結果は含みません）。', false);
+  } catch (e) {
+    batchSetStatus('batch-json-status', '出力できませんでした: ' + e.message, true);
+  }
+}
+
+function batchImportJson() {
+  var text = document.getElementById('batch-json').value;
+  try {
+    var imported = WorkspaceCore.deserializeWorkspace(text);
+    // Workspace JSONはWorkspaceを**置き換える**ので、診断も置き換える。
+    // 前回importの診断が残ると、今のファイルに無い行が一覧に居座る。
+    batchWorkspace = imported.workspace;
+    batchInvalidDiagnostics = WorkspaceCore.errorsToInvalidResults(imported.errors, 'workspace_json');
+    batchUpdateCount();
+    batchEvaluate();
+
+    var message = batchWorkspace.size() + ' 件を読み込みました。'
+      + '\n読み込んだケースは「取り込みデータ（未検証）」として扱われます。';
+    if (imported.errors.length > 0) {
+      message += '\n読み込めなかったケース（' + imported.errors.length + '件）は'
+        + '「入力エラー」として一覧に残ります:\n'
+        + batchFormatErrors(imported.errors);
+    }
+    batchSetStatus('batch-json-status', message, imported.errors.length > 0);
+  } catch (e) {
+    batchSetStatus('batch-json-status', '読み込めませんでした: ' + e.message, true);
+  }
+}
+
+function batchExportCsv() {
+  try {
+    if (batchResults.length === 0) batchEvaluate();
+    document.getElementById('batch-json').value = WorkspaceCore.toCsv(batchResults);
+    batchSetStatus('batch-json-status',
+      '結果CSVを出力しました。CSVは結果の出力専用で、入力として読み戻すことはできません。', false);
+  } catch (e) {
+    batchSetStatus('batch-json-status', '出力できませんでした: ' + e.message, true);
+  }
+}
+
+/* ---------- 描画（すべて textContent / createElement） ---------- */
+
+function batchCell(row, text, className) {
+  var td = document.createElement('td');
+  if (className) td.className = className;
+  td.textContent = text === null || text === undefined ? '—' : String(text);
+  return td;
+}
+
+function batchNumberCell(row, value, digits) {
+  var td = document.createElement('td');
+  td.className = 'num';
+  td.textContent = typeof value === 'number' && isFinite(value) ? fmt(value, digits) : '—';
+  return td;
+}
+
+var BATCH_STATUS_TEXT = { OK: 'OK', NO_SOLUTION: '解なし', INVALID: '入力エラー' };
+var BATCH_STATUS_CLASS = { OK: 'status-ok', NO_SOLUTION: 'status-no-solution', INVALID: 'status-invalid' };
+
+function batchRenderSummary(results) {
+  var card = document.getElementById('batch-summary-card');
+  var host = document.getElementById('batch-summary');
+  var groupHost = document.getElementById('batch-groups');
+  host.textContent = '';
+  groupHost.textContent = '';
+
+  if (results.length === 0) { card.hidden = true; return; }
+  card.hidden = false;
+
+  var summary = WorkspaceCore.summarize(results);
+  var grid = document.createElement('div');
+  grid.className = 'summary-grid';
+
+  var items = [
+    ['総ケース数', String(summary.totalCases)],
+    ['OK', String(summary.okCount)],
+    ['解なし', String(summary.noSolutionCount)],
+    ['入力エラー', String(summary.invalidCount)],
+    ['適用範囲外を含む', String(summary.outOfScopePresentCount)],
+    ['最大設計風圧 (N/m²)', summary.maxDesignPressure === null ? '—' : fmt(summary.maxDesignPressure, 0)],
+    ['最大見付面積 (m²)', summary.maxAreaM2 === null ? '—' : fmt(summary.maxAreaM2, 3)]
+  ];
+  items.forEach(function (pair) {
+    var box = document.createElement('div');
+    box.className = 'summary-item';
+    var k = document.createElement('div'); k.className = 'k'; k.textContent = pair[0];
+    var v = document.createElement('div'); v.className = 'v'; v.textContent = pair[1];
+    box.appendChild(k); box.appendChild(v);
+    grid.appendChild(box);
+  });
+  host.appendChild(grid);
+
+  // governing caseは定義を必ず併記する（「最も危険」という曖昧な表現を使わない）
+  if (summary.governingCaseId) {
+    var note = document.createElement('div');
+    note.style.fontSize = '11px';
+    note.style.color = 'var(--text3)';
+    note.style.marginTop = '10px';
+    note.textContent = summary.governingBasis === 'min_margin_ratio'
+      ? '支配ケース: ' + summary.governingCaseId +
+        '（定義: OKケースのうち「推奨構成の許容耐力 ÷ 設計風圧」が最小のもの）'
+      : '支配ケース: ' + summary.governingCaseId +
+        '（定義: OKケースが無いため、設計風圧が最大のもの）';
+    host.appendChild(note);
+  }
+
+  var groups = WorkspaceCore.groupByRecommended(results);
+  if (groups.length > 0) {
+    var title = document.createElement('div');
+    title.style.fontSize = '12px';
+    title.style.fontWeight = '600';
+    title.style.marginBottom = '6px';
+    title.textContent = '推奨構成ごとの件数';
+    groupHost.appendChild(title);
+    groups.forEach(function (group) {
+      var row = document.createElement('div');
+      row.className = 'group-row';
+      var k = document.createElement('span');
+      k.textContent = group.key === 'NO_SOLUTION' ? '解なし'
+        : group.key === 'INVALID' ? '入力エラー' : group.key;
+      var v = document.createElement('span');
+      v.textContent = group.count + ' 件';
+      row.appendChild(k); row.appendChild(v);
+      groupHost.appendChild(row);
+    });
+  }
+}
+
+var BATCH_TABLE_HEADERS = [
+  'ケースID', 'ラベル', '出所', 'W (mm)', 'H (mm)', '面積 (m²)',
+  '設計風圧 (N/m²)', 'ガラス種別', '推奨構成', '許容耐力 (N/m²)',
+  '余裕比', '余裕 (N/m²)', '状態', '操作'
+];
+
+function batchRender() {
+  var card = document.getElementById('batch-results-card');
+  var host = document.getElementById('batch-table');
+  host.textContent = '';
+  batchRenderSummary(batchResults);
+
+  if (batchResults.length === 0) { card.hidden = true; return; }
+  card.hidden = false;
+
+  var filter = document.getElementById('batch-filter').value;
+  var sortKey = document.getElementById('batch-sort').value;
+  var sortDir = document.getElementById('batch-sort-dir').value;
+
+  // sort / filter は evaluation result そのものを並べ替えない（§36）
+  var view = WorkspaceCore.sortResults(
+    WorkspaceCore.filterResults(batchResults, filter), sortKey, sortDir
+  );
+
+  var table = document.createElement('table');
+  table.className = 'batch-table';
+  var thead = document.createElement('thead');
+  var headRow = document.createElement('tr');
+  BATCH_TABLE_HEADERS.forEach(function (text) {
+    var th = document.createElement('th');
+    th.textContent = text;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  view.forEach(function (r) {
+    var tr = document.createElement('tr');
+    tr.appendChild(batchCell(tr, r.caseId));
+    var labelCell = batchCell(tr, r.label === null ? '—' : r.label, 'label-cell');
+    tr.appendChild(labelCell);
+    tr.appendChild(batchCell(tr, r.sourceKind));
+    tr.appendChild(batchNumberCell(tr, r.widthMm, 0));
+    tr.appendChild(batchNumberCell(tr, r.heightMm, 0));
+    tr.appendChild(batchNumberCell(tr, r.areaM2, 3));
+    tr.appendChild(batchNumberCell(tr, r.designPressure, 0));
+    tr.appendChild(batchCell(tr, r.glassType));
+    tr.appendChild(batchCell(tr, r.recommendedLabel));
+    tr.appendChild(batchNumberCell(tr, r.allowablePressure, 0));
+    tr.appendChild(batchNumberCell(tr, r.marginRatio, 3));
+    tr.appendChild(batchNumberCell(tr, r.marginPressure, 0));
+
+    var statusTd = document.createElement('td');
+    var statusSpan = document.createElement('span');
+    statusSpan.className = BATCH_STATUS_CLASS[r.status] || '';
+    statusSpan.textContent = BATCH_STATUS_TEXT[r.status] || r.status;
+    statusTd.appendChild(statusSpan);
+    if (r.outOfScopePresent) {
+      var flag = document.createElement('div');
+      flag.style.fontSize = '10px';
+      flag.style.color = 'var(--warn)';
+      flag.textContent = '適用範囲外候補あり';
+      statusTd.appendChild(flag);
+    }
+    if (r.error) {
+      var reason = document.createElement('div');
+      reason.style.fontSize = '10px';
+      reason.style.color = 'var(--text3)';
+      // どこで落ちたかを特定できるようにする（§37）。
+      // 生のTSV行・生のJSONは載せず、位置と理由だけを出す。
+      var where = [];
+      if (typeof r.lineNumber === 'number') where.push(r.lineNumber + '行目');
+      if (typeof r.index === 'number') where.push('case[' + r.index + ']');
+      // reason自体が列名で始まる場合は前置しない
+      // （「4行目 / width_mm: width_mm: ...」のような二重表示を避ける）
+      if (r.field && r.error.indexOf(r.field + ':') !== 0) where.push(r.field);
+      // 例外メッセージもtextContentで入れる（HTMLとして解釈させない）
+      reason.textContent = (where.length > 0 ? where.join(' / ') + ': ' : '') + r.error;
+      statusTd.appendChild(reason);
+    }
+    tr.appendChild(statusTd);
+
+    var actionTd = document.createElement('td');
+    if (r.status === 'INVALID' && r.source) {
+      // import診断行はWorkspaceのcaseではないので、複製も削除もできない。
+      // 操作ボタンを出すと、存在しないcaseIdに対する操作になる。
+      var note = document.createElement('span');
+      note.style.fontSize = '10px';
+      note.style.color = 'var(--text3)';
+      note.textContent = r.source === 'tsv' ? '取込エラー（TSV）' : '取込エラー（JSON）';
+      actionTd.appendChild(note);
+      tr.appendChild(actionTd);
+      tbody.appendChild(tr);
+      return;
+    }
+    var dupBtn = document.createElement('button');
+    dupBtn.type = 'button';
+    dupBtn.className = 'btn-secondary';
+    dupBtn.textContent = '複製';
+    dupBtn.addEventListener('click', function () { batchDuplicate(r.caseId); });
+    var delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn-secondary';
+    delBtn.textContent = '削除';
+    delBtn.addEventListener('click', function () { batchRemove(r.caseId); });
+    actionTd.appendChild(dupBtn);
+    actionTd.appendChild(delBtn);
+    tr.appendChild(actionTd);
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  host.appendChild(table);
+}
 
 </script>
 </body>

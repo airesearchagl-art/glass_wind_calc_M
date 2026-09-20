@@ -159,6 +159,18 @@
     return STRENGTH_TYPES[pane.strengthType].label + t;
   }
 
+  /**
+   * ガラス見付寸法(mm) から見付面積(m^2) を求める。
+   *
+   * single-case UIとBatch layerの**両方**がここを呼ぶ。
+   * 同じ式を2か所に書くと、片方だけ直したときに静かにズレる。
+   * Batch層が独自の計算式を持たないという契約(Phase 2G AC-02)は、
+   * 「呼ぶ関数が同じ」ことで保つ。
+   */
+  function paneAreaM2(widthMm, heightMm) {
+    return (widthMm * heightMm) / 1000000;
+  }
+
   /* ============================================================
      候補生成
   ============================================================ */
@@ -263,6 +275,7 @@
     calcK2_IGU: calcK2_IGU,
     calcP_notification: calcP_notification,
     calcP_single: calcP_single,
+    paneAreaM2: paneAreaM2,
     calcP_IGU: calcP_IGU,
     getK1: getK1,
     paneLabel: paneLabel,
