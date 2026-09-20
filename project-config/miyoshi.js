@@ -186,6 +186,7 @@
   var assertEvidenceConsistency = ProjectEvidence.assertEvidenceConsistency;
   var verifiedValue = ProjectEvidence.verifiedValue;
   var assertPromotionGate = ProjectEvidence.assertPromotionGate;
+  var deepFreeze = ProjectEvidence.deepFreeze;
 
   // 案件識別情報そのものは社内基本設計資料で確認済み（verificationStatus:
   // 'verified'）。ただし本リポジトリは public であるため、施主名・建物名称・
@@ -402,26 +403,32 @@
   config.validateAllEvidence = function () {
     var violations = [];
 
-    function check(label, verificationStatus, evidence) {
+    // F11: ここは**configに実際に載っている値**を検査する唯一の経路である。
+    // 以前は assertEvidenceConsistency（privateReferenceAvailableを見ない弱い方）
+    // を使っていたため、構築時にgateを通した値と、configのliteralに書かれた値が
+    // 食い違っていても検出できなかった（identityは特にliteralで組まれている）。
+    // 強化後の assertPromotionGate を使い、構築経路ではなく**結果**を検査する。
+    // verified以外のstatusでは挙動は変わらない（gateはconsistency checkに委譲する）。
+    function check(label, entry) {
       try {
-        assertEvidenceConsistency(verificationStatus, evidence, label);
+        assertPromotionGate(entry.verificationStatus, entry.evidence, label, {
+          sourceReference: entry.sourceReference || null
+        });
       } catch (e) {
         violations.push({ label: label, message: e.message });
       }
     }
 
-    check('identity', config.identity.verificationStatus, config.identity.evidence);
-    check('dimensions.defaultW', config.dimensions.defaultW.verificationStatus, config.dimensions.defaultW.evidence);
-    check('dimensions.defaultH', config.dimensions.defaultH.verificationStatus, config.dimensions.defaultH.evidence);
-    check('wind.V0', config.wind.V0.verificationStatus, config.wind.V0.evidence);
-    check('wind.roughnessCategory', config.wind.roughnessCategory.verificationStatus, config.wind.roughnessCategory.evidence);
+    check('identity', config.identity);
+    check('dimensions.defaultW', config.dimensions.defaultW);
+    check('dimensions.defaultH', config.dimensions.defaultH);
+    check('wind.V0', config.wind.V0);
+    check('wind.roughnessCategory', config.wind.roughnessCategory);
     Object.keys(config.wind.positivePressureByFloor).forEach(function (f) {
-      var entry = config.wind.positivePressureByFloor[f];
-      check('wind.positivePressureByFloor.' + f, entry.verificationStatus, entry.evidence);
+      check('wind.positivePressureByFloor.' + f, config.wind.positivePressureByFloor[f]);
     });
     Object.keys(config.wind.negativePressureByZone).forEach(function (z) {
-      var entry = config.wind.negativePressureByZone[z];
-      check('wind.negativePressureByZone.' + z, entry.verificationStatus, entry.evidence);
+      check('wind.negativePressureByZone.' + z, config.wind.negativePressureByZone[z]);
     });
 
     return violations;
@@ -447,6 +454,14 @@
   // verified caseの妥当性を検証する。違反があれば例外を投げる（true以外は
   // 返さない）。呼び出し側は try/catch するか、事前に妥当性が既知の
   // ケースにのみ使うこと。
+  // F9: caseIdはUI・export package・PR本文に**そのまま出る公開identifier**である。
+  // D-012が factKey に allowlist を課したのと同じ理由（key自体が公開情報になる）が
+  // ここにも等しく当てはまる。図面番号やファイル名をそのままcaseIdに持ち込む経路を
+  // 構造的に塞ぐため、公開して差し支えない短い記号IDだけを許す（fail closed）。
+  var CASE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
+  var FILENAME_LIKE_CASE_ID_PATTERN =
+    /[._-](pdf|dwg|dxf|xls[xm]?|doc[xm]?|ppt[xm]?|jpe?g|png|zip|csv|rvt|skp)$/i;
+
   function validateVerifiedCase(caseObj) {
     if (!caseObj || typeof caseObj !== 'object') {
       throw new Error('verified case must be an object');
@@ -460,6 +475,20 @@
     if (typeof caseObj.caseId !== 'string' || !caseObj.caseId) {
       throw new Error('verified case caseId must be a non-empty string');
     }
+    if (!CASE_ID_PATTERN.test(caseObj.caseId)) {
+      throw new Error(
+        'verified case caseId must be a public-safe short identifier ' +
+          '(letter, then letters/digits/_/-, max 48 chars): ' + JSON.stringify(caseObj.caseId)
+      );
+    }
+    if (FILENAME_LIKE_CASE_ID_PATTERN.test(caseObj.caseId)) {
+      throw new Error(
+        'verified case caseId must not look like a document/drawing filename: ' +
+          JSON.stringify(caseObj.caseId)
+      );
+    }
+    // URL・パス・長い不透明トークンも共通ガードで塞ぐ（defense in depth）
+    assertPublicSafeEvidenceText(caseObj.caseId, 'verified case caseId');
     if (VERIFIED_CASE_VALID_FLOORS.indexOf(caseObj.floor) === -1) {
       throw new Error('verified case floor must be one of ' + VERIFIED_CASE_VALID_FLOORS.join(', '));
     }
@@ -520,6 +549,32 @@
   config.isValidCheckedAt = isValidCheckedAt;
   config.validateVerifiedCase = validateVerifiedCase;
   config.assertPublicSafeEvidenceText = assertPublicSafeEvidenceText;
+
+  // F3: Ledger entryは深くfreezeされているのに、UIが実際に読む**一次の**
+  // trusted objectはmutableのままだった。つまり `config.wind.V0.value = 99` や
+  // `config.dimensions.mode = 'verified_project_case'`、
+  // `config.verifiedCases.push(...)`（validateVerifiedCaseを一切通らない）が
+  // 通ってしまい、「検証後改変の封鎖」は半分しか真でなかった。
+  //
+  // identity / dimensions / wind / verifiedCases を深くfreezeして、
+  // 検証を通った値の事後改変とcaseの裏口登録を構造的に封じる。
+  // config自体はfreezeしない（上のhelper付与と、将来のaccessor追加のため）。
+  // F11: identityは verifiedValue() を経由せずliteralで組まれているため、
+  // 「gateを通したevidence変数」と「literalが実際に載せたevidence」が
+  // 別物になっても構築時のgateでは気づけない（規約で繋がっているだけだった）。
+  // configに載った**結果**をここで検査し、食い違えばmodule loadごと失敗させる。
+  var identityViolations = config.validateAllEvidence();
+  if (identityViolations.length > 0) {
+    throw new Error(
+      'project-config evidence contract violated at module load: ' +
+        identityViolations.map(function (v) { return v.label + ': ' + v.message; }).join(' | ')
+    );
+  }
+
+  deepFreeze(config.identity);
+  deepFreeze(config.dimensions);
+  deepFreeze(config.wind);
+  deepFreeze(config.verifiedCases);
 
   return config;
 });

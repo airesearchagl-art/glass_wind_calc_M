@@ -220,13 +220,16 @@
     var sourceReference = canonicalizeSourceReference(
       (options || {}).sourceReference, label
     );
-    return {
+    // F3: gateを通った後に evidence.level や verificationStatus を
+    // 書き換えられると、gateが「構築時のみのチェック」に退化する。
+    // Ledger entryと同じく深くfreezeして、検証後の改変を構造的に封じる。
+    return deepFreeze({
       value: value,
       unit: unit,
       verificationStatus: verificationStatus,
       evidence: evidence,
       sourceReference: sourceReference
-    };
+    });
   }
 
 
@@ -253,13 +256,31 @@
    * （説明文に参照先を書かせないため）。一方こちらは公的な公開URLを
    * 受け入れる場所なので、要件が正反対である。混用してはならない。
    */
+  //
+  // 注意: ここに並ぶhost判定はすべて**末尾ドットを除去し終えたhost**に対して
+  // 適用すること。`drive.google.com.` はDNS上まったく同じホストを指すが、
+  // 正規化前は `$` アンカーのこのdenylistにも、後段の「ドットを含むか」による
+  // 完全修飾ホスト名判定にも一致せず、private provider URLと単一ラベルの
+  // intranet名の**両方**を素通りさせる。
   var PRIVATE_PROVIDER_HOST_PATTERN =
-    /(^|\.)(drive\.google\.com|docs\.google\.com|notion\.so|notion\.com|dropbox\.com)$|sharepoint/i;
+    /(^|\.)(drive\.google\.com|docs\.google\.com|drive\.usercontent\.google\.com|storage\.cloud\.google\.com|notion\.so|notion\.com|dropbox\.com|onedrive\.live\.com|box\.com|1drv\.ms)$|sharepoint/i;
+
+  // ICANN予約TLD・mDNS・慣習的な私設TLD。公開一次資料がこの空間に存在することはない。
+  var PRIVATE_USE_TLD_PATTERN =
+    /\.(local|internal|intranet|corp|home|lan|private|test|localhost|example|invalid)$/i;
+
+  // ワイルドカードDNS。任意のIPアドレスをホスト名に埋め込めるため、
+  // これを許すとIPリテラル判定と私設アドレス判定の両方を迂回できる。
+  var WILDCARD_DNS_HOST_PATTERN =
+    /(^|\.)(nip\.io|sslip\.io|xip\.io|traefik\.me|localtest\.me)$/i;
 
   // ループバック・私設ネットワーク・リンクローカルのリテラル表記
   var LOOPBACK_HOST_PATTERN = /^(localhost|127(\.\d+){3}|\[?::1\]?|0\.0\.0\.0)$/i;
+  // 10/8・192.168/16・172.16-31/12・169.254/16 に加え、
+  // 100.64/10（CGNAT / RFC 6598）と 0/8（"this network"）も塞ぐ。
+  // 注: このgeneric moduleに案件固有値を持ち込まないため、RFC番号は書かない。
   var PRIVATE_IPV4_PATTERN =
-    /^(10(\.\d+){3}|192\.168(\.\d+){2}|172\.(1[6-9]|2\d|3[01])(\.\d+){2}|169\.254(\.\d+){2})$/;
+    /^(10(\.\d+){3}|192\.168(\.\d+){2}|172\.(1[6-9]|2\d|3[01])(\.\d+){2}|169\.254(\.\d+){2}|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])(\.\d+){2}|0(\.\d+){3})$/;
   // fc00::/7（ユニークローカル: fc00–fdff）と fe80::/10（リンクローカル: fe80–febf）、
   // および未指定アドレス `::`。
   //
@@ -274,7 +295,14 @@
   var IPV6_LITERAL_PATTERN = /^\[.*\]$|^\[?[0-9a-f]{0,4}:[0-9a-f:.]*\]?$/i;
 
   // トークン様の文字列（これ単体をprovenanceの実体にしない）
-  var CREDENTIAL_LIKE_PATTERN = /(^|[?&#/=])(token|apikey|api_key|access_token|secret|signature|sig|key)=/i;
+  var CREDENTIAL_LIKE_PATTERN =
+    /(^|[?&#/=])(token|apikey|api_key|access_token|refresh_token|id_token|secret|signature|sig|key|password|passwd|pwd|auth|authorization|session_token|sessiontoken|session_id|sessionid|credential)=/i;
+
+  // 上のregexは生のURL文字列に当てるため、percent-encodeされたparam名
+  // （`?%74oken=...`）を取りこぼす。searchParamsのkeyはdecode済みなので、
+  // そちらにはこのname単位のregexを当てる。
+  var CREDENTIAL_LIKE_PARAM_NAME =
+    /^(token|apikey|api[-_]?key|access[-_]?token|refresh[-_]?token|id[-_]?token|secret|signature|sig|key|password|passwd|pwd|auth|authorization|session[-_]?token|session[-_]?id|credential)$/i;
 
   /**
    * public primary source referenceのURLを検証する。
@@ -305,7 +333,10 @@
       throw new Error('public source reference must not embed credentials' + where);
     }
 
-    var host = parsed.hostname;
+    // ルート末尾ドットを正規化してから**すべての**host判定を行う（F1）。
+    // `drive.google.com.` / `intranet.` は同一ホストを指すのに、
+    // 正規化しないとdenylistにも完全修飾判定にも一致しない。
+    var host = parsed.hostname.replace(/\.+$/, '').toLowerCase();
     if (!host) {
       throw new Error('public source reference must have a hostname' + where);
     }
@@ -337,11 +368,38 @@
           ' (host: ' + JSON.stringify(host) + ')'
       );
     }
+    if (PRIVATE_USE_TLD_PATTERN.test(host)) {
+      throw new Error(
+        'public source reference must not use a private-use/reserved TLD' + where +
+          ' (host: ' + JSON.stringify(host) + ')'
+      );
+    }
+    if (WILDCARD_DNS_HOST_PATTERN.test(host)) {
+      throw new Error(
+        'public source reference must not use a wildcard-DNS host' + where +
+          ' (host: ' + JSON.stringify(host) + ')'
+      );
+    }
     if (CREDENTIAL_LIKE_PATTERN.test(url)) {
       throw new Error(
         'public source reference must not carry a credential/token as its provenance' + where
       );
     }
+    // percent-encodeされたparam名を塞ぐ（searchParamsのkeyはdecode済み）
+    var paramNames = [];
+    parsed.searchParams.forEach(function (_value, name) {
+      paramNames.push(name);
+    });
+    for (var pi = 0; pi < paramNames.length; pi++) {
+      if (CREDENTIAL_LIKE_PARAM_NAME.test(paramNames[pi])) {
+        throw new Error(
+          'public source reference must not carry a credential/token as its provenance' + where
+        );
+      }
+    }
+    // 正規化したhostで保存する。同じホストの別表記が別referenceとして
+    // 残らないようにするため（末尾ドット等）。
+    parsed.hostname = host;
     return parsed.toString();
   }
 
@@ -490,11 +548,13 @@
     }
   }
 
+  // F4: これらはcontractの定義そのものなので、**live mutable**で公開すると
+  // 呼び出し側から緩められる（例: EVIDENCE_LEVELSへの追加）。freezeして返す。
   return {
-    EVIDENCE_LEVELS: EVIDENCE_LEVELS,
-    VERIFICATION_STATUSES: VERIFICATION_STATUSES,
+    EVIDENCE_LEVELS: Object.freeze(EVIDENCE_LEVELS),
+    VERIFICATION_STATUSES: Object.freeze(VERIFICATION_STATUSES),
     CHECKED_AT_PATTERN: CHECKED_AT_PATTERN,
-    PUBLIC_UNSAFE_TEXT_PATTERNS: PUBLIC_UNSAFE_TEXT_PATTERNS,
+    PUBLIC_UNSAFE_TEXT_PATTERNS: Object.freeze(PUBLIC_UNSAFE_TEXT_PATTERNS),
     isValidCheckedAt: isValidCheckedAt,
     assertPublicSafeEvidenceText: assertPublicSafeEvidenceText,
     makeEvidence: makeEvidence,

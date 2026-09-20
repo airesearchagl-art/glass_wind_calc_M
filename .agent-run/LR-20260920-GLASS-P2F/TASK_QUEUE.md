@@ -116,10 +116,31 @@ W7-5 Completion Report + Human Evidence Request Matrix             次
 | AC-19 | PIP v1/v2 compatibility | PASS |
 | AC-20 | Documentation sync | PASS |
 
+## Wave 8 — Independent Verifier findings repair
+
+| ID | 指摘 | 対応 |
+|---|---|---|
+| F1 | 末尾ルートドットでprivate provider denylist / 完全修飾判定を迂回（HIGH） | FIXED（正規化後に判定） |
+| F2 | createEntryのTOCTOU（gateと保存で別の値） | FIXED（snapshotを確定してからgate） |
+| F3 | trusted configが未freezeで検証後改変が可能 | FIXED（deepFreeze） |
+| F4 | contract定義表をlive mutableで公開 | FIXED（freeze） |
+| F5 | reconcileFactが自己申告statusを信用 | FIXED（gate再実行） |
+| F6 | case-level gate再実行が未テスト（mutation survivor） | FIXED（test追加。MF6でkill確認） |
+| F7 | Run Artifactの誇張・陳腐化・変更ファイル過小記載 | FIXED（RUN_STATE.md） |
+| F8 | 私設TLD / CGNAT / wildcard DNS / 追加provider / cred param | FIXED |
+| F9 | caseIdにpublic-safe checkなし | FIXED |
+| F10 | Evidence panelが例外を黙殺 | FIXED |
+| F11 | identity literalとgateの結び付きが規約のみ | FIXED（結果を検査） |
+| F12 | critical fact空時に空虚な真 | FIXED |
+
+修復mutation 19件すべてkill。テスト 256 → 270 pass / 0 fail。
+
 ## Next Action
 
 ```text
-Draft PR → Vercel Preview exact-head → Independent Verifier結果反映 → Completion Report
+Claude側: なし（Wave 8で完了）
+Human Gate: PR #7 の Ready-for-review / merge / Production 認可
+           private Evidence供給（EVIDENCE.md のEvidence Request Matrix）
 ```
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管）。

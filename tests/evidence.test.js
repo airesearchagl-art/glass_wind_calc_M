@@ -274,3 +274,100 @@ test('公開URLはreferenceとして可、publicDescriptionには不可（役割
     /must not contain/
   );
 });
+
+/* ============================================================
+   独立検証(Phase 2F)の指摘に対する回帰テスト
+   F1 / F3 / F4 / F8 — public source reference と contract の不変性
+============================================================ */
+
+test('F1: ルート末尾ドットでprivate provider denylistと完全修飾判定を迂回できない', () => {
+  // `drive.google.com.` はDNS上まったく同じホストを指すが、正規化前は
+  // `$`アンカーのdenylistにも「ドットを含むか」判定にも一致しなかった。
+  // その結果、実在のDrive URLとイントラネット名の**両方**が
+  // 「検証済みpublic primary source reference」として保存されていた。
+  const dotted = [
+    'https://drive.google.com./file/d/FILE-ID/view',
+    'https://docs.google.com./document/d/ID',
+    'https://notion.so./page',
+    'https://www.dropbox.com./s/x',
+    'https://contoso.sharepoint.com./x',
+    'https://DRIVE.GOOGLE.COM./a',
+    'https://drive.google.com../a'
+  ];
+  for (const url of dotted) {
+    assert.throws(() => Evidence.assertPublicPrimarySourceReference(url, 'F1'),
+      /known private-document provider/, url + ' はprivate providerとして拒否されるべき');
+  }
+  // 末尾ドット付き単一ラベル（`intranet.`）も完全修飾ホスト名ではない
+  for (const url of ['https://intranet./docs/x.pdf', 'https://fileserver./a']) {
+    assert.throws(() => Evidence.assertPublicPrimarySourceReference(url, 'F1'),
+      /public fully-qualified hostname/, url + ' は単一ラベルとして拒否されるべき');
+  }
+  // Ledger / verifiedValue の入口からも到達できないこと（gate経由の確認）
+  assert.throws(() => Evidence.makePublicPrimarySourceReference(
+    'https://drive.google.com./file/d/FILE-ID/view', 'F1'), /private-document provider/);
+
+  // 正規表記の公的資料は通り、保存形は末尾ドットを落とした正規形になる
+  const canonical = Evidence.assertPublicPrimarySourceReference(
+    'https://www.mlit.go.jp./jutakukentiku/build/content/H12-1454.pdf', 'F1');
+  assert.equal(canonical, 'https://www.mlit.go.jp/jutakukentiku/build/content/H12-1454.pdf');
+});
+
+test('F8: 私設TLD・CGNAT・ワイルドカードDNS・追加provider・percent-encoded credentialを拒否する', () => {
+  const rejected = [
+    ['https://printer.local/', /private-use\/reserved TLD/],
+    ['https://wiki.internal/', /private-use\/reserved TLD/],
+    ['https://fileserver.corp/', /private-use\/reserved TLD/],
+    ['https://nas.home/', /private-use\/reserved TLD/],
+    ['https://100.64.1.1/', /private-network address/],
+    ['https://0.1.2.3/', /private-network address/],
+    ['https://10.0.0.5.nip.io/', /wildcard-DNS host/],
+    ['https://drive.usercontent.google.com/download?id=x', /private-document provider/],
+    ['https://storage.cloud.google.com/b/o', /private-document provider/],
+    ['https://onedrive.live.com/x', /private-document provider/],
+    ['https://box.com/s/x', /private-document provider/],
+    ['https://example.co.jp/a?password=abc', /credential\/token/],
+    ['https://example.co.jp/a?auth=abc', /credential\/token/],
+    ['https://example.co.jp/a?sessionToken=abc', /credential\/token/],
+    // percent-encodeされたparam名（生URLのregexだけでは取りこぼす）
+    ['https://example.co.jp/a?%74oken=abc', /credential\/token/],
+    ['https://example.co.jp/a?%61pi_key=abc', /credential\/token/]
+  ];
+  for (const [url, re] of rejected) {
+    assert.throws(() => Evidence.assertPublicPrimarySourceReference(url, 'F8'), re, url);
+  }
+  // 公開資料側を巻き込んでいないこと（false positiveの確認）
+  for (const url of [
+    'https://www.mlit.go.jp/jutakukentiku/build/content/H12-1454.pdf',
+    'https://elaws.e-gov.go.jp/document?lawid=412M50000800001',
+    'https://172.32.0.1/x'   // 172.32 は私設レンジ外＝公開アドレス
+  ]) {
+    assert.doesNotThrow(() => Evidence.assertPublicPrimarySourceReference(url, 'F8'), url);
+  }
+});
+
+test('F3: verifiedValue() の戻り値はgate通過後に改変できない', () => {
+  const v = Evidence.verifiedValue(34, 'm/s', 'verified',
+    Evidence.makeEvidence('primary', '2026-09-20', '一次資料で直接確認', true), 'F3');
+  assert.equal(Object.isFrozen(v), true);
+  assert.equal(Object.isFrozen(v.evidence), true);
+  assert.throws(() => { v.value = 99; }, TypeError);
+  assert.throws(() => { v.verificationStatus = 'unverified'; }, TypeError);
+  assert.throws(() => { v.evidence.level = 'none'; }, TypeError);
+  assert.throws(() => { v.evidence.privateReferenceAvailable = false; }, TypeError);
+  assert.equal(v.value, 34);
+  assert.equal(v.evidence.level, 'primary');
+});
+
+test('F4: contract定義はlive mutableで公開されない', () => {
+  assert.equal(Object.isFrozen(Evidence.EVIDENCE_LEVELS), true);
+  assert.equal(Object.isFrozen(Evidence.VERIFICATION_STATUSES), true);
+  assert.equal(Object.isFrozen(Evidence.PUBLIC_UNSAFE_TEXT_PATTERNS), true);
+  // 緩めようとしても契約は変わらない
+  assert.throws(() => Evidence.EVIDENCE_LEVELS.push('assumed'), TypeError);
+  assert.equal(Evidence.EVIDENCE_LEVELS.includes('assumed'), false);
+  assert.throws(() => Evidence.PUBLIC_UNSAFE_TEXT_PATTERNS.length = 0, TypeError);
+  assert.equal(Evidence.PUBLIC_UNSAFE_TEXT_PATTERNS.length > 0, true);
+  // 契約が実際に効いていること
+  assert.throws(() => Evidence.makeEvidence('assumed', '2026-09-20', 'x', true));
+});

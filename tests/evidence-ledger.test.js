@@ -643,3 +643,159 @@ test('§15-N: publicDescriptionはURL/パス/private providerを受け付けな�
       /must not contain private URLs\/paths\/identifiers/, JSON.stringify(bad));
   }
 });
+
+/* ============================================================
+   独立検証(Phase 2F)の指摘に対する回帰テスト
+   F2 / F4 / F5 / F6 / F12
+============================================================ */
+
+test('F2: accessorを仕込んだevidenceでgateと保存内容を食い違わせられない（TOCTOU）', () => {
+  // gateと保存用snapshotが呼び出し側のfieldを2回読むと、
+  // 「gateには primary、snapshotには none」を返すobjectで
+  // **gateを通らないevidenceを持つverified entry**が実際に作れてしまう。
+  let levelReads = 0;
+  const trapLevel = {
+    checkedAt: '2026-09-20',
+    publicDescription: '一次資料で直接確認',
+    privateReferenceAvailable: true,
+    get level() { levelReads += 1; return levelReads <= 2 ? 'primary' : 'none'; }
+  };
+  const entry = Ledger.createEntry({
+    factKey: 'positive_pressure', value: 1297, unit: 'N/m2',
+    verificationStatus: 'verified', evidence: trapLevel
+  });
+  // 保存された内容そのものがgateを通ること（＝食い違いが残っていないこと）
+  assert.equal(entry.evidence.level, 'primary');
+  assert.doesNotThrow(() => Evidence.assertPromotionGate(
+    'verified', entry.evidence, 'F2', { sourceReference: entry.sourceReference }));
+  assert.equal(levelReads, 1, 'gateと保存で同じ値を使うため、levelは一度だけ読まれる');
+
+  // privateReferenceAvailable側の同じ仕掛けも同様
+  let privReads = 0;
+  const trapPriv = {
+    level: 'primary',
+    checkedAt: '2026-09-20',
+    publicDescription: '一次資料で直接確認',
+    get privateReferenceAvailable() { privReads += 1; return privReads <= 1; }
+  };
+  const entry2 = Ledger.createEntry({
+    factKey: 'pane_width_mm', value: 1250, unit: 'mm',
+    verificationStatus: 'verified', evidence: trapPriv
+  });
+  assert.equal(entry2.evidence.privateReferenceAvailable, true);
+  assert.doesNotThrow(() => Evidence.assertPromotionGate(
+    'verified', entry2.evidence, 'F2', { sourceReference: entry2.sourceReference }));
+  assert.equal(privReads, 1);
+
+  // evidenceがobjectでない場合はgate到達前にfail closed
+  assert.throws(() => Ledger.createEntry({
+    factKey: 'pane_width_mm', value: 1250, unit: 'mm',
+    verificationStatus: 'verified', evidence: null
+  }), /evidence must be an object/);
+});
+
+test('F4: allowlistとcritical fact表はlive mutableで公開されない', () => {
+  assert.equal(Object.isFrozen(Ledger.KNOWN_FACT_KEYS), true);
+  assert.equal(Object.isFrozen(Ledger.CASE_TYPE_CRITICAL_FACTS), true);
+  assert.equal(Object.isFrozen(Ledger.CASE_TYPE_CRITICAL_FACTS.glass_pane), true);
+  assert.equal(Object.isFrozen(Ledger.CALCULATION_PROVENANCE_EXTRA_FACTS), true);
+  assert.equal(Object.isFrozen(Ledger.RECONCILIATION_STATUSES), true);
+
+  // D-012のfail closedを後から緩められない
+  assert.throws(() => Ledger.KNOWN_FACT_KEYS.push('A_102_pdf'), TypeError);
+  assert.throws(() => Ledger.createEntry({
+    factKey: 'A_102_pdf', value: 1, unit: null,
+    verificationStatus: 'unverified', evidence: none()
+  }), /unknown factKey|factKey/);
+
+  // critical factを空にしてcase promotionを空虚に真にできない
+  assert.throws(() => { Ledger.CASE_TYPE_CRITICAL_FACTS.glass_pane.length = 0; }, TypeError);
+  assert.equal(Ledger.CASE_TYPE_CRITICAL_FACTS.glass_pane.length, 4);
+});
+
+test('F5: reconcileFactは自己申告のverificationStatusを信用せずgateを再実行する', () => {
+  // gateを通っていないduck-typedなobjectは、数値が完全一致してもMATCHにしない。
+  const forged = [
+    { verificationStatus: 'verified', value: 1525 },                       // evidenceなし
+    { verificationStatus: 'verified', value: 1250, evidence: null },       // evidence=null
+    { verificationStatus: 'verified', value: 1297, evidence: indirect() }, // level不足
+    { verificationStatus: 'verified', value: 918, evidence: none() },
+    // primaryだがprivate参照もpublic referenceも無い＝gate不成立
+    { verificationStatus: 'verified', value: 34, evidence: primary(false), sourceReference: null }
+  ];
+  for (const entry of forged) {
+    const r = Ledger.reconcileFact(entry.value, entry);
+    assert.equal(r.status, 'INSUFFICIENT_EVIDENCE',
+      'gateを通らないentryは数値一致でもMATCHにならない: ' + JSON.stringify(entry.evidence));
+    assert.match(r.note, /promotion gate|検証状況/);
+  }
+  // 正規に構築されたentryは従来どおりMATCH/MISMATCHを返す
+  const real = Ledger.createEntry(verifiedEntry('positive_pressure', 1297, 'N/m2'));
+  assert.equal(Ledger.reconcileFact(1297, real).status, 'MATCH');
+  assert.equal(Ledger.reconcileFact(1300, real).status, 'MISMATCH');
+});
+
+test('F6: case-levelのgate再実行が実際に効いている（防御の二層目）', () => {
+  // createEntry側を通り抜けたverified entryがあったとしても、
+  // case promotionは独立にgateを再実行して拒否しなければならない。
+  // 公開APIからはこの状態を作れないため、stub ledgerで直接注入する。
+  const good = {};
+  for (const key of Ledger.CASE_TYPE_CRITICAL_FACTS.glass_pane) {
+    good[key] = Ledger.createEntry(verifiedEntry(key, 1, null));
+  }
+  const okLedger = { find: (k) => good[k] || null };
+  assert.equal(Ledger.evaluateCasePromotion(okLedger, 'glass_pane').verified, true);
+
+  // verificationStatusは 'verified' だがevidenceがgateを通らないentryを1件混ぜる
+  const forgedVariants = [
+    { level: 'none', checkedAt: null, publicDescription: '未確認', privateReferenceAvailable: false },
+    { level: 'indirect', checkedAt: '2026-09-20', publicDescription: '間接', privateReferenceAvailable: true },
+    { level: 'primary', checkedAt: null, publicDescription: '一次', privateReferenceAvailable: true },
+    { level: 'primary', checkedAt: '2026-09-20', publicDescription: '一次', privateReferenceAvailable: false }
+  ];
+  for (const evidence of forgedVariants) {
+    const forged = Object.freeze({
+      factKey: 'negative_pressure', value: 918, unit: 'N/m2',
+      verificationStatus: 'verified', evidence: Object.freeze(evidence), sourceReference: null
+    });
+    const ledger = { find: (k) => (k === 'negative_pressure' ? forged : good[k] || null) };
+    const result = Ledger.evaluateCasePromotion(ledger, 'glass_pane');
+    assert.equal(result.verified, false, JSON.stringify(evidence) + ' でcaseがverifiedになってはならない');
+    assert.deepEqual(result.missing, ['negative_pressure']);
+    assert.match(result.reasons.join(' | '),
+      /negative_pressure: (promotion gate: )?verificationStatus "verified" requires/);
+    assert.throws(() => Ledger.assertCaseCanBeVerified(ledger, 'glass_pane'),
+      /case cannot be promoted to verified/);
+  }
+});
+
+test('F12: critical factが1件も無いcase typeはverifiedを名乗れない（空虚な真の禁止）', () => {
+  // 現行の表では到達不能だが、防御として成立していることを
+  // 表を空にしたコピーで実際に通して確認する。
+  const src = fs.readFileSync(path.join(__dirname, '..', 'project-config', 'evidence-ledger.js'), 'utf8');
+  const marker = "glass_pane: [";
+  assert.equal(src.split(marker).length - 1, 1, 'glass_pane定義が一意に見つかるはず');
+  const emptied = src.replace(/glass_pane: \[[^\]]*\]/, 'glass_pane: []');
+  assert.match(emptied, /glass_pane: \[\]/);
+
+  const os = require('node:os');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ledger-vacuous-test-'));
+  try {
+    fs.writeFileSync(path.join(tmpDir, 'evidence.js'),
+      fs.readFileSync(path.join(__dirname, '..', 'project-config', 'evidence.js'), 'utf8'));
+    const tmpFile = path.join(tmpDir, 'evidence-ledger.js');
+    fs.writeFileSync(tmpFile, emptied);
+    delete require.cache[require.resolve(tmpFile)];
+    const Weakened = require(tmpFile);
+    assert.deepEqual(Weakened.CASE_TYPE_CRITICAL_FACTS.glass_pane, []);
+    const result = Weakened.evaluateCasePromotion({ find: () => null }, 'glass_pane');
+    assert.equal(result.verified, false, 'critical factが空でもverifiedにしてはならない');
+    assert.match(result.reasons.join(' | '), /no critical facts/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+  // 現行の表は空ではない（到達不能であることの固定）
+  for (const key of Object.keys(Ledger.CASE_TYPE_CRITICAL_FACTS)) {
+    assert.equal(Ledger.CASE_TYPE_CRITICAL_FACTS[key].length > 0, true, key);
+  }
+});

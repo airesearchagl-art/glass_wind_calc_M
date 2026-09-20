@@ -9,7 +9,7 @@
 - Base SHA: a185b4675cac03d501ea6805b449437c3fbbb0fd
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY` — `git rev-parse HEAD` またはPRの現在headで解決する（自己参照回避contract）
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`（Wave 7 convergence commitで確定）
-- Current wave: Wave 7 — README / Run Artifact convergence / Draft PR
+- Current wave: Wave 8 — Independent verifier findings repair（Wave 7まで完了）
 - Task Packet ID: LRP-20260920-GLASS-P2F
 - Task Packet revision: 1
 - Task Packet snapshot path: .agent-run/LR-20260920-GLASS-P2F/TASK_PACKET_SNAPSHOT.md
@@ -31,7 +31,7 @@ Project Evidence Ledger + Verified Project Case のgeneric boundaryを導入す�
 - [x] AC-03 — **PASS**（evidence-ledger.js）
 - [x] AC-04 — **PASS**（gateをtrusted経路へ接続。bypass mutationはすべてkill）
 - [x] AC-05 — **PASS**（field verified ≠ case verified）
-- [ ] AC-06 Verified Project Case validatorが成立
+- [x] AC-06 — **PASS**（`validateVerifiedCase()`。F9修復後はcaseIdにもpublic-safe boundaryを適用）
 - [x] AC-07 — **PASS**（sample_default / unverified のまま）
 - [x] AC-08 — **PASS**（推定経路なし。1250×2050は sample_default のまま）
 - [x] AC-09 — **PASS**（reconcileはEvidence優先。数値一致でも INSUFFICIENT_EVIDENCE）
@@ -58,7 +58,7 @@ Project Evidence Ledger + Verified Project Case のgeneric boundaryを導入す�
 
 ## Current implementation state
 
-Wave 0-2完了。Wave 3は Evidence UNAVAILABLE のため SKIPPED_BY_DESIGN。
+Wave 0-2, 4-8 完了。Wave 3は Evidence UNAVAILABLE のため SKIPPED_BY_DESIGN。
 
 ```text
 Wave 0   Fresh Gate / Run Artifact / Phase 2E closeout / baseline   DONE
@@ -68,8 +68,9 @@ Wave 2H  immutability / allowlist / IP boundary / reference保持     DONE
 Wave 3   private Evidence reconciliation                           SKIPPED_BY_DESIGN / NO_EVIDENCE_AVAILABLE
 Wave 4   UI Evidence status / case selector規則 / 照合表示           DONE
 Wave 5   security / spoofing / mutation                            DONE
-Wave 6   browser / full regression / independent verifier          browser DONE / verifier実行中
+Wave 6   browser / full regression / independent verifier          DONE（verifier: PASS WITH FINDINGS）
 Wave 7   README / Run Artifact convergence / Draft PR              DONE
+Wave 8   independent verifier findings repair (F1-F12)             DONE
 ```
 
 **project-specific promotion: NONE。** verifiedCases: 0。Explicit unverified items: 4。
@@ -93,11 +94,14 @@ explicit_unverified_items: 4   # 維持
 ```text
 Fresh Gate                     : PASS（base SHA一致、working tree clean）
 baseline npm test              : PASS（197 pass / 0 fail）
-full npm test (current)        : PASS（256 pass / 0 fail。baseline 197 → 256）
+full npm test (current)        : PASS（270 pass / 0 fail。baseline 197 → 256 → Wave 8で270）
 Evidence availability          : UNAVAILABLE（§23の経路を取る）
 Evidence contract抽出           : PASS（evidence.js が単一の正。重複実装なし）
 Promotion Gate on trusted paths: PASS（verifiedValue / identity / validateVerifiedCase）
-public source reference検証     : PASS（構造要件。13種の不正参照を拒否）
+public source reference検証     : PASS（**Wave 8で修復済み**。独立検証F1でルート末尾ドット
+                                 迂回が実在した＝当時はFAILだった。現在は正規化後に判定し、
+                                 私設TLD / CGNAT / wildcard DNS / 追加provider /
+                                 percent-encoded credential も拒否する）
 Evidence Ledger                : PASS（field-level fact + case-level promotion）
 reconciliation                 : PASS（MATCH ≠ verified を構造的に分離）
 mutation（gate bypass 5件）     : PASS（すべてkill）
@@ -107,25 +111,61 @@ Ledger immutability            : PASS（deep freeze + caller objectからの切�
 factKey allowlist              : PASS（fail closed。A_102_pdf等を拒否）
 public reference IP boundary   : PASS（fe80::/10全域・未指定・IPv6リテラルclass）
 verifiedValue reference保持     : PASS（Option A。ephemeral pathなし）
+independent verifier           : PASS WITH FINDINGS（F1-F12。全件Wave 8で対応。下記参照）
+mutation（Wave 8 修復 19件）    : PASS（すべてkill。MF9b / MF10はtest gapを露呈→closeしてkill）
+browser（Wave 8 再実測）        : PASS（4モード。page error 0 / console error 0。
+                                 F1・F5の攻撃がブラウザ実行時にも拒否されることを確認）
 ```
 
 ## Hard Checks（Quality Debt化禁止）
 
 ```text
-private Evidence leak                    : PASS（現時点でprivate情報の記載なし）
+private Evidence leak                    : PASS（private情報の記載なし。独立検証の privacy sweepでも0件）
 secret leak                              : PASS
 trust promotion bypass                   : PASS（trusted構築経路がすべてgateを通る。mutationで確認）
-verified-state spoofing                  : PASS（検証後改変・import spoofing・forged evidenceいずれも封鎖）
-data integrity                           : PASS（preset無変更をtestで固定）
+verified-state spoofing                  : PASS（Wave 8修復後）
+data integrity                           : PASS（preset無変更をtestで固定。実機でも1297/1525/1695/1729・918/1122・1250×2050不変）
 Evidence without source                  : PASS（Evidenceを主張していない。verifiedCases 0）
-automatic pressure replacement            : PASS（照合はread-only。MISMATCHでも書き換えない）
-automatic pane-dimension inference        : PASS
-automatic Z inference                     : PASS
-Evidence without source                  : PASS（Evidenceを主張していない）
-automatic pressure replacement            : PASS（preset無変更）
-automatic pane-dimension inference        : PASS（推定していない）
-automatic Z inference                     : PASS（推定していない）
+automatic pressure replacement           : PASS（照合はread-only。MISMATCHでも書き換えない）
+automatic pane-dimension inference       : PASS（推定経路なし）
+automatic Z inference                    : PASS（推定経路なし）
 ```
+
+### `verified-state spoofing` の訂正記録
+
+Wave 7時点でこの行は `PASS（検証後改変・import spoofing・forged evidence いずれも封鎖）`
+と記載していたが、**当時この主張は半分しか正しくなかった**。独立検証が次の2件を実証した。
+
+- **F2**: `createEntry()` がgateと保存用snapshotで呼び出し側の `evidence` を2回読むため、
+  accessorを仕込んだobjectで「gateにはprimary、保存にはnone」を返せた。
+  その結果、gateを通らないevidenceを持つ **実在の** verified entry が生成できた。
+- **F3**: Ledger entryは深くfreezeされていた一方、UIが実際に読む一次のtrusted object
+  （`config.identity` / `dimensions` / `wind` / `verifiedCases`）はmutableのままだった。
+  `config.wind.V0.value = 99`、`config.dimensions.mode = 'verified_project_case'`、
+  `config.verifiedCases.push(...)`（`validateVerifiedCase()` を一切通らない裏口登録）が通った。
+
+いずれもWave 8で閉じ、mutationで固定した（MF2 / MF3a / MF3b）。
+上のPASSはその修復後の状態を指す。
+
+## 独立検証 findings と対応（Wave 8）
+
+```text
+F1  HIGH    ルート末尾ドットでprivate provider denylistと完全修飾判定を迂回  FIXED
+F2  MED-HI  createEntryのTOCTOU（gateと保存で別の値を読める）              FIXED
+F3  MED     trusted configがfreezeされておらず検証後改変が可能             FIXED
+F4  MED     allowlist / critical fact表をlive mutableで公開                FIXED
+F5  MED     reconcileFactが自己申告のverificationStatusを信用             FIXED
+F6  MED     case-levelのgate再実行が未テスト（mutation survivor M26）      FIXED（test追加）
+F7  MED     Run Artifactの誇張と陳腐化した記述                            FIXED（本ファイル）
+F8  LOW     私設TLD / CGNAT / wildcard DNS / 追加provider / cred param    FIXED
+F9  LOW     caseIdにpublic-safe checkが無い                               FIXED
+F10 LOW     Evidence panelが例外を黙殺して消える                          FIXED
+F11 INFO    identityがliteralで、gateとの結び付きが規約のみ                FIXED
+F12 INFO    critical factが空のときcase promotionが空虚に真                FIXED
+```
+
+F7は「artifactが実装より良く見えていた」という指摘であり、Evidence boundaryと同じ性質の
+問題として扱う。数値や状態を良く見せる方向の誤りは、それ自体がHard Checkの対象である。
 
 ## Quality Debt
 
@@ -155,22 +195,40 @@ DECISIONS.md を参照（D-000 digest定義 / D-001 Evidence UNAVAILABLE / D-002
 ## Files changed
 
 ```text
+project-config/evidence.js          (新規) Evidence contract / promotion gate / public reference検証
+project-config/evidence-ledger.js   (新規) field-level Evidence Ledger / case promotion / reconciliation
+project-config/miyoshi.js           契約をevidence.jsへ移譲。gate接続。config subtreeのfreeze。caseId境界
+project-config/project-input.js     VERIFICATION_STATUSES を evidence.js から解決
+index.html                          evidence.js読み込み / Evidence status UI / 照合表示 / panel失敗の明示
+README.md                           Phase 2F節（Evidence architecture）
+tests/evidence.test.js              (新規)
+tests/evidence-ledger.test.js       (新規)
+tests/calc.test.js                  追加
+tests/project-config.test.js        追加
+tests/project-input.test.js         追加
+tests/ui-mode-separation.test.js    追加
 .agent-run/LR-20260920-GLASS-P2F/*  (新規7ファイル)
 .agent-run/LR-20260919-GLASS-P2E/*  (post-merge closeoutのみ。snapshot / digestは不変)
 ```
 
+Wave 7時点でこの節は `.agent-run/` の2行しか挙げておらず、実際に変更した11の
+code / testファイルが欠落していた（独立検証F7）。変更内容を記録することが
+このartifactの役割であり、過小記載は誇張と同じく誤りである。
+
 ## Remaining tasks
 
 ```text
-Wave 1-7（TASK_QUEUE.md参照）
+Human Gate待ち（Claude側で実施しない）:
+  - PR #7 の Ready-for-review / merge / Production 認可
+  - private Evidence の供給（EVIDENCE.md のEvidence Request Matrix参照）
+Claude側の残作業: なし
 ```
 
 ## Next action
 
-Wave 1 architecture inventory。`validateVerifiedCase()` / `verifiedCases` /
-Evidence factory / promotion guard / `verificationStatus` / `privateReferenceAvailable` /
-`getPublicLabel()` / Project Input Package / preset registry をrepository-wide searchし、
-既存contractを重複実装しないよう再利用方針を決める。
+なし（Human Gate待ち）。private Evidenceが供給された場合のみ、
+EVIDENCE.md のEvidence Request Matrixに従ってfield単位で照合し、
+gateを通った項目だけを昇格する。Evidenceが無い項目はunverifiedのまま維持する。
 
 ## Stop conditions status
 
@@ -208,6 +266,7 @@ repair_strategies          : 0 / 3
 | 5 | import spoofing / preset mutation / privacy | package schemaにEvidence fieldが無く到達不能 |
 | 6 | browser 4モード / full regression | JS error 0。1756 / 1463 / 1400 / trace不変 |
 | 7 | README / Run Artifact / Draft PR | Evidence未取得であることを明記 |
+| 8 | independent verifier findings repair | F1-F12すべて対応。修復mutation 19件すべてkill。197→256→270 |
 
 ### 最終状態
 
@@ -218,6 +277,8 @@ verifiedCases: 0
 explicit_unverified_items: 4
 preset_mutation: NONE
 quality_debt: none
+independent_verifier: PASS_WITH_FINDINGS (F1-F12, all repaired in Wave 8)
+tests: 270 pass / 0 fail
 ```
 
 `verifiedCases` が空であることはbugではない。Evidenceが存在しないため、

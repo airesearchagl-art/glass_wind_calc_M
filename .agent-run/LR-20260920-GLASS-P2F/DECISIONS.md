@@ -129,6 +129,78 @@ miyoshi.js は解決して同名のローカル別名へ束ねるため、**約8
   その資料が本当に一次資料か・発行者が信頼できるかではない。
   それはHuman / reviewerの判断であり、構造が通ったことを真正性の証明と読み替えてはならない。
 
+### D-007 訂正（Wave 8 / 独立検証F1・F8）
+
+上の決定は正しかったが、**実装が決定に届いていなかった**。独立検証が実証した穴:
+
+- `new URL()` は末尾のルートドットを `hostname` に保持する。`drive.google.com.` は
+  `$` アンカーのdenylistに一致せず、`intranet.` はドットを含むので完全修飾判定も通る。
+  どちらもDNS上は同じホストを指すため、**実在のDrive URLと社内ホスト名が
+  「検証済みpublic primary source reference」として保存できた**。
+  本Phaseが防ごうとしているleakそのものである。
+- 私設TLD（`.local` / `.internal` / `.corp`）、CGNAT（100.64/10）、`0/8`、
+  wildcard DNS（`nip.io` 等）、Drive/OneDrive/Boxの実ダウンロードホスト、
+  percent-encodeされたcredential param名も通っていた。
+
+**修正**: host判定は**すべて末尾ドット除去後**の値に対して行う。
+denylistに上記を追加し、`searchParams`（decode済み）のkey名にもcredential判定を当てる。
+保存形もhost正規化後のURLにする（同じホストの別表記が別referenceとして残らない）。
+mutation 4件（MF1 / MF8a / MF8b / MF8c）で固定。
+
+**教訓**: 「denylistに載っている」ことと「denylistが効く」ことは別である。
+正規化の前に判定すると、denylistは正しく書かれていても素通りする。
+
+## D-013 — 「gateを通した」ではなく「configに載った結果」を検査する（Wave 8 / F2・F3・F5・F11）
+
+- **指摘（正当）**: 構築時にgateを呼ぶだけでは、gateを通った値と最終的に保持される値が
+  同一である保証がない。独立検証は3つの具体的な乖離を実証した。
+  - `createEntry()` が呼び出し側の `evidence` を2回読むため、accessorで
+    「gateにはprimary、保存にはnone」を返せた（TOCTOU）。
+  - `reconcileFact()` は `verificationStatus === 'verified'` という**自己申告**しか見ず、
+    gateを通らないobjectでも数値一致でMATCHを返した。
+  - `identity` はliteralで組まれ、gateを通した `identityEvidence` 変数との結び付きが
+    規約のみだった。`validateAllEvidence()` も弱い方の consistency check を使っていた。
+- **決定**: 検査対象を「構築経路」から「**結果**」へ移す。
+  - `createEntry()` は呼び出し側fieldを一度だけ読んでsnapshotを確定し、
+    gateにはそのsnapshotを渡す（読み取り順ではなく値を固定する）。
+  - `reconcileFact()` は数値比較に進む前にgateをその場で再実行する。
+  - `validateAllEvidence()` は `assertPromotionGate` を使い、configに実際に載っている
+    entryを検査する。module load時にこれを走らせ、違反があれば読み込みごと失敗させる。
+  - `verifiedValue()` の戻り値と `config.identity` / `dimensions` / `wind` /
+    `verifiedCases` を深くfreezeし、検証後の改変と裏口登録を構造的に封じる。
+- **理由**: gateが「構築時の一瞬だけ成立する条件」に退化すると、
+  実質advisoryだった Wave 2 以前の状態に戻る。
+  Wave 2の指摘（"gate that exists but is never called is advisory"）の一般形として、
+  **"gate that holds only during construction is advisory"** を同じ扱いにする。
+- mutation 6件（MF2 / MF3a / MF3b / MF5 / MF11a / MF11b）で固定。
+
+## D-014 — 表示・表そのものをimmutableにする（Wave 8 / F4・F12）
+
+- **指摘（正当）**: `KNOWN_FACT_KEYS` / `CASE_TYPE_CRITICAL_FACTS` をlive mutableで
+  exportしていたため、`KNOWN_FACT_KEYS.push('A_102_pdf')` でD-012のfail closedが破れ、
+  `CASE_TYPE_CRITICAL_FACTS.glass_pane.length = 0` でcase promotionが空虚に真になった。
+- **決定**: contract定義（allowlist / critical fact表 / EVIDENCE_LEVELS /
+  VERIFICATION_STATUSES / public-safe pattern）はすべてfreezeしてexportする。
+  あわせて `evaluateCasePromotion()` は `required.length > 0` を明示的に要求し、
+  critical factが空のcase typeがverifiedを名乗れないようにする。
+- **理由**: 「規則を定義したobject」を書き換え可能なまま公開することは、
+  規則を持たないことと大差ない。
+
+## D-015 — caseIdは公開identifierとして扱う（Wave 8 / F9）
+
+- **決定**: `caseId` に `^[A-Za-z][A-Za-z0-9_-]{0,47}$` を課し、
+  ファイル名様のsuffix（`.pdf` / `.dwg` 等）を拒否し、`assertPublicSafeEvidenceText()` も適用する。
+- **理由**: caseIdはUI・export package・PR本文にそのまま出る。
+  D-012がfactKeyにallowlistを課した理由（keyそのものが公開情報になる）が等しく当てはまる。
+  図面番号をcaseIdにする経路を規約ではなくコードで塞ぐ。
+
+## D-016 — Evidence panelは失敗しても黙って消えない（Wave 8 / F10）
+
+- **決定**: `renderProjectEvidencePanels()` のcatchは、計算機能は止めないまま
+  「検証状況を表示できなかった」ことをpanel上に `textContent` で明示する。
+- **理由**: 検証状況の表示が**無い**状態は、利用者から見て「問題なし」と読める。
+  Evidence boundaryにおいて、沈黙は安全側ではない。
+
 ## D-008 — sourceReferenceは監査可能な正規形として保持する（§5）
 
 - **決定**: `{ kind: 'public_primary', url }` を正規形とし、Ledger entryが保持する。

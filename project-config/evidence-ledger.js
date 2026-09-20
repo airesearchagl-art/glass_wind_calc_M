@@ -144,8 +144,26 @@
     // Ledgerに保存された内容は変わらない。
     var sourceReference = Evidence.canonicalizeSourceReference(spec.sourceReference, label);
 
-    // Evidence contractとpromotion gateを再利用（再実装しない）
-    Evidence.assertPromotionGate(spec.verificationStatus, spec.evidence, label, {
+    // F2 (TOCTOU): gateと保存用snapshotが `spec.evidence.*` を**2回**読むと、
+    // accessorを仕込んだobjectが「gateには正しい値、snapshotには別の値」を
+    // 返せてしまい、gateを通らないevidenceを持つ verified entry が実際に
+    // 生成される。呼び出し側のfieldはここで**一度だけ**読んで確定させ、
+    // gateにはその確定済みsnapshotを渡す（読み取り順ではなく値を固定する）。
+    var specEvidence = spec.evidence;
+    if (!specEvidence || typeof specEvidence !== 'object' || Array.isArray(specEvidence)) {
+      throw new Error(label + ': evidence must be an object');
+    }
+    var verificationStatus = spec.verificationStatus;
+    var evidence = {
+      level: specEvidence.level,
+      checkedAt: specEvidence.checkedAt,
+      publicDescription: specEvidence.publicDescription,
+      privateReferenceAvailable: specEvidence.privateReferenceAvailable
+    };
+
+    // Evidence contractとpromotion gateを再利用（再実装しない）。
+    // 検査対象は呼び出し側のobjectではなく、上で確定させたsnapshotである。
+    Evidence.assertPromotionGate(verificationStatus, evidence, label, {
       sourceReference: sourceReference
     });
 
@@ -157,13 +175,8 @@
       factKey: factKey,
       value: spec.value,
       unit: spec.unit === undefined ? null : spec.unit,
-      verificationStatus: spec.verificationStatus,
-      evidence: {
-        level: spec.evidence.level,
-        checkedAt: spec.evidence.checkedAt,
-        publicDescription: spec.evidence.publicDescription,
-        privateReferenceAvailable: spec.evidence.privateReferenceAvailable
-      },
+      verificationStatus: verificationStatus,
+      evidence: evidence,
       sourceReference: sourceReference
     });
   }
@@ -269,8 +282,13 @@
       }
     }
 
+    // F12: requiredが空のとき `missing.length === 0` は**空虚に真**になる。
+    // critical factが1件も無い状態でcase verifiedを名乗らせない（fail closed）。
+    if (required.length === 0) {
+      reasons.push('no critical facts are defined for this case type');
+    }
     return {
-      verified: missing.length === 0,
+      verified: required.length > 0 && missing.length === 0,
       requiredFactKeys: required,
       missing: missing,
       reasons: reasons
@@ -328,6 +346,26 @@
       };
     }
 
+    // F5: `verificationStatus === 'verified'` という**自己申告**だけを信じると、
+    // gateを通っていないduck-typedなobject（あるいはF2で作られた実体）でも
+    // MATCHを返してしまう。数値比較に進む前にgateを**この場で再実行**する。
+    // Evidenceが先、数値は後という順序はここでも変わらない。
+    try {
+      Evidence.assertPromotionGate('verified', ledgerEntry.evidence, 'reconcile', {
+        sourceReference: ledgerEntry.sourceReference
+      });
+    } catch (e) {
+      return {
+        status: 'INSUFFICIENT_EVIDENCE',
+        presetValue: presetValue,
+        evidenceValue: ledgerEntry.value,
+        difference: null,
+        differencePercent: null,
+        note: 'verificationStatusは "verified" だがpromotion gateを通らないため、' +
+          '数値が一致していても検証済みとして扱わない: ' + e.message
+      };
+    }
+
     if (typeof presetValue !== 'number' || typeof ledgerEntry.value !== 'number') {
       return {
         status: presetValue === ledgerEntry.value ? 'MATCH' : 'MISMATCH',
@@ -356,12 +394,16 @@
     };
   }
 
+  // F4: allowlistとcritical fact表をlive mutableで公開すると、
+  // `KNOWN_FACT_KEYS.push(...)` でD-012のfail closedが破られ、
+  // `CASE_TYPE_CRITICAL_FACTS.glass_pane.length = 0` でcase promotionが
+  // 空虚に真になる。定義そのものなので深くfreezeして返す。
   return {
-    KNOWN_FACT_KEYS: KNOWN_FACT_KEYS,
+    KNOWN_FACT_KEYS: Evidence.deepFreeze(KNOWN_FACT_KEYS),
     FACT_KEY_PATTERN: FACT_KEY_PATTERN,
-    RECONCILIATION_STATUSES: RECONCILIATION_STATUSES,
-    CASE_TYPE_CRITICAL_FACTS: CASE_TYPE_CRITICAL_FACTS,
-    CALCULATION_PROVENANCE_EXTRA_FACTS: CALCULATION_PROVENANCE_EXTRA_FACTS,
+    RECONCILIATION_STATUSES: Evidence.deepFreeze(RECONCILIATION_STATUSES),
+    CASE_TYPE_CRITICAL_FACTS: Evidence.deepFreeze(CASE_TYPE_CRITICAL_FACTS),
+    CALCULATION_PROVENANCE_EXTRA_FACTS: Evidence.deepFreeze(CALCULATION_PROVENANCE_EXTRA_FACTS),
     createEntry: createEntry,
     createLedger: createLedger,
     evaluateCasePromotion: evaluateCasePromotion,

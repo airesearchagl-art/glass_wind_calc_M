@@ -355,3 +355,31 @@ test('Phase 2F: evidence-ledger.js が evidence.js の後に読み込まれる',
   assert.ok(led > -1 && ev > -1);
   assert.ok(ev < led, 'evidence.js が evidence-ledger.js より前');
 });
+
+/* ============================================================
+   独立検証(Phase 2F) F10 — Evidence panelは黙って消えない
+============================================================ */
+
+test('F10: renderProjectEvidencePanels の catch は失敗を画面に出す（黙殺しない）', () => {
+  const src = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
+  const start = src.indexOf('function renderProjectEvidencePanels');
+  assert.notEqual(start, -1, 'renderProjectEvidencePanels が見つかるはず');
+  const fn = src.slice(start, src.indexOf('\nfunction ', start + 10));
+
+  // Evidence contract / promotion gate が失敗したとき、panelが何も言わずに
+  // 消えると「検証状況の表示が無い＝問題なし」と読めてしまう。
+  // catch節は必ず panel host へ失敗を書き出すこと。
+  const catchBody = fn.slice(fn.indexOf('catch'));
+  assert.match(catchBody, /getElementById\('evidence-status-table'\)/,
+    'catch節はEvidence status panelのhostを取得して表示を書き換えるべき');
+  assert.match(catchBody, /textContent/,
+    'catch節は例外メッセージをtextContentで表示すべき（HTMLとして解釈させない）');
+  assert.doesNotMatch(catchBody, /innerHTML/,
+    'catch節で例外メッセージをinnerHTMLに入れてはならない');
+  assert.match(catchBody, /検証済み|検証状況が不明/,
+    '表示できなかったことを「検証済み」と解釈させない文言を出すべき');
+
+  // 計算機能自体は止めない（catchで握ること自体は維持する）
+  assert.match(fn, /try \{/);
+  assert.match(fn, /catch \(e\)/);
+});

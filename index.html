@@ -914,7 +914,27 @@ function renderProjectEvidencePanels() {
     renderVerifiedCaseSelector(MiyoshiProjectConfig);
     renderReconciliation(MiyoshiProjectConfig);
   } catch (e) {
-    /* 表示に失敗しても計算機能は止めない */
+    // F10: 計算機能は止めないが、**黙って消さない**。
+    // Evidence contractやpromotion gateが失敗したとき、この panel が
+    // 何も言わずに消えると「検証状況の表示が無い＝問題なし」と読めてしまう。
+    // 検証状況を表示できなかったこと自体を、その場に明示する。
+    var host = document.getElementById('evidence-status-table');
+    if (host) {
+      host.textContent = '';
+      var warn = document.createElement('div');
+      warn.className = 'notice';
+      warn.style.borderColor = 'rgba(245,158,11,0.4)';
+      // textContent固定（例外メッセージをHTMLとして解釈させない）
+      warn.textContent =
+        'Evidence statusを表示できませんでした。検証状況が不明のため、' +
+        '表示されていないことを「検証済み」と解釈しないでください: ' +
+        (e && e.message ? e.message : String(e));
+      host.appendChild(warn);
+    }
+    var caseArea = document.getElementById('verified-case-selector-area');
+    if (caseArea) caseArea.textContent = '';
+    var recArea = document.getElementById('reconciliation-area');
+    if (recArea) recArea.textContent = '';
   }
 }
 
