@@ -35,6 +35,17 @@ W2-3 gate mutation / regression tests（§6の12カテゴリ）            DONE
 W2-4 generic Evidence Ledger（field-level fact）                  DONE
 W2-5 Verified Case validator（case-level）                        DONE
 W2-6 partial facts が case-level verified へ昇格しないこと        DONE
+
+## Wave 2H — Hardening（完了）
+
+```text
+W2H-A Ledger entryのimmutability（deep freeze / 切り離し）        DONE
+W2H-B factKey allowlist（fail closed）                            DONE
+W2H-C 非公開IPリテラル範囲の是正（fe80::/10全域・IPv6 class）      DONE
+W2H-7 sourceReferenceのcanonical copy                             DONE
+W2H-8 verifiedValueのpublic reference保持（Option A）             DONE
+W2H-M 選定mutation 7件（H4はtest gapを露呈→close後kill）          DONE
+```
 ```
 
 ## Wave 3 — private Evidence reconciliation

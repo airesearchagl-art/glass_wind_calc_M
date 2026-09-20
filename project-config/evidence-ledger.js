@@ -58,8 +58,19 @@
   var Evidence = resolveEvidenceContract();
 
   /**
-   * 推奨されるfact key（§8）。案件固有キーはここに入れない。
-   * Ledgerはこの一覧の外のkeyも受け付けるが、形式検証は行う。
+   * 許可されたfact key（§8 / Wave 2H Required Fix B）。
+   *
+   * **allowlistであり推奨一覧ではない。** ここに無いkeyは拒否する。
+   *
+   * 理由: 識別子として形式が正しいだけのkey（`A_102_pdf` / `drawing_123` /
+   * `client_code_001` 等）は、private filenameやdrawing numberに由来しうる。
+   * public Evidence Ledgerでは、keyそのものが公開情報になるため、
+   * 「形式が安全」では不十分で「レビュー済みである」ことを要求する。
+   *
+   * 新しいgeneric fact typeを足す場合は、このsourceへ意図的に追加し、
+   * レビューとテストを通してから使う。runtime/custom登録は本Phaseでは行わない。
+   *
+   * 案件固有キー・floor固有キーをここに入れない。
    */
   var KNOWN_FACT_KEYS = [
     'pane_width_mm',
@@ -74,8 +85,7 @@
     'roughness_category'
   ];
 
-  // factKeyは公開されるため、識別子として安全な形に限る
-  // （private filename / drawing number 等をkeyに使わせない）。
+  // 形式検証は allowlist の**補助**であって代替ではない。
   var FACT_KEY_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
 
   var RECONCILIATION_STATUSES = ['MATCH', 'MISMATCH', 'INSUFFICIENT_EVIDENCE'];
@@ -85,6 +95,14 @@
       throw new Error(
         'factKey must match ' + FACT_KEY_PATTERN +
           ' (got ' + JSON.stringify(factKey) + '). private filenames/IDs must not be used as keys.'
+      );
+    }
+    // allowlist: レビュー済みのgeneric fact keyのみ（fail closed）
+    if (KNOWN_FACT_KEYS.indexOf(factKey) === -1) {
+      throw new Error(
+        'factKey is not in the reviewed allowlist: ' + JSON.stringify(factKey) +
+          '. Allowed: ' + KNOWN_FACT_KEYS.join(', ') +
+          '. Add a new generic fact type to KNOWN_FACT_KEYS in source (with review and tests) before using it.'
       );
     }
     return factKey;
@@ -121,16 +139,21 @@
       throw new Error(label + ': unit must be a string or null');
     }
 
-    var sourceReference = spec.sourceReference === undefined ? null : spec.sourceReference;
-    // 正規形であることを検証する。private locationは構造検証で落ちる。
-    Evidence.assertSourceReference(sourceReference, label);
+    // §7: 呼び出し側のobjectを保持せず、正規化した**新しい**objectを作る。
+    // これにより add() 後に呼び出し側が元objectを書き換えても、
+    // Ledgerに保存された内容は変わらない。
+    var sourceReference = Evidence.canonicalizeSourceReference(spec.sourceReference, label);
 
     // Evidence contractとpromotion gateを再利用（再実装しない）
     Evidence.assertPromotionGate(spec.verificationStatus, spec.evidence, label, {
       sourceReference: sourceReference
     });
 
-    return {
+    // Wave 2H Required Fix A: 検証を通った後に改変されないよう、
+    // 呼び出し側と切り離したcanonical snapshotを深くfreezeして返す。
+    // top-levelだけのfreezeでは evidence / sourceReference を書き換えられ、
+    // Promotion Gateが「構築時のみのチェック」に退化してしまう。
+    return Evidence.deepFreeze({
       factKey: factKey,
       value: spec.value,
       unit: spec.unit === undefined ? null : spec.unit,
@@ -142,7 +165,7 @@
         privateReferenceAvailable: spec.evidence.privateReferenceAvailable
       },
       sourceReference: sourceReference
-    };
+    });
   }
 
   /** factKeyごとに1件のentryを保持するLedger。 */

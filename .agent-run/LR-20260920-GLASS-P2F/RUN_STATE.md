@@ -3,12 +3,12 @@
 - Run ID: LR-20260920-GLASS-P2F
 - Mode: LONG_RUN
 - Horizon: 8H
-- Current state: RUNNING（Wave 0-2完了 → Wave 4 UI / reconciliation表示へ）
+- Current state: RUNNING（Wave 0-2H完了 → Wave 4 UI / reconciliation表示へ）
 - Repository: airesearchagl-art/glass_wind_calc_M
 - Working branch: claude/phase2f-verified-project-cases
 - Base SHA: a185b4675cac03d501ea6805b449437c3fbbb0fd
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY` — `git rev-parse HEAD` またはPRの現在headで解決する（自己参照回避contract）
-- Current wave: Wave 2 — Evidence Ledger / Promotion Gate / Verified Case validator（完了）
+- Current wave: Wave 2H — Ledger immutability / factKey allowlist / IP boundary / reference retention（完了）
 - Task Packet ID: LRP-20260920-GLASS-P2F
 - Task Packet revision: 1
 - Task Packet snapshot path: .agent-run/LR-20260920-GLASS-P2F/TASK_PACKET_SNAPSHOT.md
@@ -88,7 +88,7 @@ explicit_unverified_items: 4   # 維持
 ```text
 Fresh Gate                     : PASS（base SHA一致、working tree clean）
 baseline npm test              : PASS（197 pass / 0 fail）
-full npm test (current)        : PASS（233 pass / 0 fail）
+full npm test (current)        : PASS（246 pass / 0 fail）
 Evidence availability          : UNAVAILABLE（§23の経路を取る）
 Evidence contract抽出           : PASS（evidence.js が単一の正。重複実装なし）
 Promotion Gate on trusted paths: PASS（verifiedValue / identity / validateVerifiedCase）
@@ -97,6 +97,11 @@ Evidence Ledger                : PASS（field-level fact + case-level promotion�
 reconciliation                 : PASS（MATCH ≠ verified を構造的に分離）
 mutation（gate bypass 5件）     : PASS（すべてkill）
 mutation（ledger 3件）          : PASS（M8はtest gapを露呈→closeしてkill）
+mutation（Wave 2H 7件）         : PASS（H4はtest gapを露呈→closeしてkill）
+Ledger immutability            : PASS（deep freeze + caller objectからの切り離し）
+factKey allowlist              : PASS（fail closed。A_102_pdf等を拒否）
+public reference IP boundary   : PASS（fe80::/10全域・未指定・IPv6リテラルclass）
+verifiedValue reference保持     : PASS（Option A。ephemeral pathなし）
 ```
 
 ## Hard Checks（Quality Debt化禁止）
@@ -105,7 +110,7 @@ mutation（ledger 3件）          : PASS（M8はtest gapを露呈→closeして
 private Evidence leak                    : PASS（現時点でprivate情報の記載なし）
 secret leak                              : PASS
 trust promotion bypass                   : PASS（trusted構築経路がすべてgateを通る。mutationで確認）
-verified-state spoofing                  : 未評価（Wave 5 import spoofingで検証）
+verified-state spoofing                  : 部分PASS（検証後改変によるbypassを封鎖。import spoofingはWave 5）
 data integrity                           : PASS（preset無変更をtestで固定）
 Evidence without source                  : PASS（Evidenceを主張していない）
 automatic pressure replacement            : PASS（preset無変更）

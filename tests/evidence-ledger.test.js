@@ -332,3 +332,215 @@ test('AC-05: verificationStatusがverifiedでないentryは、evidenceが強く�
   }
   assert.throws(() => Ledger.assertCaseCanBeVerified(led, 'glass_pane'), /cannot be promoted/);
 });
+
+/* ============================================================
+   Wave 2H §4: 検証後の改変によるbypass
+   （Promotion Gateが「構築時のみのチェック」に退化していないこと）
+============================================================ */
+
+test('§4-1: 返されたentryのverificationStatusを書き換えても保存値は変わらない', () => {
+  const led = Ledger.createLedger();
+  const returned = led.add({ factKey: 'pane_width_mm', value: 1200, unit: 'mm',
+                             verificationStatus: 'unverified', evidence: none() });
+  try { returned.verificationStatus = 'verified'; } catch (e) { /* strict modeでは例外 */ }
+  assert.equal(led.get('pane_width_mm').verificationStatus, 'unverified');
+  assert.deepEqual(led.listVerifiedFactKeys(), [], '§4-7: verified一覧も変わらない');
+});
+
+test('§4-2 / §4-3: get() / find() 経由でnested evidenceを書き換えられない', () => {
+  const led = Ledger.createLedger();
+  led.add(verifiedEntry('pane_width_mm', 1200, 'mm'));
+
+  const got = led.get('pane_width_mm');
+  try { got.evidence.level = 'none'; } catch (e) { /* noop */ }
+  try { got.evidence.checkedAt = null; } catch (e) { /* noop */ }
+  try { got.evidence.privateReferenceAvailable = false; } catch (e) { /* noop */ }
+  assert.equal(led.get('pane_width_mm').evidence.level, 'primary');
+  assert.equal(led.get('pane_width_mm').evidence.checkedAt, '2026-09-20');
+  assert.equal(led.get('pane_width_mm').evidence.privateReferenceAvailable, true);
+
+  const found = led.find('pane_width_mm');
+  try { found.value = 9999; } catch (e) { /* noop */ }
+  assert.equal(led.get('pane_width_mm').value, 1200);
+});
+
+test('§4-4 / §4-5: add()後に呼び出し側の元objectを書き換えても保存値は変わらない', () => {
+  const led = Ledger.createLedger();
+  const evidence = Evidence.makeEvidence('primary', '2026-09-20', '一次資料で直接確認', true);
+  const sourceReference = { kind: 'public_primary', url: PUBLIC_OK };
+  led.add({ factKey: 'pane_height_mm', value: 2000, unit: 'mm',
+            verificationStatus: 'verified', evidence, sourceReference });
+
+  // 呼び出し側のobjectを後から改変
+  evidence.level = 'none';
+  evidence.privateReferenceAvailable = false;
+  sourceReference.url = 'https://drive.google.com/file/d/leak';
+  sourceReference.kind = 'private';
+
+  const stored = led.get('pane_height_mm');
+  assert.equal(stored.evidence.level, 'primary');
+  assert.equal(stored.evidence.privateReferenceAvailable, true);
+  assert.equal(stored.sourceReference.kind, 'public_primary');
+  assert.equal(stored.sourceReference.url, PUBLIC_OK);
+  assert.ok(!stored.sourceReference.url.includes('drive.google'));
+});
+
+test('§4-6: Object.definePropertyでも保護されたfieldを変えられない', () => {
+  const led = Ledger.createLedger();
+  led.add(verifiedEntry('pane_width_mm', 1200, 'mm'));
+  const e = led.get('pane_width_mm');
+
+  assert.equal(Object.isFrozen(e), true, 'entryがfrozenであること');
+  assert.equal(Object.isFrozen(e.evidence), true, 'nested evidenceもfrozenであること');
+
+  // 注: frozen objectへ**同じ値**でdefinePropertyするのは仕様上no-opで例外にならない。
+  // 実際に値を変えようとした場合に落ちることを確認する。
+  assert.throws(() => Object.defineProperty(e, 'verificationStatus', { value: 'unverified' }), TypeError);
+  assert.throws(() => Object.defineProperty(e, 'value', { value: 9999 }), TypeError);
+  assert.throws(() => Object.defineProperty(e.evidence, 'level', { value: 'none' }), TypeError);
+  assert.throws(() => Object.defineProperty(e.evidence, 'privateReferenceAvailable', { value: false }), TypeError);
+  assert.equal(led.get('pane_width_mm').verificationStatus, 'verified');
+  assert.equal(led.get('pane_width_mm').evidence.level, 'primary');
+  assert.equal(led.get('pane_width_mm').value, 1200);
+});
+
+test('§4-6b: sourceReferenceもfrozenで、URLを差し替えられない', () => {
+  const led = Ledger.createLedger();
+  led.add({ factKey: 'pane_width_mm', value: 1200, unit: 'mm',
+            verificationStatus: 'verified', evidence: primary(false),
+            sourceReference: Evidence.makePublicPrimarySourceReference(PUBLIC_OK) });
+  const ref = led.get('pane_width_mm').sourceReference;
+  assert.equal(Object.isFrozen(ref), true);
+  assert.throws(() => Object.defineProperty(ref, 'url', { value: 'https://evil.example.com/' }), TypeError);
+  assert.throws(() => Object.defineProperty(ref, 'kind', { value: 'private' }), TypeError);
+  assert.equal(led.get('pane_width_mm').sourceReference.url, PUBLIC_OK);
+});
+
+test('§4-8: 以前返されたentryを書き換えてもcase promotion結果は変わらない', () => {
+  const led = Ledger.createLedger();
+  led.add(verifiedEntry('pane_width_mm', 1200, 'mm'));
+  led.add(verifiedEntry('pane_height_mm', 2000, 'mm'));
+  const weak1 = led.add({ factKey: 'positive_pressure', value: 1500, unit: 'N/m2',
+                          verificationStatus: 'unverified', evidence: none() });
+  const weak2 = led.add({ factKey: 'negative_pressure', value: -900, unit: 'N/m2',
+                          verificationStatus: 'unverified', evidence: none() });
+
+  assert.equal(Ledger.evaluateCasePromotion(led, 'glass_pane').verified, false);
+  // 返されたentryを「verified」に見せかけようとする
+  for (const w of [weak1, weak2]) {
+    try { w.verificationStatus = 'verified'; } catch (e) { /* noop */ }
+    try { w.evidence.level = 'primary'; } catch (e) { /* noop */ }
+    try { w.evidence.checkedAt = '2026-09-20'; } catch (e) { /* noop */ }
+    try { w.evidence.privateReferenceAvailable = true; } catch (e) { /* noop */ }
+  }
+  assert.equal(Ledger.evaluateCasePromotion(led, 'glass_pane').verified, false,
+    '検証後の改変でcaseを昇格させられてはならない');
+});
+
+/* ============================================================
+   Wave 2H §5: factKey allowlist（fail closed）
+============================================================ */
+
+test('§5: allowlistに無いfactKeyは、識別子として妥当でも拒否される', () => {
+  const led = Ledger.createLedger();
+  for (const bad of ['A_102_pdf', 'drawing_123', 'private_sheet', 'client_code_001',
+                     'custom_fact', 'paneWidth', 'pane_width']) {
+    assert.throws(
+      () => led.add({ factKey: bad, value: 1, unit: null,
+                      verificationStatus: 'unverified', evidence: none() }),
+      /not in the reviewed allowlist/,
+      JSON.stringify(bad) + ' はrejectされるはず'
+    );
+  }
+});
+
+test('§5: allowlistのkeyはすべて構造的に受理され、案件固有キーを含まない', () => {
+  assert.deepEqual(Ledger.KNOWN_FACT_KEYS, [
+    'pane_width_mm', 'pane_height_mm', 'positive_pressure', 'negative_pressure',
+    'evaluation_height', 'floor_height_mapping', 'building_height', 'eaves_height',
+    'V0', 'roughness_category'
+  ]);
+  for (const k of Ledger.KNOWN_FACT_KEYS) {
+    const led = Ledger.createLedger();
+    assert.doesNotThrow(() => led.add({ factKey: k, value: 1, unit: null,
+                                        verificationStatus: 'unverified', evidence: none() }), k);
+  }
+  // 案件固有・floor固有のキーが混ざっていない
+  for (const k of Ledger.KNOWN_FACT_KEYS) {
+    assert.doesNotMatch(k, /miyoshi|floor_[123R]|_1F|_RF/i, k + ' は案件/floor固有でない');
+  }
+});
+
+/* ============================================================
+   Wave 2H §6: 非公開IPリテラル
+============================================================ */
+
+test('§6: fe80::/10 全域と未指定アドレスを拒否する', () => {
+  // 旧実装は fe80: のみに一致し fe90/fea0/febf を取りこぼしていた。
+  //
+  // 重要: IPv6リテラルは後段のclass判定でも落ちるため、
+  // 「どちらかで落ちる」ことを確認するだけでは範囲judgeの弱体化を検出できない
+  // （実際、緩めるmutationが生き残った）。
+  // 判定順序は 私設レンジ -> IP-literal class なので、
+  // **私設レンジとして落ちること**をメッセージで固定する。
+  for (const h of ['fe80::1', 'fe90::1', 'fea0::1', 'febf::1', 'feb0::dead']) {
+    assert.throws(
+      () => Evidence.assertPublicPrimarySourceReference('https://[' + h + ']/x'),
+      /private-network address/,
+      h + ' は「私設ネットワーク」として落ちること（IP-literal判定に救われていない）'
+    );
+  }
+  for (const h of ['::1', '::', 'fc00::1', 'fd00::1']) {
+    assert.throws(() => Evidence.assertPublicPrimarySourceReference('https://[' + h + ']/x'),
+      /loopback|private-network address|IP-literal host/, h + ' はrejectされるはず');
+  }
+});
+
+test('§6: IPv6リテラルはクラスとして拒否（IPv4-mapped経由の迂回も塞ぐ）', () => {
+  for (const h of ['::ffff:192.168.0.1', '::ffff:127.0.0.1', '2001:db8::1', '2400:cb00::1']) {
+    assert.throws(() => Evidence.assertPublicPrimarySourceReference('https://[' + h + ']/x'),
+      /IP-literal host|private-network address|loopback/,
+      h + ' はrejectされるはず（公開一次資料がIPリテラルで参照されることは想定しない）');
+  }
+});
+
+test('§6: RFC1918 / 169.254 / localhost は引き続き拒否される', () => {
+  for (const h of ['10.0.0.5', '192.168.1.5', '172.16.0.1', '172.31.255.1', '169.254.1.1']) {
+    assert.throws(() => Evidence.assertPublicPrimarySourceReference('https://' + h + '/x'),
+      /private-network address/, h);
+  }
+  for (const h of ['localhost', '127.0.0.1', '0.0.0.0']) {
+    assert.throws(() => Evidence.assertPublicPrimarySourceReference('https://' + h + '/x'),
+      /loopback/, h);
+  }
+});
+
+/* ============================================================
+   Wave 2H §8: verifiedValue の public reference 保持契約
+============================================================ */
+
+test('§8: verifiedValueはpublic referenceを破棄せず値に保持する', () => {
+  const ref = Evidence.makePublicPrimarySourceReference(PUBLIC_OK);
+  const v = Evidence.verifiedValue(1, 'mm', 'verified', primary(false), 'fact', { sourceReference: ref });
+  assert.ok(v.sourceReference, 'referenceが失われていないこと');
+  assert.equal(v.sourceReference.kind, 'public_primary');
+  assert.equal(v.sourceReference.url, PUBLIC_OK);
+
+  // private Evidence由来の値は null
+  const vp = Evidence.verifiedValue(34, 'm/s', 'verified', primary(true), 'V0');
+  assert.equal(vp.sourceReference, null);
+
+  // 呼び出し側のobjectを後から書き換えても保持値は変わらない
+  const mutable = { kind: 'public_primary', url: PUBLIC_OK };
+  const v2 = Evidence.verifiedValue(1, 'mm', 'verified', primary(false), 'f', { sourceReference: mutable });
+  mutable.url = 'https://drive.google.com/file/d/leak';
+  assert.equal(v2.sourceReference.url, PUBLIC_OK);
+});
+
+test('§8: 既存の verified 値も sourceReference field を持つ（null）', () => {
+  assert.equal(MiyoshiProjectConfig.wind.V0.sourceReference, null);
+  assert.equal(MiyoshiProjectConfig.wind.roughnessCategory.sourceReference, null);
+  // 値・検証状況は不変
+  assert.equal(MiyoshiProjectConfig.wind.V0.value, 34);
+  assert.equal(MiyoshiProjectConfig.wind.V0.verificationStatus, 'verified');
+});

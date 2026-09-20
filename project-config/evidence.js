@@ -213,11 +213,19 @@
   // partially_verified / unverified の挙動は変わらない。
   function verifiedValue(value, unit, verificationStatus, evidence, label, options) {
     assertPromotionGate(verificationStatus, evidence, label, options);
+    // §8 Option A: public referenceで検証した場合、その参照を**値に保持する**。
+    // 一時optionとして渡して捨てると、監査時に「何を根拠にverifiedにしたか」が
+    // 失われる（ephemeral-public-reference path を残さない）。
+    // private Evidence由来の値は従来どおり sourceReference: null。
+    var sourceReference = canonicalizeSourceReference(
+      (options || {}).sourceReference, label
+    );
     return {
       value: value,
       unit: unit,
       verificationStatus: verificationStatus,
-      evidence: evidence
+      evidence: evidence,
+      sourceReference: sourceReference
     };
   }
 
@@ -252,8 +260,18 @@
   var LOOPBACK_HOST_PATTERN = /^(localhost|127(\.\d+){3}|\[?::1\]?|0\.0\.0\.0)$/i;
   var PRIVATE_IPV4_PATTERN =
     /^(10(\.\d+){3}|192\.168(\.\d+){2}|172\.(1[6-9]|2\d|3[01])(\.\d+){2}|169\.254(\.\d+){2})$/;
-  // fc00::/7（ユニークローカル）と fe80::/10（リンクローカル）
-  var PRIVATE_IPV6_PATTERN = /^\[?(f[cd][0-9a-f]{2}:|fe80:)/i;
+  // fc00::/7（ユニークローカル: fc00–fdff）と fe80::/10（リンクローカル: fe80–febf）、
+  // および未指定アドレス `::`。
+  //
+  // 旧実装は `fe80:` のみに一致し、fe90 / fea0 / febf を取りこぼしていた
+  // （コメントは fe80::/10 を主張していたので、実装が説明より弱かった）。
+  // 現状はIPv6リテラルが後段の「単一ラベルホスト」判定でも落ちるが、
+  // **別のチェックに救われている状態に依存しない**ため、ここを正しくする。
+  var PRIVATE_IPV6_PATTERN = /^\[?(f[cd][0-9a-f]{2}:|fe[89ab][0-9a-f]:|::1?\]?$|::\]?$)/i;
+
+  // IPv6リテラルはクラスとして公開一次資料の参照になりえないため、
+  // 私設レンジか否かに関わらず拒否する（IPv4-mapped IPv6での迂回も塞ぐ）。
+  var IPV6_LITERAL_PATTERN = /^\[.*\]$|^\[?[0-9a-f]{0,4}:[0-9a-f:.]*\]?$/i;
 
   // トークン様の文字列（これ単体をprovenanceの実体にしない）
   var CREDENTIAL_LIKE_PATTERN = /(^|[?&#/=])(token|apikey|api_key|access_token|secret|signature|sig|key)=/i;
@@ -297,6 +315,15 @@
     if (PRIVATE_IPV4_PATTERN.test(host) || PRIVATE_IPV6_PATTERN.test(host)) {
       throw new Error('public source reference must not point at a private-network address' + where);
     }
+    // IPv6リテラルはクラスとして拒否する（fail closed）。
+    // 公開一次資料がIPv6リテラルで参照されることは想定せず、
+    // IPv4-mapped IPv6（::ffff:192.168.0.1 等）による迂回も同時に塞ぐ。
+    if (IPV6_LITERAL_PATTERN.test(host)) {
+      throw new Error(
+        'public source reference must not use an IP-literal host' + where +
+          ' (got ' + JSON.stringify(host) + ')'
+      );
+    }
     // 単一ラベルのホスト名（イントラネット名等）は公開資料の参照になりえない
     if (host.indexOf('.') === -1) {
       throw new Error(
@@ -319,6 +346,25 @@
   }
 
   /**
+   * 再帰的にfreezeする。
+   *
+   * top-levelだけのfreezeでは nested object（evidence / sourceReference）を
+   * 書き換えられてしまい、Promotion Gateが「構築時のみのチェック」に
+   * 退化する。深くfreezeすることで、検証を通った後の改変を防ぐ。
+   */
+  function deepFreeze(value) {
+    if (value === null || typeof value !== 'object' || Object.isFrozen(value)) {
+      return value;
+    }
+    Object.freeze(value);
+    var keys = Object.keys(value);
+    for (var i = 0; i < keys.length; i++) {
+      deepFreeze(value[keys[i]]);
+    }
+    return value;
+  }
+
+  /**
    * Ledger entry等が保持するsourceReferenceの正規形（§5）。
    *
    *   private evidence -> null （URL / filename / ID は**保持しない**）
@@ -328,10 +374,24 @@
    * entryが保持できる形として定義する（監査可能性のため）。
    */
   function makePublicPrimarySourceReference(url, label) {
-    return {
+    // 呼び出し側のobjectを保持せず、正規化したURLから新しいobjectを作る。
+    // 余計なfieldは持ち込まれない。
+    return deepFreeze({
       kind: 'public_primary',
       url: assertPublicPrimarySourceReference(url, label)
-    };
+    });
+  }
+
+  /**
+   * 任意のsourceReference入力から、呼び出し側と切り離された正規形を作る（§7）。
+   * null / undefined はそのまま null（private Evidence）。
+   */
+  function canonicalizeSourceReference(sourceReference, label) {
+    assertSourceReference(sourceReference, label);
+    if (sourceReference === null || sourceReference === undefined) {
+      return null;
+    }
+    return makePublicPrimarySourceReference(sourceReference.url, label);
   }
 
   /** sourceReferenceが正規形であることを検証する。null（private）も許容。 */
@@ -444,6 +504,8 @@
     canPromoteToVerified: canPromoteToVerified,
     assertPublicPrimarySourceReference: assertPublicPrimarySourceReference,
     makePublicPrimarySourceReference: makePublicPrimarySourceReference,
-    assertSourceReference: assertSourceReference
+    canonicalizeSourceReference: canonicalizeSourceReference,
+    assertSourceReference: assertSourceReference,
+    deepFreeze: deepFreeze
   };
 });

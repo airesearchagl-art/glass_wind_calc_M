@@ -155,3 +155,51 @@ miyoshi.js は解決して同名のローカル別名へ束ねるため、**約8
 - **対応**: 当該条件を直接突くテストを追加し、mutationがkillされることを確認した。
 - **記録する理由**: 「テストが通っている」ことと「その分岐が検証されている」ことは別である、
   という具体例として残す。
+
+## D-011 — Ledger entryは検証後にimmutable（Wave 2H Required Fix A）
+
+- **指摘（正当）**: `add()` / `get()` / `find()` が保存中のobjectそのものを返していたため、
+  Promotion Gateを通った**後**に `verificationStatus` / `evidence.level` /
+  `privateReferenceAvailable` / `sourceReference.url` を書き換えられた。
+  これではgateが「構築時のみのチェック」に退化する。
+- **決定**: canonical snapshotを**深く**freezeして返す（`deepFreeze`）。
+  top-levelのみのfreezeでは nested evidence / sourceReference を書き換えられるため不十分。
+- **あわせて§7**: 呼び出し側のobjectを保持せず、正規化した新しいobjectを構築する。
+  `add()` 後に呼び出し側が元の evidence / sourceReference を書き換えても保存値は変わらない。
+
+## D-012 — factKeyはallowlist（Wave 2H Required Fix B）
+
+- **指摘（正当）**: 識別子regexだけでは `A_102_pdf` / `drawing_123` / `client_code_001` が通る。
+  これらはprivate filenameやdrawing numberに由来しうる。
+  **factKey自体が公開情報になる**ため「形式が安全」では不十分。
+- **決定**: `KNOWN_FACT_KEYS` をallowlistとし、外のkeyは拒否する（fail closed）。
+  runtime/custom登録は本Phaseでは行わない。
+  新しいgeneric fact typeはsourceへ意図的に追加し、レビューとテストを通してから使う。
+
+## D-013 — 非公開IPリテラルの扱い（Wave 2H Required Fix C）
+
+- **指摘（正当）**: コメントは `fe80::/10` を主張していたが、regexは `fe80:` にしか一致せず
+  fe90 / fea0 / febf を取りこぼしていた（実装が説明より弱い）。
+- **調査で分かったこと**: 当時もこれらは**拒否されていた**。ただし理由は
+  「ホスト名にドットが無い（単一ラベル）」という別の判定に救われていただけで、
+  意図した私設レンジ判定が効いていたわけではない。
+- **決定**: レンジ判定を fe80–febf（fe80::/10）と `::` / `::1` まで正しく広げる。
+  あわせてIPv6リテラルを**クラスとして**拒否し、IPv4-mapped IPv6（`::ffff:192.168.0.1` 等）
+  による迂回も塞ぐ。
+- **テスト設計上の教訓**: 「どちらかのチェックで落ちる」ことだけを確認すると、
+  片方を弱めるmutationが生き残る（実際に生き残った）。
+  私設レンジとして落ちることを**エラーメッセージで**固定し、mutationがkillされることを確認した。
+
+## D-014 — verifiedValueはpublic referenceを保持する（Wave 2H §8 / Option A）
+
+- **指摘（正当）**: `verifiedValue()` はgate optionとして渡された public reference を
+  検証だけして**捨てていた**。public referenceでverifiedにした場合、
+  構築後に「何を根拠にverifiedとしたか」が失われる（ephemeral-public-reference path）。
+- **決定**: **Option A** を採用。`verifiedValue()` の返り値に
+  canonicalな `sourceReference` を保持する。private Evidence由来の値は `null`。
+- **Option Bを選ばなかった理由**: 「Ledger経由でしか public reference を使えない」制約は、
+  configが直接verified値を持つ既存構造と噛み合わず、
+  呼び出し側が回避策としてLedgerを経由しない別経路を作る誘因になる。
+  保持する方が監査可能性が高い。
+- **確認**: 既存の private backed な verified 値（V0 / roughness）は `sourceReference: null` を持ち、
+  値・検証状況は不変。
