@@ -893,7 +893,9 @@ glass_wind_calc_M/
 │   ├── ui-mode-separation.test.js # 入力モードのUI契約テスト（Phase 2C〜2E）
 │   ├── workspace.test.js         # Workspace契約・評価・TSV/JSON/CSV・診断隔離・行番号（Phase 2G）
 │   ├── batch-ui.test.js          # Batch UIの契約テスト（Single既定・textContent境界・診断配線）（Phase 2G）
-│   └── project-profile.test.js   # プロファイル契約・resolver等価性・snapshot・Matrix cap・canonical gate（Phase 2H）
+│   ├── project-profile.test.js   # プロファイル契約・resolver等価性・snapshot・Matrix cap・canonical gate（Phase 2H）
+│   ├── review-package.test.js    # Review Package契約・値の一致・exporter gate・redaction・継承値遮断（Phase 2I）
+│   └── review-ui.test.js         # Review UIの契約テスト（activeReview単一source・鮮度再計算・印刷関門）（Phase 2I）
 ├── package.json
 └── README.md                     # このファイル
 ```
@@ -1052,6 +1054,8 @@ node --test
 | `tests/workspace.test.js` | Workspace契約・case lifecycle・評価orchestration・summary/grouping・sort/filter・Workspace Package v1・TSV（物理行番号・trust・上限）・CSV（数式中和・escaping）・INVALID診断の隔離・診断の秘匿 |
 | `tests/batch-ui.test.js` | Batch UIの契約（Single既定・`[hidden]` vs `display:grid`・innerHTML不使用・診断配線・永続化の不在） |
 | `tests/project-profile.test.js` | プロファイル契約（unverifiedのみ・Z/zone不在・継承による持ち込み不可・floor→Z無し・既定値無し）・effective resolverとdirect pathの等価性・snapshot semantics・Matrix生成と絶対上限（`matrix.add()` 自身の1000件上限を含む）・TSV行単位隔離と余剰セル検査・寸法/extraFactor契約・canonical result-side gate |
+| `tests/review-package.test.js` | Review Package契約（derived-only・import経路なし・exporter gate）・**行と詳細の値が評価結果と一致すること**・summary/governingの一致・Full/Redactedのredaction・Markdown escape・診断privacy・継承値の遮断・export上限 |
+| `tests/review-ui.test.js` | Review UIの契約（描画元は `activeReview` のみ・鮮度はその場で再計算・export/印刷の関門・`@media print`・支配ケースを再選択しない・保存/通信なし） |
 
 ### 必須ケース
 
@@ -1188,8 +1192,105 @@ Phase 2Aで `project-config/miyoshi.js` を分離したことに伴うテスト�
 
 ## 更新履歴
 
+## 設計レビュー資料（Design Review Package / Phase 2I）
+
+検討が終わったあと、レビューの場で読める資料を1つ作る機能。
+Batch viewの「設計レビュー資料」から生成する。
+
+### これは何で、何でないか
+
+Review Package は現在のWorkspaceから作る **derived snapshot** である。
+
+- 計算入力の正本では**ない**（Project Input Package ではない）
+- Workspace Package では**ない**
+- Evidence では**ない**
+- 承認の記録では**ない**
+
+**入力へ戻す経路を持たない。** `deserializeReviewPackage` の類は存在せず、
+Review JSON は `WorkspaceCore.deserializeWorkspace()` でも
+`ProjectInput.deserialize()` でも取り込めない（どちらもテストで固定）。
+derived result が次の計算の入力として通用しないようにするためである。
+
+### 計算しない
+
+資料の集計は `WorkspaceCore.summarize()` を、構成ごとの件数は
+`groupByRecommended()` を、行は `evaluateWorkspace()` の結果を**呼んで**使う。
+風条件の内訳は `ProjectInput.windTraceFor()` の trace をそのまま載せる。
+`review-package.js` に風圧式も強度式も候補生成も無い（ソース契約テストで固定）。
+
+生成時は Workspace を**再評価**する。画面に出ている丸めた表示値を資料の元にしない。
+
+### 値が食い違わないこと
+
+行・詳細の各値が、評価結果および authoritative な入力packageと一致することを
+テストで固定している。寸法や許容耐力を書き換えても、
+NO_SOLUTION の詳細を OK に固定しても落ちる。
+
+### 詳細とtrace
+
+全件は一覧に載せ、詳細は選んだケースだけ（上限50件）。
+告示算定のケースは既存の trace をそのまま表示する。
+**手入力・案件プリセットのケースには trace が無い**（`windTraceFor()` が `null` を返す）。
+その場合は「この入力は告示風圧計算の経路を通っていない」と明記し、
+それらしい Er / qBar を作らない。
+
+### 比較
+
+2ケースを選ぶと事実の差（**B − A**）だけを出す。
+better / worse / safer / winner のような優劣判定は出さない。
+片方だけ選んだ状態は「比較なし」に読み替えず、両方選ぶよう求めて止まる。
+
+### Full / Redacted
+
+生成時に選ぶ。Redacted では表題・副題・備考・各ラベルといった自由記述を
+**モデルの時点で**伏せる。画面・Markdown・JSON・印刷が同じ境界を共有するため、
+どれか1つだけ伏せ忘れることが起きない。
+数値・ケースID・判定・登録プリセットの公開名は伏せない。
+
+### 出力
+
+- **Markdown**: 議事録や設計資料へ貼るため。表・見出し・コードフェンス・リンク構文を
+  壊さないよう、出所に関係なく全文字列をescapeする
+  （内部の trace にも `5<Z<40` のような文字列があるため）
+- **Review JSON**: 監査用。key順は固定で、同じ入力からは同じ出力になる
+- **印刷 / PDF**: ブラウザの「印刷 → PDFとして保存」。PDFライブラリは入れない。
+  ユーザー入力を含む standalone HTML は書き出さない
+
+### 古くなったら、黙って作り直さない
+
+資料を作ったあとに Workspace や設定が変わると、
+`WORKSPACE_STALE` / `SETTINGS_DIRTY` / `BOTH_STALE` として表示し、
+**再生成を求める**。勝手に作り直すと、利用者が見ていた資料が手元で別物に変わる。
+
+鮮度は旗で持たず、その都度計算し直す。変更listenerは表示を早くするためのもので、
+判断の根拠ではない。**印刷は既定で不可**で、`beforeprint` がその場で鮮度を確かめた
+ときだけ資料が出る。Ctrl+P やブラウザメニューからの印刷、変更イベントを伴わない
+設定変更、UI helperを通さないWorkspace変更、いずれも同じ関門を通る。
+
+### その他
+
+- 入口は素の object だけを受け取る（`Object.create({...})` で継承させた
+  metadata / options / 診断は拒否する）
+- 診断行は位置と理由だけを載せる。生のTSV行・生のJSON・入力package一式は載せない
+- Review操作は通信も保存もしない（localStorage / fetch などを持たない）
+- 1000ケースの資料も作れる（実測: 生成 226 ms / Markdown 11 ms / JSON 57 ms）
+
+### 信頼の表示について
+
+- **OK は設計承認ではない**。この入力条件と本ツールの算定契約のうえで候補が成立した、という意味
+- **OK は製品採用承認でもない**
+- **式の検証と入力の検証は別**。告示算定の trace は
+  `formulaVerificationStatus`（式は一次資料で確認）と
+  `inputVerificationStatus`（入力条件は未検証）を別項目のまま表示する
+- **MATCH は verified ではない**（Phase 2F の照合契約のまま）
+- **登録プリセットがあること自体は、そのケースが検証済みであることを意味しない**
+- **資料を出力しても Evidence は増えない**。検証状況はfactの出所に属する
+
+ツールとして `Approved` / `Certified` / `Final Design` を発行することはない。
+
 | バージョン | 日付 | 内容 |
 |-----------|------|------|
+| v1.10.0-phase2i | 2026-09-21 | **Phase 2I：設計レビュー資料（Design Review Package）。**（1）`review-package.js` を新設。現在のWorkspaceから、レビューで読める資料を1つ作る。**derived snapshot であって計算入力の正本ではない**——PIPでもWorkspace Packageでも Evidence でも承認記録でもない。（2）**入力へ戻す経路を持たない**。`deserializeReviewPackage` の類を作らず、Review JSON は Workspace / PIP のどちらのimportでも失敗する。（3）**計算しない**。集計は `WorkspaceCore.summarize()`、構成別件数は `groupByRecommended()`、行は `evaluateWorkspace()` を呼ぶ。ソース契約テストが `k1` / `k2` / `Er` / `qBar` / `Cpe` / `Gpe` の再実装と `calc.js` / `wind-pressure.js` への直接依存を禁じる（trace由来の**読み出し**と見出し文字列は対象外にして、広すぎる誤検出を避けている）。（4）**値が食い違わない**ことをテストで固定。行・詳細の各値が評価結果および authoritative な入力packageと一致することを確かめる。（5）詳細は選択ケースのみ（上限50）。**手入力・登録プリセットには trace が無い**ため、「告示風圧計算の経路を通っていない」と明記し Er / qBar を捏造しない。（6）比較は事実の差（**B − A**）のみ。優劣判定を出さない。片側だけの選択は「比較なし」に読み替えず fail closed。（7）**Full / Redacted をモデルの時点で分ける**。preview / Markdown / JSON / 印刷が同じ境界を共有する。（8）Markdown export は出所に関係なく全文字列をescapeする（内部traceに `5<Z<40` が含まれるため）。Review JSON は key順固定・決定的で、内部の source snapshot を含まない。（9）印刷は**既定で不可**。`beforeprint` がその場で鮮度を計算し直したときだけ資料が出る。Ctrl+P・変更イベントを伴わない設定変更・UI helperを通さないWorkspace変更、いずれも同じ関門を通る。（10）**独立検証の指摘6件を本フェーズ内で修復**。F1: 集計は固定していたが**値そのもの**を確かめるテストが無く、寸法や許容耐力を偽っても、NO_SOLUTION の詳細を OK に固定しても全テストが緑のままだった（実装は正しく、欠けていたのは証明）——値の一致を直接固定するテストを追加。F2 / F3: 面ごとに**項目立て**がずれていた（`publicLabel` が Markdown / JSON のみ、診断の理由が Markdown の表のみ欠落）——4面をそろえた。F4: `beforeprint` が例外時に fail open だった——既定で不許可にしてから与え直す形にした。F5 / F6: export上限の余裕を UTF-16 単位で測っていた——UTF-8 bytes で測り直した（多バイトラベルでの最大構成 1.33 MiB / 上限 8 MiB）。（11）Review操作は通信も保存もしない。1000ケースの資料も作れる（生成 226 ms / Markdown 11 ms / JSON 57 ms）。テストは baseline 398 → 500、browser 294 checks（pageError 0 / consoleError 0）。Evidenceは一切変更していない（`verifiedCases: []`、昇格なし、1250×2050 は `sample_default` / `unverified`、未解決4件も維持）。 |
 | v1.9.0-phase2h | 2026-09-20 | **Phase 2H：案件プロファイル / 検討ケース（Runtime Project Profile / Scenario Matrix）。**（1）`project-profile.js` を新設。案件共通の風条件（V0 / 粗度 / 建物高さ / 軒高 / 建物タイプ / 算定基準）を1回だけ入力し、開口ごとには W / H / 評価高さ Z / 部位 / ガラス種別だけを指定する。**Profileは registered preset ではなく verified Evidence でもない**——検証状況は `user_input_unverified` のみで、保存・export・100回の利用いずれによっても変わらない。schemaが `verificationStatus` / `evidence` / `sourceReference` / `sourceKind` / `presetId` を受け付けない。（2）**評価高さ Z と部位は Profile に入る場所が無い**。この2つは開口ごとに違い設計風圧を直接左右するため、規約ではなくschemaの構造として継承を不可能にした。（3）**階→評価高さの自動変換を持たない**。ラベルに `2F` と書いても Z は独立入力で、TSVの `floor` / `storey` / `level` 列は専用メッセージで拒否する。（4）**既定値を作らない**。V0 / 粗度 / 各高さ / 建物タイプ / 算定基準 / Z / 部位のいずれも欠ければ fail closed。とくに `basis` は Phase 2E と同じ理由で既定値を持たない。（5）`resolveEffectiveWindInput()` は Profile + Scenario を1つの WindInput へ展開するだけで、そこから先は既存の `ProjectInput.fromWindCalculation()` を通る。**Profile経由のPIPは direct path と deepEqual**（traceを含む）で、Profile layerは数値を変えない。（6）**snapshot semantics**: Workspaceへ追加した時点で effective input を PIP v2 として固定する。以後 Profile を変更しても既存caseは変わらず、UIが「反映されていません」と明示する（自動同期しない）。（7）Workspace export は Profile に依存せず、**Workspace JSON だけで再計算できる**。（8）組み合わせ生成（直積）と Profile Package v1 の export/import。すべて memory-only。（9）Phase 2G の TSV表パーサを `workspace.js` から共有化し、Workspace TSV と Scenario TSV の**物理行番号規約が一致する**ことを実測で確認。（10）**継続パケットの Required Fix 3件を修復**。RF-A: `options.maxTotal` が上限をそのまま置き換えていたため `maxTotal: 2000` で1400件生成でき、負の `existingCaseCount` でも同じことができた——`MAX_SCENARIOS` を絶対の天井にし、optionは狭める方向にしか効かないようにした。RF-B: TSVのrow isolationが**格納段階で切れて**おり、重複IDで後続行が試されないままMatrixが部分変更されていた——canonical helper `addParsedScenarios()` を置き1行ずつ隔離した。RF-C: gateが構築時のみで、手で組んだ `{profileType:'runtime_wind_profile', verificationStatus:'verified'}` がpreviewへ到達しPIPまで生成できた——**結果objectそのもの**を検査する `assertRuntimeProfile()` / `assertCanonicalScenario()` を置き、各消費関数が推移的な呼び出しに頼らず自分で通すようにした（Phase 2F D-013 の一般形）。（11）**独立検証の指摘7件を本フェーズ内で修復**。F5: 寸法と `extraFactor` の契約が遅れて効いていたため `extraFactor: 5.0` や W=999999 の行がケース一覧に並び、「Workspaceへ追加」まで落ちなかった——契約の実装を `project-input.js` に1つだけ置き（`assertPaneDimensionMm` / `assertExtraFactor`）、入力された時点で適用するようにした。これによりTSV由来の違反は**物理行番号付きで**落ちる。F2: Scenario Matrix の追加失敗が「取込エラー（JSON）」——起きていない取り込みの名前——と表示されていたため、診断のsourceに `scenario_matrix` を足し、専用の見出しにした。F6: Z / 部位の拒否が own property のみで、`Object.create()` で継承させると通過できた——継承の判定を1か所（`assertOrdinaryObject`）に置いた。F4b: 危険キーの事前走査が値まで拒否していたため、ラベルがちょうど `constructor` のProfileが弾かれていた——key位置のみを見るようにした。F3a / F3b / F4a / F7: 実行時には効いているのに削除してもテストが緑のままだった guard 4件（Matrix自身の1000上限 / Scenario TSVの余剰セル検査 / nest深さcap / 「既定値を置かない」メッセージ）を、それぞれ削除すると落ちるテストで固定した。（12）攻撃 33件すべて遮断、mutation は Wave 4H 14/14 と Wave 7 の修理後 8/9 kill（生存1件は別のguardが拾ったための生存で、coverageを主張せず判定を1か所へ戻した）、browser 130 checks（pageError 0 / consoleError 0）、テストは baseline 342 → 398。Evidenceは一切変更していない（`verifiedCases: []`、昇格なし、1250×2050 は `sample_default` / `unverified`）。 |
 | v1.8.0-phase2g | 2026-09-20 | **Phase 2G：一括検討 Workspace（Batch / Scenario Workspace）。**（1）複数ケースを1画面で比較する `workspace.js` を新設。**Batch layerは計算式を持たない**——各ケースは単一ケース計算とまったく同じ経路（PIP v2 → `GlassCalc.paneAreaM2` → `generateCandidates` → `splitCandidates`）を通る。見付面積の式は `GlassCalc.paneAreaM2()` に一本化し、単一ケースUIとBatchの両方が同じ関数を呼ぶ。テストは `workspace.js` のソースを読み、計算コアの識別子や案件固有値が現れたら失敗する。（2）**Workspace Package v1**（`schemaVersion: 1` / `workspaceType: "glass_batch_workspace"`）を新設。1ケース = 既存PIP v2で、PIPは v2 のまま（v3へ上げていない）。**保存するのは入力だけ**で、設計風圧・推奨構成・許容耐力・traceといった計算結果を正本として保存しない。import後は必ず再計算する。（3）外部importは既存 `ProjectInput.deserialize()` を必ず通す。ファイルが `registered_preset` / `verified` を名乗っても `imported_unverified` / `unverified` へ降格し、改ざんされた `designPressure` は再計算で上書きされる。TSVから registered preset / Evidence を作る経路は存在しない。（4）ExcelからのTSV貼り付け（`manual` / `notification` のみ。`basis` は必須で既定値を持たない——業界推奨値が法定最低値として通らないようにするため）。未知の列・計算結果側の列・header列数超過はいずれも読み飛ばさずエラーにする。（5）結果CSV出力。`=` `+` `-` `@` タブ・CRで始まる**文字列セル**を中和し、数値セルは中和しない（`-918` はそのまま）。RFC4180 escaping。（6）取り込めなかった行は消えず「入力エラー」として一覧に残る。ただしWorkspaceがauthoritativeに持つ入力は常に妥当なPIP v2だけで、壊れた行は**表示専用の診断レコード**として別レイヤに隔離される。診断は計算値をすべて `null` で持つため、最大設計風圧にも支配ケースにも混ざらず、Workspace JSONにも出力されない。（7）診断が持つのは位置と理由だけ（物理行番号 / case index / 安全なcaseId / 列名 / 理由）。行番号は貼り付けたシート上の**物理行**で、空行があってもずれない。理由の文面は、既知語彙以外の引用部分を伏せ字にし長さ上限を設ける（CSVは共有されるファイルであり、実際の流出経路になるため）。（8）Workspaceは**メモリ上だけ**に存在する（localStorage / サーバー / DB のいずれにも保存しない）。上限は 1000ケース / JSON 1MB / TSV 1MB / label 200文字 / caseId 64文字。（9）**Single（単一ケース）が既定**で、その挙動・結果は Phase 2G 前と完全一致。実装中に `display: grid` が `[hidden]` を上書きして初期表示で両viewが同時に描画される実バグを発見し修正、回帰テストで固定した。（10）**独立検証（別コンテキスト）の指摘4件をすべて修復**。最も重いものは、validatorの例外メッセージが落ちた値をそのまま引用するため、案件名や図面番号を含むセルが画面と**エクスポートされたCSV**へ出ていた点（F1。3000文字のセルが3075文字の診断になった）。あわせて必須列欠落時に直前の列を原因として報告していた点（F2）、header列数超過ガードの未テスト（F3）、`errorToInvalidResult` がlabel契約を呼び出し側に委ねていた点（F4）を修復。Evidenceは一切変更していない（`verifiedCases: []`、昇格なし、1250×2050 は `sample_default` / `unverified`）。テストは baseline 270 → 342。 |
 | v1.7.0-phase2f | 2026-09-20 | **Phase 2F：Evidence アーキテクチャと Verified Case レイヤ。**（1）Evidence契約（level / checkedAt / public-safe境界 / promotion guard）が案件固有の `miyoshi.js` に閉じ込められていたため、案件非依存の `project-config/evidence.js` へ**移動**（再実装ではない）。`project-input.js` にあった `VERIFICATION_STATUSES` の重複定義も解消し、契約の正を1か所にした。（2）**Promotion Gate を強化し、実際の構築経路へ接続**。`verified` は `level === 'primary'` かつ妥当な `checkedAt` に加えて、`privateReferenceAvailable === true` または構造検証済みの public primary source reference を要求する。`verifiedValue()` / 案件identity構築 / `validateVerifiedCase()` のすべてがこのgateを通る（gateを呼ばない経路は存在しない）。（3）`assertPublicPrimarySourceReference()` を新設。https / 資格情報なし / localhost・loopback・私設ネットワーク・IPリテラルでない / 既知private provider（Drive・Docs・Notion・SharePoint・Dropbox）でない / 完全修飾ホスト / tokenを提供元にしない、を構造検証する。**検証するのはpublic-safeな構造であって資料の真正性ではない**旨を明記。`publicDescription`（URLを禁止）とは役割が逆であるため別関数とした。（4）`project-config/evidence-ledger.js` を新設。field単位のfactを検証状況付きで保持し、case-level昇格は critical fact が**すべて** gate を通ることを要求する（field verified ≠ case verified）。factKeyはレビュー済み allowlist のみ（`A_102_pdf` 等のprivate filename由来キーを拒否）。entryは検証後に改変できないよう深くfreezeし、呼び出し側objectから切り離して保持する。（5）read-onlyの照合診断を追加。**判定順序はEvidenceが先、数値が後**で、Evidenceがverifiedでなければ数値が完全一致していても `INSUFFICIENT_EVIDENCE` を返す（`MATCH` ≠ verified）。照合はpresetを一切変更しない。（6）案件プリセットモードへEvidence status表示を追加（configのmetadataから導出。UI側に検証状況を持たない）。`verifiedCases` が0件のため **case selectorは描画しない**（空のUIを作らない）。（7）**案件の一次資料が本実行環境から利用できなかったため、案件factの昇格は一切行っていない。** `verifiedCases: []`、Explicit unverified items 4件を維持。1250×2050 は `sample_default` / `unverified` のまま。告示1458号式・k1・k2・IGU・TP・Low-E・`extraFactor`・Phase 2E Wind Trace（Er / qBar / Cpe×Gpe / 内圧係数 / IV→III / 再現期間の分離）・みよし案件の風圧値・V0=34・roughness III はいずれも無変更。テストは baseline 197 → 256。（8）**独立検証（別コンテキスト）の指摘12件をすべて修復**。最も重いものは、`new URL()` が末尾のルートドットを保持するため `https://drive.google.com./file/d/...` が private provider denylist と完全修飾ホスト判定の**両方**を迂回し、実在のDrive URLを「検証済みpublic primary source reference」として保存できた点（F1）。あわせて、`createEntry()` がgateと保存で呼び出し側 `evidence` を2回読むTOCTOU（F2）、UIが読む `config.identity` / `dimensions` / `wind` / `verifiedCases` が未freezeで検証後に改変できた点（F3）、contract定義表のlive mutable公開（F4）、`reconcileFact()` が自己申告の `verificationStatus` を信用していた点（F5）、case-level gate再実行の未テスト（F6・mutation survivor）、Run Artifactの誇張と変更ファイルの過小記載（F7）、私設TLD/CGNAT/wildcard DNS/追加provider/percent-encoded credential（F8）、`caseId` のpublic-safe未検査（F9）、Evidence panelの例外黙殺（F10）、identity literalとgateの結び付きが規約のみ（F11）、critical fact空時の空虚な真（F12）を修復。修復は19件のmutationで固定し、テストは 256 → 270。 |
