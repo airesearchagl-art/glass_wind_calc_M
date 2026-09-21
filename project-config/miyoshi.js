@@ -187,6 +187,7 @@
   var verifiedValue = ProjectEvidence.verifiedValue;
   var assertPromotionGate = ProjectEvidence.assertPromotionGate;
   var deepFreeze = ProjectEvidence.deepFreeze;
+  var assertOrdinaryObject = ProjectEvidence.assertOrdinaryObject;
 
   // 案件識別情報そのものは社内基本設計資料で確認済み（verificationStatus:
   // 'verified'）。ただし本リポジトリは public であるため、施主名・建物名称・
@@ -466,9 +467,16 @@
     if (!caseObj || typeof caseObj !== 'object') {
       throw new Error('verified case must be an object');
     }
+    // Phase 2J Wave 1: caseObj のfieldはすべて素のproperty readで消費される。
+    // custom prototype に必須fieldを載せれば、下の必須field検査も
+    // caseId / floor / zone / 寸法 / designPressure の検査も、
+    // 「呼び出し側が実際には持っていない値」で通過してしまう。
+    assertOrdinaryObject(caseObj, 'verified case');
     for (var i = 0; i < VERIFIED_CASE_REQUIRED_FIELDS.length; i++) {
       var field = VERIFIED_CASE_REQUIRED_FIELDS[i];
-      if (!(field in caseObj)) {
+      // `field in caseObj` は prototype chain まで見るため、必須field検査として
+      // 弱い。own propertyであることを要求する（構造ガードとの二重防御）。
+      if (!Object.prototype.hasOwnProperty.call(caseObj, field)) {
         throw new Error('verified case is missing required field: ' + field);
       }
     }
@@ -515,6 +523,9 @@
     if (!evidence || typeof evidence !== 'object') {
       throw new Error('verified case evidence must be an object with widthEvidence/heightEvidence/pressureEvidence');
     }
+    // top-levelを閉じてもnestedは閉じない。widthEvidence/heightEvidence/
+    // pressureEvidence を継承で供給する経路が別に残るため、ここでも閉じる。
+    assertOrdinaryObject(evidence, 'verified case evidence');
     // pane W / pane H / pressure のそれぞれについて、
     // 「primary evidence かつ妥当なcheckedAt」というhard conditionを、
     // Phase 2Fの強化後gate assertPromotionGate('verified', ...) を再利用して強制する
@@ -525,6 +536,9 @@
     // であればここでの再検証は冗長になるが、caseObjのevidenceがmakeEvidence()
     // を経由せず直接組み立てられる可能性を考慮し、validateVerifiedCase()側
     // でも独立して強制する（defense in depth）。
+    if (evidence.sourceReferences !== null && evidence.sourceReferences !== undefined) {
+      assertOrdinaryObject(evidence.sourceReferences, 'verified case evidence.sourceReferences');
+    }
     ['widthEvidence', 'heightEvidence', 'pressureEvidence'].forEach(function (key) {
       var entryEvidence = evidence[key];
       // Phase 2F §3-C: case-level検証も強化後のgateを通す。

@@ -78,6 +78,59 @@
     return true;
   }
 
+  // ============================================================
+  // 構造ガード（Phase 2J Wave 1）
+  // ============================================================
+
+  /**
+   * prototype chain に細工の無い素の object だけを通す。
+   *
+   * ── なぜ field ごとの検査では閉じないか ──────────────────────
+   *
+   * `Object.create({level: 'primary', ...})` で継承させたkeyは
+   * `Object.keys()` にも `hasOwnProperty()` にも現れない。したがって
+   *   - 「余計なfieldが無いこと」を Object.keys で確かめる allowlist は**空虚に真**になり
+   *   - `evidence.level` のような素の property read は継承値を読んでしまう
+   * という形で、契約検査を通り抜けたまま契約値を注入できる。
+   *
+   * これは prototype pollution ではない（Object.prototype は一切変更されない）。
+   * 呼び出し側objectの prototype に契約値を載せる
+   * **inherited-field consumption / custom-prototype contract-value injection** である。
+   * 名前を取り違えると、対策が key sanitization の方向へ逸れて的を外す。
+   *
+   * ── null prototype を通す理由（Phase 2J §23 の明示的決定）────
+   *
+   * 継承元が無い＝継承値が入り得ないため、`Object.prototype` 付きより素直な
+   * データである。required fieldは必ず own property になる。
+   * これは「たまたま通っている」のではなく意図した決定であり、testで固定する。
+   *
+   * ── 判定はここ1か所だけで行う ────────────────────────────────
+   *
+   * field ごとの継承チェックを増やさない。増やすと、前段が生きている限り
+   * 後段が発火せず、どちらが効いているのか分からなくなる。
+   */
+  function assertOrdinaryObject(value, label) {
+    var where = label || 'value';
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(where + ' must be a plain object');
+    }
+    var proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+      throw new Error(where + ' must be a plain object with no inherited properties');
+    }
+    // own "__proto__" は**別の形**であり、prototypeの付け替えではない（実測）。
+    // `JSON.parse('{"__proto__":{...}}')` はprototypeを変えないので上の判定を通る。
+    // しかしこのkeyを持ったまま下流で `Object.assign({}, value)` のような
+    // [[Set]] を使ったcopyが起きると、`Object.prototype.__proto__` のsetterが
+    // 発火してcopyのprototypeが差し替わる。つまり「素のdata」として通した値が、
+    // 一手先で custom prototype として**再生する**。
+    // 値そのものは無害でも運搬体として危険なので、予期しないown fieldとして塞ぐ。
+    if (Object.prototype.hasOwnProperty.call(value, '__proto__')) {
+      throw new Error(where + ' must not carry an own "__proto__" field');
+    }
+    return value;
+  }
+
   // public-safe boundary（RF-02）: publicDescription（および将来
   // publicEvidenceDescription等）へ渡してよいテキストかどうかを検証する
   // 共通ガード。既知のURL/パス/プロバイダ/opaqueトークンのパターンに
@@ -181,6 +234,10 @@
     if (!evidence || typeof evidence !== 'object') {
       throw new Error('evidence metadata is required' + (label ? ' for ' + label : ''));
     }
+    // Phase 2J Wave 1: 以降の `evidence.level` / `evidence.checkedAt` /
+    // `evidence.privateReferenceAvailable` はすべて素のproperty readであり、
+    // custom prototype に載せた契約値をそのまま読んでしまう。読む前に構造を閉じる。
+    assertOrdinaryObject(evidence, 'evidence' + (label ? ' (' + label + ')' : ''));
     if (EVIDENCE_LEVELS.indexOf(evidence.level) === -1) {
       throw new Error('evidence.level must be one of ' + EVIDENCE_LEVELS.join(', ') + (label ? ' (' + label + ')' : ''));
     }
@@ -460,6 +517,9 @@
     if (typeof sourceReference !== 'object' || Array.isArray(sourceReference)) {
       throw new Error('sourceReference must be null or an object' + (label ? ' (' + label + ')' : ''));
     }
+    // 継承させた kind/url は Object.keys ベースのallowlistに現れないため、
+    // 「余計なfieldが無い」検査が空虚に真になったまま契約値だけが通る。
+    assertOrdinaryObject(sourceReference, 'sourceReference' + (label ? ' (' + label + ')' : ''));
     if (sourceReference.kind !== 'public_primary') {
       throw new Error(
         'sourceReference.kind must be "public_primary" (got ' +
@@ -515,6 +575,11 @@
       return true;
     }
 
+    // options.sourceReference も素のproperty readなので、同じ経路で
+    // 「検証済みpublic referenceがある」と偽れる。ここで構造を閉じる。
+    if (options !== null && options !== undefined) {
+      assertOrdinaryObject(options, 'promotion options' + (label ? ' (' + label + ')' : ''));
+    }
     options = options || {};
     var sourceReference = options.sourceReference;
 
@@ -556,6 +621,7 @@
     CHECKED_AT_PATTERN: CHECKED_AT_PATTERN,
     PUBLIC_UNSAFE_TEXT_PATTERNS: Object.freeze(PUBLIC_UNSAFE_TEXT_PATTERNS),
     isValidCheckedAt: isValidCheckedAt,
+    assertOrdinaryObject: assertOrdinaryObject,
     assertPublicSafeEvidenceText: assertPublicSafeEvidenceText,
     makeEvidence: makeEvidence,
     assertEvidenceConsistency: assertEvidenceConsistency,

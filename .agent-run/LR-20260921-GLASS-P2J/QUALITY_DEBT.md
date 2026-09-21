@@ -1,8 +1,35 @@
 # Quality Debt — LR-20260921-GLASS-P2J
 
+## QD-J01 — `assertOrdinaryObject` がリポジトリ内に3実装ある（Wave 1実測）
+
 ```text
-none（Wave 0時点）
+project-config/evidence.js : Wave 1で追加（Evidence契約の正）
+project-profile.js:120     : Phase 2H F6 で追加
+review-package.js:189      : Phase 2I で追加
 ```
+
+3つはロジックが同一で、null prototype の扱いという**判断が割れうる箇所でも
+同じ決定**をしていることを実測で確認した（D-004）。したがって現時点で
+挙動の不整合は無い。
+
+debt の内容は「将来ひとつだけ変更されて判断が割れる」可能性である。
+統合しなかった理由:
+
+- `project-profile.js` / `review-package.js` は現在 `evidence.js` に依存していない。
+  汎用のobject形状述語のために、UI/report層から Evidence契約層への依存辺を
+  足すのは層として逆であり、Wave 1 の mandate（§2 inventory と generic Evidence
+  hardening）の外でもある。
+- `tests/review-package.test.js` は review-package 側の定義数と呼び出し数を
+  pinしている。ここを動かすのは Wave 1 の範囲を超える churn になる。
+
+Hard Gate には該当しない。Hard Gate の "prototype boundary" は
+**境界が破れていること**を指すが、境界自体は9経路すべてで閉じていることを
+実測済みであり、3実装それぞれが独立にテストで守られている。
+
+対処案（将来phase）: 汎用述語を層に依存しない小moduleへ切り出すか、
+`evidence.js` の実装を正として他2つがそれを解決する。
+どちらも Phase 2J の目的（Evidence closure）とは独立に行える。
+
 
 ## 規則
 
