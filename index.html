@@ -422,6 +422,9 @@
   }
   .review-kv { margin: 0; font-size: 12px; }
 
+  /* 印刷不可の文面は画面には出さない */
+  #review-print-blocked { display: none; }
+
   @media print {
     /* Reportだけを残す。操作要素は1つも印刷しない。 */
     body { background: #fff; color: #000; }
@@ -430,15 +433,27 @@
       display: none !important;
     }
     .batch-wrap { display: block; padding: 0; max-width: none; }
-    #review-report {
+
+    /* RF-P1: 既定は「印刷しない」。
+       アプリのボタンを通らない印刷（Ctrl+P / ブラウザメニュー）でも、
+       beforeprint が鮮度を確かめて body に印を付けない限り資料は出ない。
+       警告の裏に古い内容を残さないよう、display を切り替える。 */
+    #review-report { display: none !important; }
+    #review-print-blocked {
+      display: block !important; border: 1px solid #000; padding: 12px;
+      background: #fff; color: #000; font-size: 13px; line-height: 1.8;
+    }
+    body.review-print-allowed #review-print-blocked { display: none !important; }
+    body.review-print-allowed #review-report {
       display: block !important; border: none; padding: 0; margin: 0;
       background: #fff; color: #000; box-shadow: none;
     }
-    #review-report .batch-table { font-size: 10px; }
-    #review-report .batch-table th, #review-report .batch-table td {
+    body.review-print-allowed #review-report .batch-table { font-size: 10px; }
+    body.review-print-allowed #review-report .batch-table th,
+    body.review-print-allowed #review-report .batch-table td {
       border: 1px solid #999; color: #000; white-space: normal;
     }
-    #review-report .review-interpretation { border: 1px solid #000; }
+    body.review-print-allowed #review-report .review-interpretation { border: 1px solid #000; }
     /* 小さなカードはページ跨ぎで割らない。長い一覧表は自然に流す。 */
     .review-detail-card, .review-interpretation { break-inside: avoid; }
     .review-section h3 { break-after: avoid; }
@@ -1178,8 +1193,16 @@
       style="margin-top:10px;" hidden></textarea>
   </div>
 
-  <!-- 印刷対象。ここだけが @media print で残る -->
+  <!-- 印刷対象。ただし既定は「印刷しない」で、
+       beforeprint が鮮度を確かめたときだけ印刷される（RF-P1）。 -->
   <div class="card" id="review-report" hidden></div>
+
+  <!-- 古い資料を印刷しようとしたときに、資料の代わりに出る静的な文面。
+       画面には出ない。印刷時に、許可されていない場合だけ現れる。 -->
+  <div id="review-print-blocked">
+    <p><strong>このReportは印刷できません。</strong></p>
+    <p>現在のWorkspaceまたは設定と一致していません。画面へ戻り、Reportを再生成してください。</p>
+  </div>
 
 </div>
 
@@ -2875,24 +2898,40 @@ function readCurrentReportSettings() {
   for (var i = 0; i < boxes.length; i++) {
     if (boxes[i].checked) detailIds.push(boxes[i].value);
   }
+  // RF-P2: A と B を**別々に**持つ。
+  // 片方だけ選んだ状態を「比較なし」と同じ [] に潰すと、
+  // 「A だけ選んだ」という設定変更が snapshot 比較で消え、
+  // 資料が FRESH のままになる（実測で確認した）。
   var a = document.getElementById('rep-cmp-a').value;
   var b = document.getElementById('rep-cmp-b').value;
-  var comparison = (a && b) ? [a, b] : [];
   return {
     title: document.getElementById('rep-title').value,
     subtitle: document.getElementById('rep-subtitle').value,
     note: document.getElementById('rep-note').value,
     privacyMode: document.getElementById('rep-privacy').value,
     detailCaseIds: detailIds,
-    comparisonCaseIds: comparison
+    comparisonA: a === '' ? null : a,
+    comparisonB: b === '' ? null : b
   };
+}
+
+/**
+ * 片方だけの選択を「比較なし」へ読み替えない（RF-P2）。
+ * 黙って解釈し直すと、利用者が選んだつもりの比較が資料に出ない。
+ */
+function comparisonIdsFrom(settings) {
+  if (settings.comparisonA === null && settings.comparisonB === null) return [];
+  if (settings.comparisonA === null || settings.comparisonB === null) {
+    throw new Error('比較する場合は Case A / Case B の両方を選択してください。');
+  }
+  return [settings.comparisonA, settings.comparisonB];
 }
 
 /** 決定的な文字列化。弱いhashは作らない（厳密比較で足りる）。 */
 function serializeReportSettings(settings) {
   return JSON.stringify([
     settings.title, settings.subtitle, settings.note, settings.privacyMode,
-    settings.detailCaseIds, settings.comparisonCaseIds
+    settings.detailCaseIds, settings.comparisonA, settings.comparisonB
   ]);
 }
 
@@ -2928,8 +2967,45 @@ function renderReviewFreshness() {
   var host = document.getElementById('rep-freshness');
   host.textContent = REVIEW_FRESHNESS_TEXT[state];
   host.className = 'batch-status' + (state === 'FRESH' || state === 'NO_REPORT' ? '' : ' is-error');
+
+  // 古くなった時点で、前回のexport結果を画面へ残さない（§13）。
+  // 「設定が変わりました」という警告の横に、前のFull出力が出たままだと、
+  // それを現在の内容だと思ってコピーできてしまう。
+  // 既にexport済みのテキストを取り消すものではなく、
+  // 古い出力が現在の内容のような顔をし続けるのを止めるだけである。
+  if (state !== REVIEW_FRESHNESS.FRESH) {
+    var out = document.getElementById('rep-export-out');
+    if (out) { out.value = ''; out.hidden = true; }
+  }
+
+  // 画面表示用の印。印刷時の可否は beforeprint が決め直す（下記）。
+  applyPrintEligibility(state === REVIEW_FRESHNESS.FRESH);
   return state;
 }
+
+function applyPrintEligibility(allowed) {
+  if (!document.body) return;
+  if (allowed) document.body.classList.add('review-print-allowed');
+  else document.body.classList.remove('review-print-allowed');
+}
+
+/**
+ * 印刷の最終関門（RF-P1）。
+ *
+ * アプリのボタンを通らない印刷（Ctrl+P / ブラウザメニュー）でも必ずここを通る。
+ * ここで鮮度を**その場で計算し直す**ため、
+ * 変更listenerの付け忘れも、プログラムからのcontrol操作も、
+ * 画面表示の古さも、判断に影響しない。
+ * ボタン側のgateは早い段階での案内であって、境界はこちらである。
+ */
+window.addEventListener('beforeprint', function () {
+  applyPrintEligibility(getReviewFreshness() === REVIEW_FRESHNESS.FRESH);
+});
+
+// 許可状態を印刷後に持ち越さない。次の印刷でもう一度確かめさせる。
+window.addEventListener('afterprint', function () {
+  applyPrintEligibility(false);
+});
 
 /** 詳細候補・比較候補は authoritative Workspace のcaseだけ。診断は載せない。 */
 function refreshReportSelectors() {
@@ -3019,7 +3095,7 @@ function generateReview() {
         note: settings.note
       },
       detailCaseIds: settings.detailCaseIds,
-      comparisonCaseIds: settings.comparisonCaseIds,
+      comparisonCaseIds: comparisonIdsFrom(settings),
       privacyMode: settings.privacyMode
     });
     activeReportSettingsSnapshot = serializeReportSettings(settings);

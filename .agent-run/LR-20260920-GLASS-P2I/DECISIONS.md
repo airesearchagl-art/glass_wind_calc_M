@@ -209,3 +209,51 @@ Phase 2D〜2Hと同一。Resume時に再計算して一致を確認する。
      「攻撃が届いたこと」自体をassertする行を足した。
    Phase 2G / Wave 3 と同じ「通ってしまうtest」の系列なので、経緯ごと残す。
 ```
+
+## D-016 — RF-P1: 印刷の既定を「出さない」にする
+
+- **指摘（正当・実測で再現）**: `printReview()` はアプリのボタンしか守っていなかった。
+  print CSS が `#review-report { display: block !important; }` を無条件で当てていたため、
+  Ctrl+P / ブラウザメニューからの印刷は鮮度ゲートを素通りした。
+  ```text
+  再現: Full資料を作成 → privacyをRedactedへ変更 → 再生成しない → 印刷媒体
+        freshness      : SETTINGS_DIRTY
+        #review-report : display: block
+        Fullのmarker   : 印刷媒体に存在
+  ```
+  §44 の「silent stale report」「Redacted mode leak」に当たる。
+- **決定**: 二層にする。
+  - Layer A（表示）: `renderReviewFreshness()` が `review-print-allowed` を同期する。UXのため。
+  - Layer B（境界）: `beforeprint` が**その場で** `getReviewFreshness()` を計算し直し、印を付け直す。
+    こちらが正である。listenerの網羅性を privacy の境界にしない。
+  - `afterprint` で許可を落とし、次の印刷でもう一度確かめさせる。
+- print CSS の既定は `#review-report { display: none !important; }`。
+  許可の印が付いたときだけ表示する。警告は `display` の切り替えで出すので、
+  **警告の裏に古い内容が残らない**。
+- **実測（修正後）**: 変更イベントを一切出さずに control の値だけ書き換えても、
+  `beforeprint` の時点で SETTINGS_DIRTY になり、Fullのmarkerは印刷媒体に現れない。
+
+## D-017 — RF-P2: 比較の片側状態を潰さない
+
+- **指摘（正当・実測で再現）**: `(a && b) ? [a, b] : []` が
+  「未選択 / Aのみ / Bのみ」を同じ `[]` に畳んでいた。
+  ```text
+  再現: 比較なしで作成 → FRESH
+        Aだけ選択      → FRESH（本来は SETTINGS_DIRTY）
+  ```
+  Wave 4 の「比較セレクタの変更は SETTINGS_DIRTY」という契約と矛盾していた。
+- **決定**: 設定モデルは `comparisonA` / `comparisonB` を**別々に**持つ。
+  snapshotも別々に含めるので、none/none・A/none・none/B・A/B が区別できる。
+- 生成時に片側だけなら **fail closed**（「比較する場合は Case A / Case B の両方を選択してください。」）。
+  黙って「比較なし」に読み替えない。読み替えると、利用者が選んだつもりの比較が
+  資料に出ないまま完成してしまう。
+
+## D-018 — 古いexport出力を画面に残さない（§13 / §14）
+
+- Hard Gateではないが、紛らわしい状態だった。
+  Full → Redacted へ切り替えた直後、「設定が変更されています」の警告の横に
+  前回のFull出力がそのまま残り、現在の内容のような顔をしていた。
+- **決定**: `renderReviewFreshness()` が FRESH 以外を返した時点で、
+  export bufferを隠し、値も消す。同じ再計算が print 可否と buffer の両方を守る。
+- 既にexport済みのテキストを取り消すものではない。
+  古い出力が「現在の内容」を名乗り続けるのを止めるだけである。

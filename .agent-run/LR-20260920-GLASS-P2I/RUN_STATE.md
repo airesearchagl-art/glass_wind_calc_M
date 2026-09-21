@@ -10,7 +10,7 @@
 - Base SHA: 6a5232f65d02e2a8bfa8c2c87049b5865c584855
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 4 — Review UI / print / stale boundary 完了
+- Current wave: Wave 4H — Boundary Closure（RF-P1 / RF-P2）完了
 - Task Packet ID: LRP-20260920-GLASS-P2I
 - Task Packet revision: 1
 - Task Packet SHA-256: 901afdc2317e0b38ca90dcb69ba1fb8d8b271b1e073acd40e20d0e784c8f229e
@@ -288,6 +288,61 @@ redaction漏れ / report JSONの再取り込み。
 §41 の意図が上記と異なる場合は、残りを送ってもらえれば差分を実施する。
 ```
 
+## Wave 4H — Boundary Closure（実測）
+
+独立レビューの指摘2件。どちらもコードに触る前に再現を確認した。
+
+```text
+RF-P1  native print bypass                                     FIXED
+  printReview() はアプリのボタンしか守っておらず、
+  print CSS が #review-report を無条件で表示していたため、
+  Ctrl+P / ブラウザメニューからの印刷が鮮度ゲートを素通りした。
+
+  修正前の実測（Full資料 → Redactedへ変更 → 再生成せず → 印刷媒体）:
+    freshness      : SETTINGS_DIRTY
+    #review-report : display: block
+    Fullのmarker   : 印刷媒体に存在   ← 漏れる
+
+  修正後の実測（変更イベントを一切出さずに値だけ書き換えた場合も含む）:
+    freshness      : SETTINGS_DIRTY
+    report         : 印刷媒体で非表示
+    Fullのmarker   : 印刷不可
+    代わりに静的な「印刷できません」の文面が出る
+
+RF-P2  partial comparison freshness collapse                   FIXED
+  (a && b) ? [a, b] : [] が none/none・Aのみ・Bのみ を同じ [] に畳み、
+  「Aだけ選んだ」という設定変更が snapshot 比較で消えていた。
+
+  修正前の実測: 比較なしで作成 → FRESH / Aだけ選択 → FRESH（誤り）
+  修正後の実測: Aだけ → SETTINGS_DIRTY / Bだけ → SETTINGS_DIRTY /
+                片側だけで生成 → fail closed（両方選べ、と明示）/
+                両方選択 → FRESH・比較が出る / Bだけ解除 → SETTINGS_DIRTY
+```
+
+```text
+npm test : 478 pass / 0 fail（Wave 4 472 → +6）
+browser  : 4H flow 27 checks / 0 fail / pageError 0 / consoleError 0
+回帰      : Wave 4 flow 48 / p2h 29 / p2g 84 いずれも 0 fail
+```
+
+### mutation（§16の10項目を8 mutantで網羅）
+
+```text
+KILLED 8 / SURVIVED 0 / PATCH-MISS 0
+
+  P1  beforeprint handler削除                KILLED
+  P2  beforeprint がcache値を使う            KILLED
+  P3  print CSSが常に資料を表示              KILLED
+  P4  警告の裏で資料が印刷可能               KILLED
+  P5  afterprintが許可を残す                 KILLED
+  P6/P7 比較を再び [] へ畳む                 KILLED（同一箇所のため1 mutant）
+  P8  片側比較を黙って「比較なし」に         KILLED
+  P9/P10 古いexport bufferが残る             KILLED（同一箇所のため1 mutant）
+```
+
+P3 / P4 の挙動面の証拠は、修正前の再現実測そのものである
+（印刷媒体で display: block かつ marker 在り）。
+
 ## Quality Debt
 
 QUALITY_DEBT.md 参照（Wave 0時点で none）。
@@ -306,8 +361,9 @@ Wave 1-7（TASK_QUEUE.md参照）
 
 ## Next action
 
-Wave 5: security / privacy / injection / mutation / size limits。
-Wave 4で先行実施した攻撃・mutationの結果は本ファイルに実測済み。
+Wave 5: coverage reconciliation / residual attack sweep /
+cross-surface privacy sweep / 残りのmutation / large-report / network・storage audit。
+Wave 4・4Hで実測済みの項目は再実行せず、突合表で参照する。
 
 ## Stop conditions status
 

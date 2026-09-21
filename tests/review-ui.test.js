@@ -194,3 +194,86 @@ test('UI-15: 承認を名乗る語をUIに持たない', () => {
     assert.equal(reviewSection.toLowerCase().includes(word), false, word + ' を出さない');
   }
 });
+
+// ============================================================
+// Wave 4H: 印刷の最終関門と、比較設定の片側状態
+// ============================================================
+
+test('4H-1: 印刷は既定で不可。許可の印が付いたときだけ資料が出る（RF-P1）', () => {
+  const block = HTML.slice(HTML.indexOf('@media print'));
+  const rules = block.slice(0, block.indexOf('\n  .batch-table'));
+
+  // 既定で隠す → 許可時だけ出す、の順で書かれていること
+  const hideAt = rules.indexOf('#review-report { display: none !important; }');
+  const showAt = rules.indexOf('body.review-print-allowed #review-report');
+  assert.notEqual(hideAt, -1, '既定で #review-report を隠す');
+  assert.notEqual(showAt, -1, '許可時のみ表示する');
+  assert.equal(hideAt < showAt, true, '既定が先、許可が後');
+
+  // 警告の裏に資料を残さない（display切り替えであること）
+  assert.match(rules, /#review-print-blocked \{[^}]*display: block !important/);
+  assert.match(rules, /body\.review-print-allowed #review-print-blocked[^}]*display: none !important/);
+  // 警告文は静的markupで、runtime文字列ではない
+  assert.match(HTML, /id="review-print-blocked"/);
+  assert.match(HTML, /このReportは印刷できません/);
+});
+
+test('4H-2: beforeprint がその場で鮮度を計算し直す（旗を読まない）', () => {
+  const code = scriptCode();
+  assert.match(code, /addEventListener\('beforeprint'/);
+  const idx = code.indexOf("addEventListener('beforeprint'");
+  const handler = code.slice(idx, idx + 260);
+  assert.match(handler, /getReviewFreshness\(\)/, 'その場で計算する');
+  assert.match(handler, /applyPrintEligibility\(/);
+  // 保存された状態を読むだけの実装にしない
+  assert.equal(/beforeprint[\s\S]{0,200}cachedFreshness/.test(code), false);
+
+  assert.match(code, /addEventListener\('afterprint'/);
+  const aidx = code.indexOf("addEventListener('afterprint'");
+  assert.match(code.slice(aidx, aidx + 200), /applyPrintEligibility\(false\)/,
+    '許可状態を印刷後に持ち越さない');
+});
+
+test('4H-3: アプリのボタン側のgateも残っている（§8）', () => {
+  const code = scriptCode();
+  assert.match(bodyOf(code, 'printReview'), /assertReviewExportable\(/);
+  // 二層である: ボタン = 早い案内 / beforeprint = 最終境界
+  assert.match(code, /addEventListener\('beforeprint'/);
+});
+
+test('4H-4: 比較の片側選択を [] へ潰さない（RF-P2）', () => {
+  const code = scriptCode();
+  const settings = bodyOf(code, 'readCurrentReportSettings');
+  assert.match(settings, /comparisonA/);
+  assert.match(settings, /comparisonB/);
+  // 旧実装の (a && b) ? [a, b] : [] を残さない
+  assert.equal(/\(a && b\)\s*\?/.test(settings), false);
+  assert.equal(settings.includes('comparisonCaseIds'), false,
+    '生の選択値を読む段階で配列へ畳まない');
+
+  // snapshot が A / B を別々に含む
+  const ser = bodyOf(code, 'serializeReportSettings');
+  assert.match(ser, /comparisonA/);
+  assert.match(ser, /comparisonB/);
+});
+
+test('4H-5: 片側だけの比較指定は fail closed（§11）', () => {
+  const code = scriptCode();
+  const fn = bodyOf(code, 'comparisonIdsFrom');
+  assert.match(fn, /両方を選択/, '明示的なメッセージで止める');
+  assert.match(fn, /throw new Error/);
+  // 自動補完しない
+  assert.equal(/comparisonB\s*=\s*settings\.comparisonA/.test(fn), false);
+  // 生成時にこの関数を通る
+  assert.match(bodyOf(code, 'generateReview'), /comparisonIdsFrom\(settings\)/);
+});
+
+test('4H-6: 古くなったらexport bufferを残さない（§13 / §14）', () => {
+  const code = scriptCode();
+  const fresh = bodyOf(code, 'renderReviewFreshness');
+  assert.match(fresh, /rep-export-out/);
+  assert.match(fresh, /hidden = true/);
+  assert.match(fresh, /value = ''/, '値も消す（表示を隠すだけにしない）');
+  // 同じ再計算が print 可否とbufferの両方を守る
+  assert.match(fresh, /applyPrintEligibility\(/);
+});
