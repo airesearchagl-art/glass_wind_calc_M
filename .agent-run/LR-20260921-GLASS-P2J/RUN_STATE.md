@@ -10,7 +10,7 @@
 - Base SHA: 44e4032a2fb3bd3a48bab04d3a5a76c5a6a912eb
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 3 — Closure Evaluation / Promotion Candidate 完了
+- Current wave: Wave 4 — Evidence Request Matrix（read-only UI）完了
 - Task Packet ID: LRP-20260921-GLASS-P2J
 - Task Packet revision: 1
 - Task Packet SHA-256: aa9ce07dac4767afc0ad9ff4b13663ae8cc2ab1be98e9e44ef80498da3acc446
@@ -123,6 +123,46 @@ mutation 5件: M1/M2/M3/M5 は KILLED。M4（`hasOwnProperty`→`in`）は **SUR
 §29 の「inherited-field defectが見つかったらWave 2の前にFIXする。
 さもなくばWave 1はBLOCKED」は満たしている。
 
+## Wave 4 結果（Evidence Request Matrix / read-only UI）
+
+```text
+npm test  : 600 pass / 0 fail（Wave 3の581 → +19）
+browser   :  34 pass / 0 fail（Chromium / file:// で実測）
+injection :   8 pass / 0 fail（renderer安全性のprobe）
+fail-open :  10 pass / 0 fail（evaluateClosureを強制throw）
+変更      : index.html（script配線 + Matrix + renderer分割）
+            tests/evidence-closure-ui.test.js（新規）
+            tests/ui-mode-separation.test.js（F10の参照先を更新）
+```
+
+### UI判断: IMPLEMENTED
+
+read-only表示が Evidence Request Matrix として**実際に使える**と判断した。
+どのfloorの正圧根拠が要るか、どのzoneの負圧根拠が要るか、
+どのfloorのZが要るかが項目単位で読める（§43の到達条件）。
+
+```text
+現在のclosure状態 : 未充足
+必要な確認項目   : 0 / 12 充足
+closureカテゴリ  : 0 / 4 充足
+想定case scope   : 0 / 8 充足
+提出済みObservation: 0 件
+Promotion Candidate: なし
+```
+
+### この画面からverifiedにできない（構造として）
+
+Observation入力欄・Evidence level選択・checkedAt入力・sourceReference入力・
+Verify/Promote/Apply のいずれも**存在しない**。ブラウザ実測でも
+closure領域内のフォーム要素は 0 件である。
+
+### U4-13: 理由の無い「KILLED」を疑って正解だった
+
+mutation U4-13 は当初 KILLED と表示されたが失敗テスト名が空欄で、
+個別に再実行すると **harnessの例外による誤検出**で、実際には生存していた。
+unit側（包含判定が甘い）と browser側（nullを例外にしていた）の
+両方に穴があり、両方を直した。詳細は EVIDENCE.md §20 / D-024。
+
 ## Wave 3 結果（Closure Evaluation / Promotion Candidate）
 
 ```text
@@ -208,6 +248,24 @@ distinct mutants 16 / KILLED 16 / SURVIVED 0 / PATCH-MISS 0
 真の last-one-wins と first-one-wins を別々に実装して再実行した。
 詳細と訂正の記録は EVIDENCE.md §9。
 
+## Wave 4 final state
+
+```text
+UI decision                   : IMPLEMENTED（Evidence Request Matrix / read-only）
+Displayed status              : 未充足（BLOCKED）
+Displayed slots               : 0 / 12
+Displayed categories          : 0 / 4
+Displayed case scopes         : 0 / 8
+Displayed observations        : 0 件
+Promotion Candidate           : なし
+Observation input controls    : 0
+Promotion controls            : 0
+Private references in UI      : 0
+Network requests added        : 0
+Storage writes added          : 0
+Primary Evidence availability : UNAVAILABLE（開発セッションの調査結果。製品状態には焼き込まない）
+```
+
 ## Wave 3 final state
 
 ```text
@@ -266,29 +324,25 @@ none
 ## Remaining tasks
 
 ```text
-Wave 4-7（TASK_QUEUE.md参照）
+Wave 5-7（TASK_QUEUE.md参照）
 ```
 
 ## Next action
 
-Wave 4: 一次資料の可用性は **UNAVAILABLE のまま**である（§58）。
-Evidence取得を発明しない。選択は2つ:
+Wave 5: security / privacy / trust spoof / prototype / source scan /
+no-import-apply / mutation / regression。
 
 ```text
-(a) read-only の Evidence Closure Status 表示を index.html に足す
-    - 表示するのは「何が足りないか」であって「現在の真実」ではない
-    - evidence-closure.js は registry.js の後に読み込む（D-012）
-    - 実案件の表示は常に BLOCKED / 0 of 12 / candidate なし になる
-
-(b) UIが価値を足さないと判断するならUIを省き、
-    security / privacy / trust campaign（Wave 5）へ直接進む
+- Phase 2J で増えた面（closure module + Matrix UI）の攻撃面を総点検する
+- private reference が 評価 / candidate / export / DOM のどこにも出ないこと
+- Observation・candidate を入力経路にできないことの再確認
+- repository全体の privacy scan
+- Phase 2F〜2I への regression が無いこと
 ```
 
-判断基準: read-only表示が Evidence Request Matrix として
-**実際に使えるか**（何を集めれば閉じるのかが読み取れるか）。
-
-いずれの場合も、実案件の状態は
-`BLOCKED_BY_MISSING_EVIDENCE` / promotion `NONE` / `verifiedCases: []` のままである。
+実案件の状態は変わらない:
+`BLOCKED_BY_MISSING_EVIDENCE` / promotion `NONE` / `verifiedCases: []` /
+actual observations 0。
 
 ## Stop conditions status
 

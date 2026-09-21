@@ -361,3 +361,84 @@ Wave 1 のガードは realm 依存で、これは仕様どおりの挙動であ
 `globalThis.PresetRegistry` を一時差し替えし、require cache を落として再評価する。
 **本番registryに合成presetを登録しない**ことは P2J-C44 で固定した
 （差し替え後も `BUILT_IN_PRESET_IDS` が変わらず、実案件評価が従来どおり動くこと）。
+
+## D-020 — UIは「何を確認すればよいか」だけを答える（§2 / §5）
+
+Evidence Request Matrix は read-only である。verified にする経路を
+**構造的に**持たない: Observation入力欄・Evidence level選択・checkedAt入力・
+privateReferenceAvailable・sourceReference入力・Verify/Promote/Apply のいずれも作らない。
+
+「作らない」を方針ではなくテストで固定した:
+renderer が `createElement('input'|'textarea'|'select'|'button'|'form')` を
+一切呼ばないこと、Production UIに `serializePromotionCandidate` が出ないこと、
+renderer に `JSON.parse` が無いこと（P2J-U08 / U09）。
+ブラウザ実測でも closure領域内のフォーム要素は 0 件である。
+
+## D-021 — session固有の可用性判定を製品状態に焼き込まない（§6 / §42）
+
+`UNAVAILABLE` は**この開発セッションで**到達可能なrepositoryを調べた結果であって、
+ブラウザが知り得る製品事実ではない。別の場所にいる人が私的な原典を
+持っているかどうかを、Production UIは知らない。
+
+したがってUIには「一次資料は利用できません」と書かない。
+代わりに runtime の真実を出す:
+
+```text
+提出済みEvidence Observation: 0 件
+→ 必要な一次Evidenceが登録されていないため closure は未充足
+```
+
+`UNAVAILABLE` は Run Artifact 側の調査記録として残す。
+P2J-U19 で、UIコードにその語が入らないことを固定した。
+
+## D-022 — closure状態をUIで数え直さない（§7 / §8 / §37）
+
+12 slot / 4 category / case scope数 / BLOCKED をUI側で構成しない。
+すべて `EvidenceClosure.evaluateClosure()` の返り値から取る。
+
+数え直すと判定が core と UI の2か所になり、片方だけ壊れても気付けない
+（このcampaignで繰り返してきた「1か所で判定する」の適用）。
+P2J-U04 / U06 で、renderer が `config.dimensions` / `config.wind` /
+`verifiedCases` を読まないこと、slot/case件数の数値リテラルを持たないこと、
+floor/zone語彙をUIに持たないことを固定した。
+
+あわせて他機能の入力をEvidenceとして読まないことも固定した（P2J-U05）。
+Scenario Matrix に Z を入れても `evaluation_height` の Observation にはならず、
+Single/Batch に W/H を入れても pane寸法は閉じない。
+
+## D-023 — Phase 2F パネルと Closure Matrix を別々にguardする（§25 option B）
+
+従来 `renderProjectEvidencePanels()` は1つの try/catch で3パネルを包んでいた。
+そこへ closure を足すと、closure表示の失敗で Evidence status / Verified Case /
+reconciliation まで消える。消えたこと自体が「問題なし」と読まれるのが最悪である。
+
+`renderPhase2FEvidencePanels()` と `renderEvidenceClosureMatrix()` に分け、
+それぞれが自前のguardを持つ形にした。外側は呼ぶだけで catch しない（P2J-U13）。
+
+ブラウザ実測で確認: `evaluateClosure` を強制的に throw させても、
+closure領域に警告が出て、Phase 2F の2パネルは残り、計算機能も生きている。
+
+既存の F10 テストは、契約は同じまま**見る場所**が変わったので、
+`renderPhase2FEvidencePanels` を指すよう更新した（削除も緩和もしていない）。
+
+## D-024 — U4-13 は最初「KILLED」に見えていたが、実際は生存していた
+
+Wave 4 の mutation で、Matrix を `mode-field-miyoshi` ブロックの外へ出す mutant
+（U4-13）が KILLED と表示された。**しかし理由が空欄だった**ため個別に再実行したところ:
+
+```text
+npm test : 600 pass / 0 fail  ← 検出できていない
+browser  : TypeError: Cannot read properties of null (reading 'style')
+```
+
+browser scriptが `el.closest(...)` の null を握らずに例外で落ち、
+その異常終了コードを runner が「検出」と読んでいた。**harnessの誤検出**である。
+
+理由の無い kill を成果として数えないルールが効いた。2つとも直した:
+
+- P2J-U02 は「次のブロックより前にあるか」しか見ておらず、外へ出ても通っていた。
+  `<div>` の入れ子を数えて**実際の包含**を判定する形にし、
+  既存の reconciliation が同ブロック内にあることを positive control として先に確認する。
+- browser script は包含が無い場合に例外ではなく `'not-contained'` を返すようにした。
+
+修正後、U4-13 は unit（P2J-U02）と browser（B2/B3/B4/B5）の**両方**で落ちる。

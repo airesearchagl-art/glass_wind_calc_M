@@ -8,7 +8,7 @@
 | 1 | Evidence architecture inventory / 4 unresolved fact model / privacy boundary | DONE |
 | 2 | evidence-closure.js / Observation contract / strict schemas | DONE |
 | 3 | reconciliation / Closure Evaluation / Promotion Candidate / one-way export | DONE |
-| 4 | 一次資料の可用性確認 / 可能ならpublic-safe candidate / read-only status UI | PENDING |
+| 4 | read-only Evidence Request Matrix（UI実装） | DONE |
 | 5 | security / privacy / trust spoof / prototype / mutation | PENDING |
 | 6 | full regression / independent verifier / repair | PENDING |
 | 7 | README / Run Artifact convergence / Draft PR / Preview / Completion Report | PENDING |
@@ -35,10 +35,10 @@
 | AC-J16 | trust spoof rejection | PASS | verificationStatus等10種すべて「予期しないfield」として拒否（P2J-C27 / mutation O15） |
 | AC-J17 | current verifiedCases unchanged | PASS | `[]` のまま。P2J-TB16で固定 |
 | AC-J18 | current preset status unchanged | PASS | W/H/圧力/V0=34/粗度IIIすべて不変。P2J-TB16で固定（D-006） |
-| AC-J19 | calculation regressionなし | PASS（Wave 3時点） | 581 pass / 0 fail。保護対象の計算値を直接再実測して一致 |
-| AC-J20 | Review/Batch/Profile regressionなし | PASS（Wave 3時点） | 既存suite無改変で全緑。index.htmlは未変更 |
-| AC-J21 | actual evidence availabilityを正直に記録 | PASS | Wave 0で実測。UNAVAILABLE（下記 EVIDENCE.md §2） |
-| AC-J22 | private evidence unavailableならpromotion NONE | PASS（継続） | actual observations 0 / promotion NONE のまま |
+| AC-J19 | calculation regressionなし | PASS（Wave 4時点） | 600 pass / 0 fail。ブラウザでも単体計算の描画を実測 |
+| AC-J20 | Review/Batch/Profile regressionなし | PASS（Wave 4時点） | index.html変更後も全緑。既存Phase 2Fパネルもブラウザで残存確認 |
+| AC-J21 | actual evidence availabilityを正直に記録 | PASS | 開発セッションの調査結果（UNAVAILABLE）はRun Artifactに残し、UIにはruntime真実（Observation 0件）だけを出す（D-021 / P2J-U19） |
+| AC-J22 | private evidence unavailableならpromotion NONE | PASS | UI実測で candidate「なし」/ 0 of 12 / 0 of 4 / 0 of 8 |
 | AC-J23 | README/documentation sync | PENDING | |
 | AC-J24 | independent verifier | PENDING | |
 | AC-J25 | Draft PR / Human Gate STOP | PENDING | |
@@ -46,18 +46,14 @@
 ## Next Action
 
 ```text
-Wave 4: 一次資料の可用性は UNAVAILABLE のままである（§58）。
-        Evidence取得を発明しない。選択肢は2つ:
+Wave 5: security / privacy / trust spoof / prototype / source scan /
+        no-import-apply / mutation / regression
 
-  (a) read-only の Evidence Closure Status 表示を index.html に足す
-      - 表示するのは「何が足りないか」であって「現在の真実」ではない
-      - evidence-closure.js は registry.js の後に読み込む（D-012）
-      - 実案件の表示は常に BLOCKED / 0 of 12 / candidate なし になる
-  (b) UIが価値を足さないと判断するならUIを省き、
-      security / privacy / trust campaign（Wave 5）へ直接進む
-
-  どちらを採るかは、read-only表示が
-  「Evidence Request Matrix として実際に使えるか」で決める。
+  - Phase 2J で増えた面（closure module + UI）に対する攻撃面の総点検
+  - private reference が評価・candidate・export・DOM のどこにも出ないこと
+  - Observation / candidate を入力経路にできないことの再確認
+  - repository全体の privacy scan
+  - 既存Phase（2F〜2I）へのregressionが無いこと
 ```
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管 / §34）。

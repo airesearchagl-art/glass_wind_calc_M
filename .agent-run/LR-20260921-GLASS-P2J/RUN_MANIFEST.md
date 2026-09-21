@@ -44,7 +44,8 @@ expected : >= 500 / 0 fail  → 一致
 | 0 | Fresh Gate / Run Artifact / Phase 2I closeout / baseline / 一次資料の可用性判定 | `5bb8b2baa280d710c79ba825366118905775b0de` | 500 / 0 |
 | 1 | Evidence architecture inventory / trust boundary 修理 | `c8dea2a7087c37bec0637574079ed7e5ea77654e` | 518 / 0 |
 | 2 | Observation v1 / scope contract | `42c8f7096b20450997bfe2739728cc45b433b3b3` | 557 / 0 |
-| 3 | Closure Evaluation / Promotion Candidate | `RESOLVE_DYNAMICALLY` | 581 / 0 |
+| 3 | Closure Evaluation / Promotion Candidate | `707b0aac8eb173641e04d59080676ec381cb0686` | 581 / 0 |
+| 4 | Evidence Request Matrix（read-only UI） | `RESOLVE_DYNAMICALLY` | 600 / 0 + browser 34 / 0 |
 
 ## Wave別の変更ファイル
 
@@ -61,6 +62,14 @@ Wave 2: project-config/evidence-closure.js（新規）
 Wave 3: project-config/evidence-closure.js（evaluateClosure / candidate / export を追加）
         tests/evidence-closure.test.js    （Wave 2の境界testをWave 3の境界へ更新 + 追加）
         index.html                        （**変更なし** / Wave 3もUIを持たない）
+
+Wave 4: index.html                        （evidence-closure.js配線 / Matrix / renderer分割）
+        tests/evidence-closure-ui.test.js （新規）
+        tests/ui-mode-separation.test.js  （F10の参照先を renderPhase2FEvidencePanels へ更新）
+
+ブラウザ検証（Chromium / file://）はrepositoryに常設していない。
+Wave 4 の実測値は EVIDENCE.md §17〜§19 に記録し、
+repositoryで常時守られる部分は tests/evidence-closure-ui.test.js に落としてある。
 ```
 
 自己参照commit SHAは固定しない。各ファイルがどのheadで最終化されたかを併記する

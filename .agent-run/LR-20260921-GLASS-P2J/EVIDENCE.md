@@ -404,3 +404,185 @@ V0                      : 34    roughnessCategory : III
 
 P2J-C58 で、closure評価 → candidate生成 → serialize を実行した**前後**の
 config構造が等しいことを確認している（一連の操作に副作用が無いことの確認）。
+
+## §17 — Wave 4: Evidence Request Matrix（実測）
+
+```yaml
+ui_decision: IMPLEMENTED
+reason: 収集すべき一次Evidenceを項目単位で示すチェックリストとして機能するため
+displayed_status: 未充足（BLOCKED）
+displayed_categories: 0 / 4
+displayed_slots: 0 / 12
+displayed_case_scopes: 0 / 8
+displayed_observations: 0 件
+promotion_candidate: なし
+observation_input_controls: 0
+promotion_controls: 0
+private_references: 0
+network_requests_added: 0
+storage_writes_added: 0
+```
+
+### ブラウザ実測（Chromium / file:// で実際に開いて計測）
+
+```text
+browser checks : 34 pass / 0 fail
+```
+
+| 確認 | 実測 |
+|---|---|
+| script読み込み順 | closure@7 > registry@6、`EvidenceClosure` 解決済み |
+| 案件preset mode | Matrix表示あり |
+| Manual / Notification / Imported | いずれも非表示 |
+| 全体status | 未充足 |
+| 必要な確認項目 | 0 / 12 |
+| closureカテゴリ | 0 / 4 |
+| 想定case scope | 0 / 8 |
+| 提出済みObservation | 0 件 |
+| Promotion Candidate | なし |
+| 行数 | 12（寸法2 / 正圧4 / 負圧2 / 評価高さ4） |
+| 全行のClosure | 未充足 |
+| 全行のObservation | 未提出（0や現在値で埋めていない） |
+| 全行のEvidence Gate | 未評価 |
+| 評価高さの現在値 | 「— 現在の正なし」 |
+| 評価高さの照合 | 「比較対象なし」（MATCHではない） |
+| それ以外の照合 | 「Evidenceが不十分」 |
+| Matrix内のフォーム要素 | 0 |
+| promote/apply操作 | 無し |
+| Verified系の語 | 無し |
+| page error / console error | 0 / 0 |
+| 非file:// リクエスト | 0 |
+| localStorage / sessionStorage / cookie | 0 / 0 / 0 |
+| 案件fact（UI操作後） | verifiedCases 0 / sample_default / 1250 / 2050 / V0 34 / III |
+
+### 実際の表示（§43 の到達確認）
+
+```text
+ガラス見付幅 W   共通          mm     1250   未提出  未評価  Evidenceが不十分  未充足
+ガラス見付高さ H 共通          mm     2050   未提出  未評価  Evidenceが不十分  未充足
+階別正圧         floor 1       N/m²   1297   未提出  未評価  Evidenceが不十分  未充足
+階別正圧         floor 2       N/m²   1525   未提出  未評価  Evidenceが不十分  未充足
+階別正圧         floor 3       N/m²   1695   未提出  未評価  Evidenceが不十分  未充足
+階別正圧         floor R       N/m²   1729   未提出  未評価  Evidenceが不十分  未充足
+部位別負圧       zone corner   N/m²   1122   未提出  未評価  Evidenceが不十分  未充足
+部位別負圧       zone general  N/m²    918   未提出  未評価  Evidenceが不十分  未充足
+評価高さ Z       floor 1       m      — 現在の正なし  未提出  未評価  比較対象なし  未充足
+評価高さ Z       floor 2       m      — 現在の正なし  未提出  未評価  比較対象なし  未充足
+評価高さ Z       floor 3       m      — 現在の正なし  未提出  未評価  比較対象なし  未充足
+評価高さ Z       floor R       m      — 現在の正なし  未提出  未評価  比較対象なし  未充足
+```
+
+各行には「何を集めればよいか」の静的説明が付く
+（例: 「このfloorの正圧値と算定根拠を直接確認できる一次資料」）。
+private資料名・ファイル名・IDは一切含まない。
+
+## §18 — Wave 4: DOM injection probe（rendererの安全性）
+
+これは **renderer の安全性**を見るprobeであり、core の validation を見るものではない
+（core は合成攻撃値を通さないため、renderer単体の挙動は別に確かめる必要がある）。
+
+評価結果を差し替え、`projectId` / `slotKey` / `scope` / gate reason /
+`closureStatus` に `<img onerror>` と `<script>` を仕込んだ。
+
+```text
+probe : 8 pass / 0 fail
+
+img要素の生成      : 0
+script要素の生成   : 0
+onerror発火        : なし
+inline script実行  : なし
+攻撃文字列の扱い   : **リテラルtextとして描画された**（＝攻撃は確かに到達している）
+innerHTML内の生markup: なし
+dialog             : なし
+page error         : 0
+```
+
+「攻撃文字列がテキストとして現れた」ことを先に確認している。
+これが無いと、攻撃がrendererへ届かないまま
+「何も起きなかった」と読む空虚な確認になる（Phase 2G/2I で3度学んだ形）。
+
+## §19 — Wave 4: fail-closed 表示（§38）
+
+`evaluateClosure` を強制的に throw させた実測:
+
+```text
+fail-open check : 10 pass / 0 fail
+
+closure領域        : 空欄にならない
+警告               : 「Evidence Closure Statusを表示できませんでした。
+                      表示できないことを「検証済み」と解釈しないでください: ...」
+matrix表             : 正常時のように描かれない
+"0 blockers" 的表示  : なし
+Verified 的表示      : なし
+Phase 2F status panel: **残る**
+Phase 2F reconcile   : **残る**
+計算機能             : 生存（GlassCalc 利用可能）
+uncaught page error  : 0
+```
+
+Phase 2F の2パネルが残ることが、§25 option B（独立guard）が
+実際に効いていることの確認である。
+
+## §20 — Wave 4 mutation 結果（§39）
+
+```text
+U4-01 evidence-closure script を外す        KILLED  unit P2J-U01
+U4-02 registry より前に読み込む              KILLED  unit P2J-U01
+U4-03 全体statusをREADYに固定                KILLED  browser B6
+U4-04 現在値をEvidence値として表示           KILLED  unit P2J-U15 / browser B20a
+U4-05 評価高さをMATCHと表示                  KILLED  unit P2J-U16 / browser B17
+U4-06 欠測slotを表示しない                   KILLED  browser B11
+U4-07 READY_CANDIDATEをVerifiedと表示        KILLED  unit P2J-U14
+U4-08 Observation入力欄を足す                KILLED  unit P2J-U08 / browser B20
+U4-09 Promoteボタンを足す                    KILLED  unit P2J-U08 / browser B20
+U4-10 rendererがconfigを直接読む             KILLED  unit P2J-U04
+U4-11 runtime値をinnerHTMLへ                 KILLED  unit P2J-U11
+U4-12 closure例外を黙殺                      KILLED  unit P2J-U12
+U4-13 Matrixをpreset modeブロックの外へ出す  ※下記（当初は誤検出）→ KILLED
+U4-14 Scenario Z をEvidence扱い              KILLED  unit P2J-U05
+U4-15 カテゴリ数にslot数を表示               KILLED  browser B33
+
+distinct mutants : 15 / KILLED 15 / SURVIVED 0 / PATCH-MISS 0
+```
+
+### U4-13: 理由の無い「KILLED」を疑って正解だった
+
+U4-13 は当初 KILLED と表示されたが、**失敗したテスト名が空欄**だった。
+個別に再実行したところ:
+
+```text
+npm test : 600 pass / 0 fail   ← 検出できていない
+browser  : TypeError: Cannot read properties of null (reading 'style')
+```
+
+browser script が `el.closest('.mode-field-miyoshi')` の null を握らずに
+例外で落ち、その異常終了を runner が「検出」と読んでいた。
+つまりこれは **harness の誤検出**であり、実際には生存していた。
+
+隠れていた穴は2つ:
+
+1. P2J-U02 が「次のブロックより前にあるか」しか見ておらず、
+   要素がブロックの外へ出ても通ってしまう判定だった。
+2. browser script が包含の不在を例外にしていた。
+
+両方を直した。U02 は `<div>` の入れ子を数えて**実際の包含**を判定し、
+既存の reconciliation が同ブロック内にあることを positive control として先に確認する。
+browser script は包含が無ければ例外ではなく `'not-contained'` を返す。
+
+修正後、U4-13 は unit（P2J-U02）と browser（B2/B3/B4/B5）の**両方**で落ちる。
+
+## §21 — Wave 4: 現案件のfactは変更していない
+
+```text
+npm test : 600 pass / 0 fail（Wave 3の581 → +19）
+browser  : 34 pass / 0 fail
+probe    :  8 pass / 0 fail
+fail-open: 10 pass / 0 fail
+
+verifiedCases : []          dimensions : sample_default / 1250 × 2050
+pressures     : partially_verified のまま
+V0            : 34          roughnessCategory : III
+promotion     : NONE
+```
+
+UI操作（mode切替・計算実行・Matrix描画）の**後**にブラウザ内で再測定して確認した。
