@@ -5,21 +5,21 @@
 | Wave | 内容 | 状態 |
 |---|---|---|
 | 0 | Fresh Gate / Run Artifact / Phase 2H closeout / baseline | DONE |
-| 1 | architecture inventory / Review Package contract / privacy contract | PENDING |
+| 1 | architecture inventory / Review Package contract / privacy contract | DONE |
 | 2 | review-package.js / snapshot / summary / case table / detail selection | DONE |
 | 3 | comparison / Evidence・trust display / Markdown / JSON | DONE |
 | 4 | Review UI / print view / print CSS / redacted mode / stale warning | DONE |
-| 5 | security / privacy / injection / mutation / size limits | PENDING |
+| 5 | security / privacy / injection / mutation / size limits | DONE |
 | 6 | full regression / browser / independent verifier / repair | DONE |
-| 7 | README / Run Artifact convergence / Draft PR / Completion Report | PENDING |
+| 7 | README / Run Artifact convergence / Draft PR / Completion Report | DONE |
 
 ## Acceptance Criteria（packet §38）
 
 | AC | 内容 | 状態 | 実測 |
 |---|---|---|---|
-| AC-01 | Single regressionなし | PENDING | |
-| AC-02 | Batch regressionなし | PENDING | |
-| AC-03 | Profile/Scenario regressionなし | PENDING | |
+| AC-01 | Single regressionなし | PASS | Single view 既定・4モードとも非退行（p2i-w4 / p2g-final / p2h-browser で実測、0 fail） |
+| AC-02 | Batch regressionなし | PASS | Batch 一括計算・TSV・CSV・診断いずれも非退行（p2g-final 84 checks 0 fail） |
+| AC-03 | Profile/Scenario regressionなし | PASS | Profile / Scenario Matrix 非退行（p2h-browser 29 / p2h-repair 17、いずれも 0 fail） |
 | AC-04 | Review Package v1成立 | PASS | Review Package v1（schemaVersion 1 / reportType glass_design_review）成立。Workspace/PIPに見えるtypeを名乗らない |
 | AC-05 | Reviewはderived-only | PASS | buildReviewPackage()は計算済みの結論を引数で受け取らない（results/summary/governingCase等を名指しで拒否） |
 | AC-06 | Review import pathなし | PASS | import系API 0件。Review JSONは Workspace / PIP のどちらのdeserializeでも失敗する |
@@ -29,7 +29,7 @@
 | AC-10 | selected detail成立 | PASS | detail選択: 未知ID / 重複 / 上限51 / INVALID診断 をすべて拒否。上限50ちょうどは通る |
 | AC-11 | Notification trace再利用 | PASS | notification detail の trace が windTraceFor() と deepEqual（Er / qBar 一致） |
 | AC-12 | formula/input verification分離 | PASS | formulaVerificationStatus と inputVerificationStatus を別々に保持。統合badgeを作らない |
-| AC-13 | Evidence status非退行 | PENDING | |
+| AC-13 | Evidence status非退行 | PASS | registered preset は partially_verified のまま。manual / notification / imported も格上げなし（4面で確認） |
 | AC-14 | two-case factual comparison成立 | PASS | 2ケースの事実差分のみ。delta = B - A。winner/better/safer を model / JSON / Markdown のどこにも持たない |
 | AC-15 | print preview成立 | PASS | Review Report Preview を Batch view に追加。描画元は activeReview のみ（mutation U6 KILLED） |
 | AC-16 | print CSS成立 | PASS | @media print で操作要素を全て隠し #review-report だけ残す。break-inside: avoid（mutation U9 KILLED） |
@@ -40,14 +40,13 @@
 | AC-21 | diagnostic privacy成立 | PASS | Phase 2G が伏せた秘密らしき値は JSON / Markdown のどちらにも出ない |
 | AC-22 | HTML/Markdown injection防止 | PASS | escapeは出所で分岐しない。内部traceの 5<Z<40 も同じ扱い |
 | AC-23 | no storage/network | PASS | network / storage API を1つも持たない（source contract） |
-| AC-24 | Evidence/verifiedCases不変 | PENDING | |
-| AC-25 | README / Run Artifact actual sync | PENDING | |
+| AC-24 | Evidence/verifiedCases不変 | PASS | verifiedCases [] / promotion NONE / dimensions sample_default・unverified / 未解決4件。50回の生成・exportでも不変 |
+| AC-25 | README / Run Artifact actual sync | PASS | 本convergenceで完了。READMEとRun Artifactの数値は実装verification head 915e11a の実測値 |
 
 ## Next Action
 
 ```text
-Wave 5: security / privacy / injection / mutation / size limits
-（Wave 4で先行実施した分は RUN_STATE に実測済み）
+Human Gate待ち。Draft PRのReady化 / merge / Production は本Campaignに含めない（§59）。
 ```
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管 / §47）。

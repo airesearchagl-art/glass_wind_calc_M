@@ -41,7 +41,55 @@ expected : >= 398 / 0 fail  → 一致
 
 | Wave | Goal | Commit（full SHA） |
 |---|---|---|
-| 0 | Fresh Gate / Run Artifact初期化 / Phase 2H closeout / baseline | `RESOLVE_DYNAMICALLY` |
+| 0-1 | Fresh Gate / Run Artifact / architecture inventory | `f08a3df843ac17e44f230ab29c5bd7f2a03e4936` |
+| 2 | review-package.js core | `7d270743c4f9f061483d84550d380dd8be8b2f10` |
+| 2H | evidenceSummary genericity fix | `71d032c` |
+| 3 | canonical exporter gate / Review JSON / Markdown | `9cf9aea360633e2669d7bb692ad7eb6f4af65f6f` |
+| 4 | Review UI / print preview / stale boundary | `4e08922c0762bea60886b506e660fc393068493e` |
+| 4H | native print bypass / partial comparison（RF-P1 / RF-P2） | `75d320302835a7326f5e9404fbca68cff3661a75` |
+| 5 | inherited-field gate / cross-surface sweep | `ada6d795ef9b76d1ba44683a0c71a2c7cab03b2e` |
+| 5 cont. | print media / audits / residual mutants | `0405ac2e5467b3058c54e3bc4d6f1be212978fa3` |
+| 6 | independent verifier findings F1-F6 の修理 | `915e11ae54c2094b8b8454b9248214c96b906ca3` |
+| 7 | README + Run Artifact convergence | `RESOLVE_DYNAMICALLY`（自己参照のため固定しない） |
 
-自己参照commit SHAは固定しない。過去commitになったwaveは確定値へ置き換える。
-各ファイルがどのheadで最終化されたかを併記する（Phase 2Hの文言訂正を踏襲）。
+## Head roles（Phase 2H の文言誤りを繰り返さない）
+
+**Implementation verification head**: `915e11ae54c2094b8b8454b9248214c96b906ca3`
+
+役割: **executable source / tests / UI implementation の最終head**。
+§54 の全測定（npm test 500 / browser 294 / 保護値5つ / Evidence / security sweep /
+export size / privacy sweep）は、この exact head に対する実測値である。
+
+**Documentation / Run Artifact convergence head**: Wave 7 commit（本ファイルを含む）
+
+役割: README と Run Artifact の同期。
+
+正確な言い方:
+
+```text
+implementation verification head 以降、
+executable source / tests / UI は変更していない。
+その後のcommitは README measured-result synchronization と
+Run Artifact convergence のみを行った。
+```
+
+「以降はRun Artifactのみ」とは書かない。READMEも変わっているためである
+（Phase 2H で同じ書き方をして事実と合わなくなり、訂正した経緯がある）。
+
+## 変更ファイル（base 6a5232f → 現在のbranch head）
+
+```text
+executable source / tests / UI（最終化: 915e11a = implementation verification head）
+  review-package.js               新規
+  tests/review-package.test.js    新規
+  tests/review-ui.test.js         新規
+  index.html                      Review UI / print view / 印刷の関門 / 診断見出し
+
+documentation（最終化: 915e11a より後）
+  README.md                       Phase 2I節 / file structure / test表 / changelog
+  .agent-run/LR-20260920-GLASS-P2I/*  Run Artifact 7ファイル
+```
+
+`calc.js` / `wind-pressure.js` / `workspace.js` / `project-profile.js` /
+`project-config/**` は Phase 2I で**1バイトも変更していない**（verifier が
+`git diff --name-only` で独立に確認済み）。
