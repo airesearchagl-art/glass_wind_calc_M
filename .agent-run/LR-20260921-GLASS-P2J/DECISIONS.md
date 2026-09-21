@@ -169,3 +169,91 @@ wind.roughnessCategory   : III           （変更なし）
 ```
 
 テスト P2J-TB16 でこの状態を固定した。
+
+## D-007 — scope語彙は preset topology から導出する（§5 / §33）
+
+`evidence-closure.js` は階key・区分keyの配列を**定数として持たない**。
+`Registry.getPreset(projectId)` から
+`wind.positivePressureByFloor` / `wind.negativePressureByZone` のkeyを取り出し、
+sortして scope contract にする。
+
+ハードコードしない理由は「汎用だから」だけではない。
+ハードコードすると preset が変わってもここが追随せず、
+**存在しない階の観測を受理し、存在する階の観測を拒否する**。
+どちらも静かに起きて、しかも「観測が足りない/多い」という形でしか表面化しない。
+
+実測（現行の登録preset）:
+
+```text
+floors : 4件   zones : 2件   → required observation slots = 2 + 4 + 2 + 4 = 12
+```
+
+テストは期待値をテスト側に書かず、presetから導いた集合と一致することを見る。
+mutation O4/O5（floor/zone を不完全にハードコードする）は
+それぞれ6件・4件のテストを落として KILLED。
+
+## D-008 — Observation は trust status ではない（§7 / §14 / §30）
+
+`normalizeObservation()` は「妥当な観測の申告か」だけを判定し、
+「昇格に十分か」を判定しない。したがって Wave 2 は
+`assertPromotionGate('verified', ...)` を**呼ばない**。
+
+呼んでしまうと、記述できる観測が verified 相当のものだけに狭まり、
+**「根拠が不十分である」という観測そのものを記録できなくなる**。
+Evidence closure の目的は「何が足りないか」を機械可読にすることなので、
+これは目的を直接損なう。
+
+したがって `level: 'indirect'` / `'none'` の Observation も正当に成立する。
+テスト P2J-C19 で、`primary` だが reference が無い Evidence について
+「Observation としては妥当」かつ `canPromoteToVerified() === false` を同時に固定した。
+この2つが同時に成り立つことが、Wave 2 と Wave 3 の責務境界そのものである。
+
+あわせて、Observation が trust を自己申告する経路を塞いだ。
+`verificationStatus` / `verified` / `approved` / `promotion` / `verifiedCases` /
+`sourceKind` / `evidenceStatus` / `currentVerified` /
+`proposedVerificationStatus` / `trusted` はすべて
+「予期しないfield」として拒否される（P2J-C27）。
+
+## D-009 — slotKey は呼び出し側が供給できない（§18）
+
+slotKey は `factKey` と**検証済みscope**から計算する。Observationのfieldではない。
+`slotKey` を持つObservationは「予期しないfield」として拒否される。
+
+`getObservationSlotKey()` は `normalizeObservation()` を通ったobjectしか受け付けない
+（WeakSetで通過の事実を保持する）。未検証のobjectからslotKeyを計算できると、
+topologyに無いscopeのslotKeyが公開identifierとして流通しうる。
+Phase 2I の Review Package が `BUILT_REVIEWS` で採ったのと同じ形である。
+
+scope key 自体にも公開安全なtoken形式を要求する。これは Phase 2F contract の
+複製ではない。slotKey は**公開されるidentifier**なので、図面番号やファイル名が
+preset経由でそこへ流れ込む経路を塞ぐ必要がある。
+D-012（factKeyのallowlist）と同じ理由が scope key にも等しく当てはまる。
+
+## D-010 — 同一slotの重複は集合ごと拒否する（§22）
+
+last-one-wins も first-one-wins も採らない。どちらも
+**どちらの根拠が採用されたかを黙って決めてしまい、監査時に追えない**。
+1つのslotに複数のEvidence源を持たせたいなら、それは明示的な設計を要する。
+
+mutation で両方の政策を**別々に**実装して確認した（下記の訂正を参照）。
+
+## D-011 — 単位変換をしない（§12）
+
+fact typeごとに単位を固定し、換算しない。換算を許すと、
+別単位で申告された観測が黙って等価になり、
+**「一致した」という結論だけが残って換算契約が残らない**。
+換算が必要なら申告側が換算してから申告する。
+
+実測で、現行configの単位表記（`mm` / `N/m²` / `m`）と一致していることを確認した。
+packetの指定と実際の表記が食い違っていれば、正規化の入口で全件落ちていた。
+
+## D-012 — Wave 2 は index.html へ配線しない
+
+`evidence-closure.js` は UMD で browser 読み込みにも対応しているが、
+`index.html` には追加していない。Wave 2 は UI を持たない（§3）ため、
+利用者のいない `<script src>` を先に足さない。
+
+既存の script 読み込み順テストは「UIが実際に使うmodule」の順序を見ており、
+本moduleを要求していないことを確認済み（未配線でも全テスト緑）。
+Wave 4 で read-only status UI を作る場合は、
+`registry.js` より後に読み込む必要がある（依存順）。

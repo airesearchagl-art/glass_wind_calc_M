@@ -10,7 +10,7 @@
 - Base SHA: 44e4032a2fb3bd3a48bab04d3a5a76c5a6a912eb
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 1 — Evidence architecture inventory / trust boundary 修理 完了
+- Current wave: Wave 2 — Observation v1 / scope contract 完了
 - Task Packet ID: LRP-20260921-GLASS-P2J
 - Task Packet revision: 1
 - Task Packet SHA-256: aa9ce07dac4767afc0ad9ff4b13663ae8cc2ab1be98e9e44ef80498da3acc446
@@ -123,6 +123,58 @@ mutation 5件: M1/M2/M3/M5 は KILLED。M4（`hasOwnProperty`→`in`）は **SUR
 §29 の「inherited-field defectが見つかったらWave 2の前にFIXする。
 さもなくばWave 1はBLOCKED」は満たしている。
 
+## Wave 2 結果（Observation v1 / scope contract）
+
+```text
+npm test : 557 pass / 0 fail（Wave 1の518 → +39）
+新規     : project-config/evidence-closure.js / tests/evidence-closure.test.js
+index.html: 未変更（Wave 2はUIを持たない / D-012）
+```
+
+### 責務境界
+
+```text
+Wave 2 が答える : 「この Observation は妥当な観測の申告か」
+Wave 2 が答えない: 「昇格に十分か」「current config と一致するか」
+```
+
+そのため Wave 2 は `assertPromotionGate` を呼ばず、`reconcileFact` も呼ばない。
+`level: 'indirect' / 'none'` の Observation も正当に成立する（D-008）。
+これは手抜きではなく、「根拠が不十分である」という観測を記録可能にするための条件である。
+
+### 導出された topology（実測）
+
+```text
+floors 4件 / zones 2件 → required observation slots 12
+unresolved conceptual categories 4（12と混同しない / P2J-C08）
+```
+
+scope語彙は preset から導出しており、moduleに定数として持たない（D-007）。
+
+### mutation
+
+```text
+distinct mutants 16 / KILLED 16 / SURVIVED 0 / PATCH-MISS 0
+```
+
+初回実行で O10 と O11 に同一patchを当てていた（同じmutantを2回数えていた）。
+真の last-one-wins と first-one-wins を別々に実装して再実行した。
+詳細と訂正の記録は EVIDENCE.md §9。
+
+## Wave 2 final state
+
+```text
+Primary Evidence availability : UNAVAILABLE
+Actual project observations   : 0
+Facts closed                  : 0 / 4
+Required observation slots    : 12（software contract上の必要数）
+Project Promotion Candidate   : NONE
+verifiedCases                 : []
+promotion                     : NONE
+reconciliation performed      : なし（Wave 3）
+promotion candidate generated : なし（Wave 3）
+```
+
 ## Wave 1 final state（§29）
 
 ```text
@@ -150,31 +202,30 @@ none
 ## Remaining tasks
 
 ```text
-Wave 2-7（TASK_QUEUE.md参照）
+Wave 3-7（TASK_QUEUE.md参照）
 ```
 
 ## Next action
 
-Wave 2: `project-config/evidence-closure.js` を新規実装する。
+Wave 3: Evidence gate / scalar reconciliation / Closure Evaluation /
+temporary per-case ledger / project completeness / Promotion Candidate。
 
 ```text
-- Observation v1（§9）: schemaVersion / observationType / factKey / scope /
-  observedValue / unit / evidence / sourceReference
-  ※ sourceReference は evidence の**中に入れない**（Phase 2Fのmodelに従う）
-- scope contract（§10）:
-    pane_width_mm / pane_height_mm      -> scope = null
-    positive_pressure                    -> { floor: "1"|"2"|"3"|"R" }
-    evaluation_height                    -> { floor: "1"|"2"|"3"|"R" }
-    negative_pressure                    -> { zone: "general"|"corner" }
-  unknown scope field / fact typeに合わないscope / filename由来識別子は拒否
-- scalar leafのみ（§12）。map丸ごとを reconcileFact へ渡さない
-- 検証は Phase 2F contract を呼ぶ。§3 の copy禁止リストを再確認する
-- 合成fixtureのみ。実案件Observationは 0 件のまま（§17）
+- Evidence gate は ProjectEvidence.assertPromotionGate() を呼ぶ（再実装しない）
+- reconciliation は EvidenceLedger.reconcileFact() を **scalar leaf単位**で呼ぶ
+- case readiness は EvidenceLedger.evaluateCasePromotion() を呼ぶ
+  （W && H && positive && negative && Z の並行条件を書かない）
+- project completeness は 12 slot が揃って初めて成立。欠ければ BLOCKED
+- Promotion Candidate は non-mutating。apply / import API を作らない
 ```
 
-§13 の注意（Wave 1で裏取り済み）: current config に評価高さ/Z のキーは
-**存在しない**ため、evaluation_height について `MATCH` を報告してはならない。
+§13 の注意（Wave 1で実測済み・Wave 3で効く）: current config に評価高さ/Z の
+キーは**存在しない**ため、evaluation_height について `MATCH` を報告してはならない。
 `reconciliationApplicable: false` / `reconciliationStatus: null` を用いる。
+
+実案件Observationは 0 件のままなので、実際の closure は
+`BLOCKED_BY_MISSING_EVIDENCE` / promotion `NONE` で確定する。
+Wave 3 が作るのは「閉じる仕組み」であって「閉じた結果」ではない。
 
 ## Stop conditions status
 

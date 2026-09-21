@@ -39,9 +39,24 @@ expected : >= 500 / 0 fail  → 一致
 
 ## Wave / Checkpoint commit mapping
 
-| Wave | Goal | Commit（full SHA） |
-|---|---|---|
-| 0 | Fresh Gate / Run Artifact / Phase 2I closeout / baseline / 一次資料の可用性判定 | `RESOLVE_DYNAMICALLY` |
+| Wave | Goal | Commit（full SHA） | tests |
+|---|---|---|---|
+| 0 | Fresh Gate / Run Artifact / Phase 2I closeout / baseline / 一次資料の可用性判定 | `5bb8b2baa280d710c79ba825366118905775b0de` | 500 / 0 |
+| 1 | Evidence architecture inventory / trust boundary 修理 | `c8dea2a7087c37bec0637574079ed7e5ea77654e` | 518 / 0 |
+| 2 | Observation v1 / scope contract | `RESOLVE_DYNAMICALLY` | 557 / 0 |
+
+## Wave別の変更ファイル
+
+```text
+Wave 1: project-config/evidence.js        （canonical assertOrdinaryObject 追加 + 3境界）
+        project-config/evidence-ledger.js （createEntry / evaluateCasePromotion / reconcileFact）
+        project-config/miyoshi.js         （validateVerifiedCase / in → hasOwnProperty）
+        tests/evidence-trust-boundary.test.js（新規）
+
+Wave 2: project-config/evidence-closure.js（新規）
+        tests/evidence-closure.test.js    （新規）
+        index.html                        （**変更なし** / Wave 2はUIを持たない）
+```
 
 自己参照commit SHAは固定しない。各ファイルがどのheadで最終化されたかを併記する
 （Phase 2H で「以降はRun Artifactのみ」と書いて事実と合わなくなった経緯を踏まえる）。

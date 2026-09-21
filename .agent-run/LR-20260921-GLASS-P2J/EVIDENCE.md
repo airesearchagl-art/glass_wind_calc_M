@@ -176,3 +176,105 @@ verifiedCases    : []
 
 Wave 1 で追加したのは構造ガードとテストだけであり、
 Evidence・案件事実・検証状況のいずれも動かしていない（D-006 / P2J-TB16）。
+
+## §8 — Wave 2 成果物（Observation v1 / scope contract）
+
+```yaml
+module: project-config/evidence-closure.js
+observation_schema_version: 1
+observation_type: evidence_closure_observation
+closure_fact_keys:
+  - pane_width_mm        # scope: null
+  - pane_height_mm       # scope: null
+  - positive_pressure    # scope: { floor }
+  - negative_pressure    # scope: { zone }
+  - evaluation_height    # scope: { floor }
+scope_source: PresetRegistry.getPreset(projectId) の wind topology（導出）
+required_observation_slots: 12
+unresolved_conceptual_categories: 4
+actual_project_observations: 0
+primary_evidence_availability: UNAVAILABLE
+promotion: NONE
+verifiedCases: []
+reconciliation_performed: false
+promotion_candidate_generated: false
+```
+
+`closure_fact_keys` は `EvidenceLedger.KNOWN_FACT_KEYS`（10件）の**部分集合**であり、
+generic allowlist を置き換えるものではない。module評価時に部分集合であることを
+assertしており、片方だけ変更すると読み込み自体が失敗する。
+
+### 12 slot と 4 カテゴリは別の数である
+
+```text
+required observation slots      : 12（2 + 4 + 2 + 4、topologyから導出）
+unresolved conceptual categories: 4（pane寸法 / 正圧 / 負圧 / 評価高さ）
+```
+
+混同すると「4件しか無いのに12件要求している」または
+「12件あるので12カテゴリ未解決」という誤読が生じる。P2J-C08 で両方を同時に固定した。
+
+## §9 — Wave 2 mutation 結果（§35）
+
+```text
+O1  observation構造ガード除去          KILLED (2)
+O2  未知top-level fieldを許可          KILLED (5)
+O3  fact不一致のscopeを許可            KILLED (2)
+O4  floor語彙を不完全にハードコード    KILLED (6)
+O5  zone語彙を不完全にハードコード     KILLED (4)
+O6  数値文字列のobservedValueを許可    KILLED (1)
+O7  単位不一致を許可                   KILLED (1)
+O8  makeEvidence正規化を省略           KILLED (3)
+O9  sourceReference正規化を省略        KILLED (3)
+O10 重複slotを許可                     KILLED (1)
+O11 last-one-wins（真の上書き）        KILLED (1)
+O11b first-one-wins（黙って捨てる）    KILLED (1)
+O12 正規化集合をsortしない             KILLED (1)
+O13 呼び出し側evidence参照を保持       KILLED (1)
+O14 V0をclosure factに追加             KILLED (2)
+O15 verificationStatus fieldを許可     KILLED (1)
+
+distinct mutants: 16 / KILLED 16 / SURVIVED 0 / PATCH-MISS 0
+```
+
+### 訂正（結果の言い換えをしないための記録）
+
+最初の実行では O10 と O11 に**同一のpatch**を当てていた（どちらも同じ `if` を
+無効化するだけで、生成されるsourceがbyte一致していた）。
+つまり O11「last-one-wins」は**別のmutantとして試験されていなかった**。
+O10 を2回数えていただけである。
+
+真の last-one-wins（既存entryを上書きする）と first-one-wins（後続を黙って捨てる）を
+別々に実装して再実行し、いずれも P2J-C32 で KILLED であることを確認した。
+上の表はその再実行結果である。
+
+## §10 — Wave 2 で発見した自分の誤り
+
+テスト P2J-C38（現行値がclosure moduleに現れない）が、
+自分が書いたコメントの中の現行圧力値を検出して落ちた。
+packet §11 の説明例をそのままコメントへ書き写したことが原因である。
+
+コメントであっても、案件非依存moduleに現行の案件値が入るのは §27 / §28 に反する。
+合成値へ置き換えた。テストが意図どおり機能した事例として記録する。
+
+またテスト P2J-C24 で、`{ __proto__: ... }` を `Object.assign` 経由のhelperへ
+渡していたため、override が own enumerable property を1つも持たず
+**素の妥当なObservationが出来てしまい、拒否を何も確かめていない空虚なテスト**に
+なっていた。prototypeが実際に差し替わっていることを先にassertしてから
+判定する形へ修正した（Phase 2G/2I で繰り返した positive control の教訓と同じ）。
+
+## §11 — 現案件のfactは Wave 2 でも変更していない
+
+```text
+verifiedCases            : []
+dimensions               : sample_default / unverified / 1250 × 2050
+positivePressureByFloor  : 1297 / 1525 / 1695 / 1729（全て partially_verified）
+negativePressureByZone   : 918 / 1122（全て partially_verified）
+V0                       : 34（32へ変更していない）
+roughnessCategory        : III
+actual observations      : 0
+facts closed             : 0 / 4
+```
+
+P2J-C39 で、Observation正規化とslot列挙を実行した**後**にこの状態を再確認している
+（呼び出しが現状に副作用を持たないことの確認）。
