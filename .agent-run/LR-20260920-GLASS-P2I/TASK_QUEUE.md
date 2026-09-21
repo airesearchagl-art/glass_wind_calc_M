@@ -10,7 +10,7 @@
 | 3 | comparison / Evidence・trust display / Markdown / JSON | DONE |
 | 4 | Review UI / print view / print CSS / redacted mode / stale warning | DONE |
 | 5 | security / privacy / injection / mutation / size limits | PENDING |
-| 6 | full regression / browser / independent verifier / repair | PENDING |
+| 6 | full regression / browser / independent verifier / repair | DONE |
 | 7 | README / Run Artifact convergence / Draft PR / Completion Report | PENDING |
 
 ## Acceptance Criteria（packet §38）
@@ -83,6 +83,20 @@ Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human
 | Wave 4H（print / comparison boundary） | 8 | 0 | 0 |
 | Wave 5 prototype gate | 5 | 0 | 0 |
 | Wave 5 residual | 5 | 0 | 0 |
+
+### 全corpusに対する生存（independent verifier 実測 / 45件）
+
+各campaignの数字は「その campaign の guard を対象にした範囲」での結果である。
+全体の生存数はこちらを正とする。
+
+```text
+修理前 : 34 KILLED / 11 survived
+  documented 2（M10 / M15）
+  equivalent / unreachable 2（M25 / M35）
+  coverage hole 7（値を偽っても全テストが緑だった。verifier F1）
+修理後 : coverage hole 7 はすべて KILLED（再実行で確認）
+        F2 / F3 / F4 の修理も mutant で固定（3件とも KILLED）
+```
 
 生存2件の正体（名前を付け替えない）:
 

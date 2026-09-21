@@ -293,3 +293,80 @@ Phase 2D〜2Hと同一。Resume時に再計算して一致を確認する。
   別の文字だった（U+2212 と ASCII hyphen）。
 - 機能上の害は無いが、同じ資料の別surfaceとして読むものなので preview 側へそろえた。
 - 自分のtestが拾った。3面を同じ基準で突き合わせると、こういう差が出る。
+
+## D-021 — 値そのものを確かめる test が無かった（verifier F1）
+
+- **指摘（正当・再現済み）**: summary / groups / governing の**集計**は固定していたが、
+  行と詳細の**値**を確かめる test が1つも無かった。
+  実測で、次の6つを仕込んでも 499 件すべて緑のまま通った。
+  ```text
+  detail の input.widthMm を 1 に      / case行の widthMm を 1 に
+  case行の allowablePressure を 1 に   / detail の allowablePressure を 1 に
+  detail の status を 'OK' に固定       / detail の designPressure を 0 に
+  ```
+  最後の2つは Hard Gate（wrong calculation / verified・unverified display inversion）に
+  触れる形で、NO_SOLUTION の詳細が OK として印刷されうる状態だった。
+- **実装は正しかった**。verifier が自分で書いた照合でも値は完全一致していた。
+  欠けていたのは**証明**であり、次の編集で静かに壊れる状態だった。
+- **決定**: 値の一致を直接固定する test を4本置く。
+  - case行の全項目 == `mergeEvaluationResults()` の対応する値
+  - detail.input.* == `workspace.getCase().inputPackage`
+  - detail.result.* == `evaluateWorkspace()` の結果
+  - 同じ値が Markdown / JSON にも出ること
+  すべて「値が実在すること」も併せて確かめる（全部 null でも通る形にしない）。
+- 6つの mutant を再実行して全て KILLED を確認した。
+
+## D-022 — 面ごとに**項目立て**がずれていた（verifier F2 / F3）
+
+- Wave 5 の突合（D-020）は**文言**を比べており（U+2212 と `-` の差を拾った）、
+  **項目の有無**を比べていなかった。そのため2件が残っていた。
+  ```text
+  F2  publicLabel  : Markdown / JSON には出るが、preview / print には出ない
+                     registered preset では案件名にあたる文字列である
+  F3  診断の理由    : preview（15列）/ print / JSON にはあるが、
+                     Markdown の表（14列）に無い
+  ```
+- F2 は **redaction違反ではない**（packet §20 が registered preset の publicLabel の
+  表示を明示的に許している）。問題は、画面で承認する人が
+  「配る資料に何が載っているか」を見ないまま配れてしまうことである。
+- F3 は「なぜこの行が落ちたのか」が議事録へ貼った先でだけ消えることになる。
+- **決定**: preview に表示名を出し、Markdown の表に備考列を足して、
+  4面の項目立てをそろえた。どちらも mutant で固定した。
+
+## D-023 — 印刷の関門を fail closed にする（verifier F4）
+
+- `beforeprint` が `applyPrintEligibility(getReviewFreshness() === FRESH)` の1行だったため、
+  鮮度計算が例外を投げると **applyPrintEligibility が呼ばれず、前回の許可が残った**。
+  verifier の再現（control要素を外して null 参照させる）は人工的だが、
+  構造としてはコメントが主張する「最終関門」の逆だった。
+- **決定**: まず `applyPrintEligibility(false)` で落とし、確かめられたときだけ与え直す。
+  例外時も落としたままにする。`afterprint` と同じ形にそろえた。
+
+## D-024 — 「生存2件」という書き方が実態より狭かった（verifier の artifact 指摘）
+
+- `QUALITY_DEBT.md` / `TASK_QUEUE.md` に「生存2件」「防御的事実2件」と書いていた。
+  各 wave の battery は**その wave の guard に対して** SURVIVED 0 であり、その範囲では正しい。
+  しかし全体として「生存は2件」と読める書き方になっており、
+  実際には値系の7件（F1）が生き残っていた。
+- **決定**: 集計の書き方を変える。
+  - 各 campaign の数字は範囲付きで残す（何を対象にした battery かを明記）
+  - 「全 corpus に対する生存」は別項目として、verifier の45件の結果を採用する
+  - F1 修理後の再測で、値系7件は KILLED になった
+- 数字を後から良く見せないための書き方であって、過去の数字を消すものではない。
+
+## D-025 — export上限の余裕は多バイト文字で測る（verifier F5 / F6）
+
+- capは UTF-8 bytes で測っているのに、headroom の test は `.length`（UTF-16 code units）で
+  測っていた。日本語ラベルでは両者が1.2〜1.9倍ずれる。
+- 記録していた「最大構成 1.21 MiB」も、ラベルが英字の場合の値だった。
+  日本語ラベル（このツールの実際の使われ方）で測り直すと **1.33 MiB**。
+- **決定**: test も記録も UTF-8 bytes で測る。cap 8 MiB は据え置き
+  （余裕は約6.0倍で、動かす実測上の理由が無い）。
+
+## D-026 — repo外の資産に Hard Gate を依存させない（verifier の durability 指摘）
+
+- privacyMode を設定snapshotから落とす mutant を殺していたのは browser suite だけで、
+  それは session の scratchpad にあり repository には無い。
+  「npm test 500件」を関門として引用すると、この Hard Gate は守られていないことになる。
+- **決定**: snapshot が6系統すべてを含むことを `npm test` 側の contract test で固定した。
+  同じ mutant を npm test だけで KILLED にできることを実測で確認した。

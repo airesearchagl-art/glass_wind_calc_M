@@ -10,7 +10,7 @@
 - Base SHA: 6a5232f65d02e2a8bfa8c2c87049b5865c584855
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 5 — §1-§49 完了 / Wave 6（independent verifier）待ち
+- Current wave: Wave 6 — independent verifier の指摘（F1-F6）修理完了
 - Task Packet ID: LRP-20260920-GLASS-P2I
 - Task Packet revision: 1
 - Task Packet SHA-256: 901afdc2317e0b38ca90dcb69ba1fb8d8b271b1e073acd40e20d0e784c8f229e
@@ -539,6 +539,68 @@ read-only : Review の生成・preview・JSON・Markdown・stale判定の前後�
    値として使う文字種で区切るよう直した。
 ```
 
+## Wave 6 — independent verification と修理（実測）
+
+verdict: **PASS WITH FINDINGS**。
+shipped code の挙動としては、verifier が実行できた全領域で正しかった。
+Hard Gate 違反は発生していない。指摘6件はすべて本Campaign内で修理した。
+
+verifier が再現できた主張はすべて一致した（493 pass、browser 7 suite、
+保護値5つ、digest、HEAD、tree clean）。
+
+```text
+F1  MEDIUM  値そのものを確かめる test が無く、値系の mutant 7件が全corpusを生き延びた
+            実測: widthMm を 1 に / allowablePressure を 1 に /
+                  status を 'OK' に固定 / designPressure を 0 に
+                  → いずれも 499件すべて緑のまま
+            実装は正しかった。欠けていたのは証明（D-021）          FIXED
+F2  LOW-MED publicLabel が Markdown / JSON には出るが preview / print に無い
+            redaction違反ではない（packet §20が明示的に許可）。
+            画面で承認する人が、配る資料の中身を見ないまま配れる状態（D-022）FIXED
+F3  LOW-MED Markdown の表だけ診断の理由列が無い（15列 vs 14列）        FIXED
+F4  LOW     beforeprint が例外時に fail open（前回の許可が残る）（D-023） FIXED
+F5  INFO    headroom test が .length、capは UTF-8 bytes で単位が不一致    FIXED
+F6  INFO    記録していた最大構成が多バイトラベルでの最大ではなかった      FIXED
+```
+
+### artifact の書き方についての指摘（受け入れた）
+
+verifier は artifact を「概して正直」と評価したうえで、
+「生存2件」という書き方が実態より狭いと指摘した。これは正しい。
+各 wave の battery は**その wave の guard を対象にした範囲**での SURVIVED 0 であり、
+その範囲では正しいが、全体の生存数として読める書き方になっていた。
+全corpus（45件）に対する生存は修理前 11件で、うち7件は本物の穴だった。
+集計の書き方を D-024 で改め、範囲を明記するようにした。
+
+### 修理後の再測
+
+```text
+npm test : 500 pass / 0 fail（Wave 5 493 → +7）
+mutation : verifier の生存7件（値系）+ F2 / F3 / F4 の計10件 → すべて KILLED
+           byte-exact restore を sha256 で確認
+browser  : w5b 31 / w5 58 / 4H 27 / W4 48 / p2g 84 / p2h 29 / p2h-repair 17
+           すべて 0 fail
+```
+
+### repo外の資産への依存を1つ減らした（verifier の durability 指摘）
+
+privacyMode を設定snapshotから落とす mutant を殺していたのは browser suite だけで、
+それは scratchpad にあり repository に無い。
+「npm test の件数」を関門として引用する以上、この Hard Gate が
+repo内のテストで守られていない状態だった。
+snapshot が6系統すべてを含むことを contract test で固定し、
+同じ mutant を npm test だけで KILLED にできることを実測した（D-026）。
+
+### export size 再測（多バイトラベル / §26 の値を更新）
+
+```text
+最大構成（1000 case / detail 50 / 日本語ラベル200字 / title 200 / note 2000）
+  Review JSON : 1,392,779 bytes = 1.33 MiB（英字ラベルでの 1.21 MiB より大きい）
+  Markdown    :   505,959 bytes = 0.48 MiB
+  cap         : 8 MiB（据え置き）
+  headroom    : JSON 約6.0倍 / Markdown 約16.6倍
+```
+
 ## Quality Debt
 
 QUALITY_DEBT.md 参照（Wave 0時点で none）。
@@ -557,10 +619,9 @@ Wave 1-7（TASK_QUEUE.md参照）
 
 ## Next action
 
-Wave 6: full regression（§50）/ 1つにつながった browser flow（§51）/
-independent verifier（§52、別context・read-only）。
-verifier の指摘は本Campaign内で修理する（§53）。
-その後 implementation verification head を固定（§54）。
+Wave 7: README 更新 / Run Artifact convergence / AC-01〜AC-25 の実測反映 /
+Draft PR（§55-§56）。
+その前に implementation verification head を固定する（§54）。
 
 ## Stop conditions status
 

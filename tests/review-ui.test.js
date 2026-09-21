@@ -320,3 +320,23 @@ test('W5-30: previewは支配ケースを自分で選び直さない', () => {
   // summary 由来の値も同様に model から読む
   assert.equal(render.includes('summarize('), false);
 });
+
+test('W6: 設定snapshotは6項目すべてを含む（browser suiteに頼らず npm test で守る）', () => {
+  const code = scriptCode();
+  const ser = bodyOf(code, 'serializeReportSettings');
+
+  // privacyMode が抜けると、Full で作った資料を Redacted へ切り替えても
+  // SETTINGS_DIRTY にならず、そのまま export / print できてしまう。
+  // これを落とせるのが browser suite だけだと、repo外の資産に依存することになる。
+  for (const field of ['title', 'subtitle', 'note', 'privacyMode',
+                       'detailCaseIds', 'comparisonA', 'comparisonB']) {
+    assert.match(ser, new RegExp('settings\\.' + field + '\\b'),
+      'snapshot に ' + field + ' が入る');
+  }
+  // 読み取り側も同じ6系統を読む
+  const read = bodyOf(code, 'readCurrentReportSettings');
+  for (const id of ['rep-title', 'rep-subtitle', 'rep-note', 'rep-privacy',
+                    'rep-detail-list', 'rep-cmp-a', 'rep-cmp-b']) {
+    assert.equal(read.includes(id), true, id + ' を読む');
+  }
+});

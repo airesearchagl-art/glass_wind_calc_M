@@ -877,7 +877,7 @@ test('W3-11〜17: Markdown injection はすべて不活性になる', () => {
   // 表の列数が攻撃行でも崩れない
   const tableRows = lines.filter((l) => /^\| A\d+ /.test(l));
   assert.equal(tableRows.length, MD_ATTACKS.length);
-  const expectedCols = 14;
+  const expectedCols = 15; // F3で備考列を追加した
   tableRows.forEach((row) => {
     const cells = row.split(/(?<!\\)\|/).slice(1, -1);
     assert.equal(cells.length, expectedCols, '列数が崩れない: ' + row.slice(0, 60));
@@ -1008,8 +1008,9 @@ test('W3: 1000ケースのreportは通り、上限はcore側にある', () => {
   const md = Review.toMarkdown(rev);
 
   assert.equal(rev.cases.length, 1000);
-  assert.equal(json.length < Review.MAX_EXPORT_JSON_BYTES, true, '正当な最大reportは通る');
-  assert.equal(md.length < Review.MAX_EXPORT_MARKDOWN_BYTES, true);
+  assert.equal(Buffer.byteLength(json, 'utf8') < Review.MAX_EXPORT_JSON_BYTES, true,
+    '正当な最大reportは通る');
+  assert.equal(Buffer.byteLength(md, 'utf8') < Review.MAX_EXPORT_MARKDOWN_BYTES, true);
   // 上限そのものはUIではなくcoreが持つ
   assert.equal(typeof Review.MAX_EXPORT_JSON_BYTES, 'number');
   assert.equal(typeof Review.MAX_EXPORT_MARKDOWN_BYTES, 'number');
@@ -1369,9 +1370,168 @@ test('W5-26: 最大構成の実測値と上限の関係（M15の根拠を最新�
 
   const json = Review.serializeReviewPackage(rev);
   const md = Review.toMarkdown(rev);
-  // 上限に対して余裕が2倍以上あること。余裕が消えたらここが落ちて、値を見直す合図になる。
-  assert.equal(json.length * 2 < Review.MAX_EXPORT_JSON_BYTES, true,
-    'JSON ' + json.length + ' vs cap ' + Review.MAX_EXPORT_JSON_BYTES);
-  assert.equal(md.length * 2 < Review.MAX_EXPORT_MARKDOWN_BYTES, true,
-    'MD ' + md.length + ' vs cap ' + Review.MAX_EXPORT_MARKDOWN_BYTES);
+  // capは UTF-8 bytes で測っている。test が .length（UTF-16 code units）で測ると
+  // 多バイト文字のぶんだけ実際より小さく見える。同じ単位で比べる。
+  const bytes = (t) => Buffer.byteLength(t, 'utf8');
+  assert.equal(bytes(json) * 2 < Review.MAX_EXPORT_JSON_BYTES, true,
+    'JSON ' + bytes(json) + ' bytes vs cap ' + Review.MAX_EXPORT_JSON_BYTES);
+  assert.equal(bytes(md) * 2 < Review.MAX_EXPORT_MARKDOWN_BYTES, true,
+    'MD ' + bytes(md) + ' bytes vs cap ' + Review.MAX_EXPORT_MARKDOWN_BYTES);
+});
+
+// ============================================================
+// 値そのものが一致していることを確かめる（独立検証 F1）
+//
+// これまで summary / groups / governing の**集計**は固定していたが、
+// 行と詳細の**値**を確かめる test が1つも無かった。
+// そのため widthMm や allowablePressure を書き換えても、
+// status を OK に固定しても、全テストが緑のまま通った（実測）。
+//
+// このmoduleの主張は「資料は画面と食い違わない」である。
+// 食い違わないことを、集計だけでなく値で示す。
+// ============================================================
+
+test('F1: case行の全項目が、評価結果の値と一致する', () => {
+  const ws = allSourceKindsWorkspace();
+  const diagnostics = makeDiagnostics('no_such_glass');
+  const rev = Review.buildReviewPackage({ workspace: ws, diagnostics });
+
+  const expected = Workspace.mergeEvaluationResults(
+    Workspace.evaluateWorkspace(ws), diagnostics);
+  assert.equal(rev.cases.length, expected.length);
+
+  expected.forEach((src, i) => {
+    const row = rev.cases[i];
+    assert.equal(row.caseId, src.caseId, 'row ' + i + ' の並び順');
+    for (const key of Review.REVIEW_CASE_KEYS) {
+      if (key === 'label') continue; // labelはprivacy modeで変わる（別testで固定）
+      assert.deepEqual(row[key], src[key] === undefined ? null : src[key],
+        row.caseId + ' の ' + key + ' が評価結果と一致する');
+    }
+  });
+
+  // 実在する値であることも確かめる（すべてnullでも上のループは通るため）
+  const ok = rev.cases.find((c) => c.caseId === 'MAN');
+  assert.equal(ok.widthMm, 1250);
+  assert.equal(ok.heightMm, 2050);
+  assert.equal(ok.designPressure, 1400);
+  assert.equal(typeof ok.allowablePressure, 'number');
+  assert.equal(typeof ok.marginRatio, 'number');
+});
+
+test('F1: detail の input が authoritative な inputPackage と一致する', () => {
+  const ws = allSourceKindsWorkspace();
+  const ids = ['MAN', 'NOT', 'PRE', 'IMP'];
+  const rev = Review.buildReviewPackage({ workspace: ws, detailCaseIds: ids });
+
+  ids.forEach((id) => {
+    const d = rev.selectedDetails.find((x) => x.caseId === id);
+    const pkg = ws.getCase(id).inputPackage;
+
+    assert.equal(d.input.widthMm, pkg.widthMm, id + ' widthMm');
+    assert.equal(d.input.heightMm, pkg.heightMm, id + ' heightMm');
+    assert.equal(d.input.glassType, pkg.glassType, id + ' glassType');
+    assert.equal(d.input.extraFactor, pkg.extraFactor, id + ' extraFactor');
+    assert.equal(d.input.positivePressure, pkg.positivePressure, id + ' positivePressure');
+    assert.equal(d.input.negativePressure, pkg.negativePressure, id + ' negativePressure');
+    assert.equal(d.input.designPressure, pkg.designPressure, id + ' designPressure');
+    assert.equal(d.input.sourceKind, pkg.sourceKind, id + ' sourceKind');
+    assert.equal(d.input.verificationStatus, pkg.provenance.verificationStatus, id + ' status');
+    assert.equal(d.input.publicLabel, pkg.provenance.publicLabel, id + ' publicLabel');
+    assert.deepEqual(d.windInput, pkg.windInput === undefined ? null : pkg.windInput,
+      id + ' windInput');
+  });
+
+  // 値が実在すること（全部nullなら上は通ってしまう）
+  const man = rev.selectedDetails.find((x) => x.caseId === 'MAN');
+  assert.equal(man.input.widthMm, 1250);
+  assert.equal(man.input.designPressure, 1400);
+});
+
+test('F1: detail の result が evaluateWorkspace の結果と一致する', () => {
+  const ws = allSourceKindsWorkspace();
+  const ids = ['MAN', 'NOT', 'NOSOL'];
+  const rev = Review.buildReviewPackage({ workspace: ws, detailCaseIds: ids });
+  const results = Workspace.evaluateWorkspace(ws);
+
+  ids.forEach((id) => {
+    const d = rev.selectedDetails.find((x) => x.caseId === id);
+    const src = results.find((r) => r.caseId === id);
+    assert.equal(d.result.status, src.status, id + ' status');
+    assert.equal(d.result.recommendedLabel,
+      src.recommendedLabel === undefined ? null : src.recommendedLabel, id + ' recommendedLabel');
+    assert.equal(d.result.allowablePressure,
+      src.allowablePressure === undefined ? null : src.allowablePressure, id + ' allowable');
+    assert.equal(d.result.marginRatio,
+      src.marginRatio === undefined ? null : src.marginRatio, id + ' marginRatio');
+    assert.equal(d.result.marginPressure,
+      src.marginPressure === undefined ? null : src.marginPressure, id + ' marginPressure');
+    assert.equal(d.result.outOfScopePresent, !!src.outOfScopePresent, id + ' outOfScope');
+  });
+
+  // 判定が実際に分かれていること（OKで塗り潰されていないこと）
+  const statuses = ids.map((id) =>
+    rev.selectedDetails.find((x) => x.caseId === id).result.status);
+  assert.deepEqual(statuses, ['OK', 'OK', 'NO_SOLUTION']);
+});
+
+test('F1: 同じ値が Markdown と JSON にも一致して出る', () => {
+  const ws = allSourceKindsWorkspace();
+  const rev = Review.buildReviewPackage({ workspace: ws, detailCaseIds: ['MAN'] });
+  const json = JSON.parse(Review.serializeReviewPackage(rev));
+  const md = Review.toMarkdown(rev);
+  const src = Workspace.evaluateWorkspace(ws).find((r) => r.caseId === 'MAN');
+
+  const jsonRow = json.cases.find((c) => c.caseId === 'MAN');
+  assert.equal(jsonRow.widthMm, src.widthMm);
+  assert.equal(jsonRow.designPressure, src.designPressure);
+  assert.equal(jsonRow.allowablePressure, src.allowablePressure);
+  assert.equal(json.selectedDetails[0].input.widthMm, src.widthMm);
+  assert.equal(json.selectedDetails[0].result.allowablePressure, src.allowablePressure);
+
+  // Markdown は丸めた表示だが、桁を合わせれば同じ値であること
+  assert.equal(md.includes('W × H: ' + src.widthMm.toFixed(0) + ' × ' + src.heightMm.toFixed(0)),
+    true, 'Markdown detail の寸法');
+  assert.equal(md.includes('許容耐力: ' + src.allowablePressure.toFixed(2)), true,
+    'Markdown detail の許容耐力');
+});
+
+test('F2/F3: preview / Markdown / JSON の項目立てがそろっている', () => {
+  const ws = allSourceKindsWorkspace();
+  const diagnostics = makeDiagnostics('no_such_glass');
+  const rev = Review.buildReviewPackage({
+    workspace: ws, diagnostics, detailCaseIds: ['PRE', 'MAN'] });
+  const md = Review.toMarkdown(rev);
+  const json = JSON.parse(Review.serializeReviewPackage(rev));
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+
+  // F3: 診断の理由は JSON にも Markdown にも出る
+  const diagRow = json.cases.find((c) => c.status === 'INVALID');
+  assert.equal(typeof diagRow.error, 'string');
+  assert.equal(md.includes('備考'), true, 'Markdownに備考列がある');
+  const headerCols = md.split('\n').find((l) => l.startsWith('| ケースID')).split('|').length;
+  assert.equal(headerCols, 17, '14列 + 備考 = 15列（前後の空セルを含めて17分割）');
+
+  // F2: publicLabel は Markdown / JSON に出るなら preview にも出す
+  const presetDetail = rev.selectedDetails.find((d) => d.caseId === 'PRE');
+  assert.equal(typeof presetDetail.input.publicLabel, 'string');
+  assert.equal(md.includes('表示名:'), true, 'Markdownに表示名がある');
+  assert.match(html, /'表示名: ' \+ revText\(d\.input\.publicLabel\)/,
+    'previewにも表示名を出す');
+});
+
+test('F4: 印刷の関門は既定で不許可にしてから与え直す', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
+  const idx = html.indexOf("addEventListener('beforeprint'");
+  assert.notEqual(idx, -1);
+  const handler = html.slice(idx, idx + 420);
+
+  // 先に落とす → 確かめられたときだけ与える、の順序
+  const denyAt = handler.indexOf('applyPrintEligibility(false)');
+  const grantAt = handler.indexOf('applyPrintEligibility(true)');
+  assert.notEqual(denyAt, -1, '既定で不許可にする');
+  assert.notEqual(grantAt, -1, '確認後に許可する');
+  assert.equal(denyAt < grantAt, true, '不許可が先');
+  // 例外時も許可のまま残さない
+  assert.match(handler, /catch\s*\(/);
 });

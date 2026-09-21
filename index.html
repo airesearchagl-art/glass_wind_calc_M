@@ -2999,7 +2999,15 @@ function applyPrintEligibility(allowed) {
  * ボタン側のgateは早い段階での案内であって、境界はこちらである。
  */
 window.addEventListener('beforeprint', function () {
-  applyPrintEligibility(getReviewFreshness() === REVIEW_FRESHNESS.FRESH);
+  // まず落とす。確かめられたときだけ与え直す。
+  // 計算の途中で例外が出た場合に前回の許可が残ると、古い資料がそのまま印刷される。
+  // afterprint と同じ「既定は不許可」の形にそろえる。
+  applyPrintEligibility(false);
+  try {
+    if (getReviewFreshness() === REVIEW_FRESHNESS.FRESH) applyPrintEligibility(true);
+  } catch (e) {
+    applyPrintEligibility(false);
+  }
 });
 
 // 許可状態を印刷後に持ち越さない。次の印刷でもう一度確かめさせる。
@@ -3287,6 +3295,11 @@ function renderReviewReport() {
       card.appendChild(revEl('p',
         '出所: ' + revText(d.input.sourceKind) +
         ' / 検証状況: ' + revText(d.input.verificationStatus), 'review-kv'));
+      // F2: publicLabel は Markdown / JSON に出る。画面に出していないと、
+      // 承認する人が「配る資料に何が載っているか」を見ないまま配ることになる。
+      if (d.input.publicLabel) {
+        card.appendChild(revEl('p', '表示名: ' + revText(d.input.publicLabel), 'review-kv'));
+      }
       card.appendChild(revEl('p',
         'W × H: ' + revNum(d.input.widthMm, 0) + ' × ' + revNum(d.input.heightMm, 0) +
         ' mm / ガラス種別: ' + revText(d.input.glassType) +

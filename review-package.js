@@ -840,14 +840,17 @@
 
   function markdownCaseTable(cases) {
     var lines = [];
+    // F3: 備考（診断の理由）を落とさない。
+    // preview / print / JSON は理由を持っているのに Markdown だけ無いと、
+    // 「なぜこの行が落ちたのか」が議事録へ貼った先でだけ消える。
     lines.push(mdRow([
       'ケースID', 'ラベル', '出所', '検証状況', 'W (mm)', 'H (mm)', '面積 (m²)',
       '設計風圧 (N/m²)', 'ガラス種別', '推奨構成', '許容耐力 (N/m²)',
-      '余裕率', '余裕圧 (N/m²)', '判定'
+      '余裕率', '余裕圧 (N/m²)', '判定', '備考'
     ]));
     lines.push(mdRow([
       '---', '---', '---', '---', '---:', '---:', '---:', '---:',
-      '---', '---', '---:', '---:', '---:', '---'
+      '---', '---', '---:', '---:', '---:', '---', '---'
     ]));
     cases.forEach(function (c) {
       lines.push(mdRow([
@@ -860,7 +863,8 @@
         escapeMarkdown(c.glassType),
         escapeMarkdown(c.recommendedLabel),
         fmt(c.allowablePressure, 2), fmt(c.marginRatio, 4), fmt(c.marginPressure, 2),
-        escapeMarkdown(c.status)
+        escapeMarkdown(c.status),
+        c.isDiagnostic ? escapeMarkdown(c.error) : '—'
       ]));
     });
     return lines;
