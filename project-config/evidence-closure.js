@@ -148,6 +148,59 @@
 
   var MAX_OBSERVATIONS = 64;
 
+  // ── Wave 3: closure evaluation contract ───────────────────
+
+  var CLOSURE_STATUSES = ['READY_CANDIDATE', 'BLOCKED'];
+
+  /**
+   * blocker の種別。**現在の真実を表すstatusを混ぜない**
+   * （VERIFIED / PROMOTED / APPROVED はここに入らない）。
+   * closure評価が答えるのは「候補として閉じられるか」であって
+   * 「いま検証済みか」ではない。
+   */
+  var BLOCKER_KINDS = {
+    MISSING_OBSERVATION: 'MISSING_OBSERVATION',
+    INSUFFICIENT_EVIDENCE: 'INSUFFICIENT_EVIDENCE',
+    MISMATCH: 'MISMATCH',
+    CASE_NOT_READY: 'CASE_NOT_READY'
+  };
+
+  /**
+   * current claim と突き合わせられる fact かどうか。
+   *
+   * evaluation_height が false なのは実装の都合ではない。
+   * current config に評価高さ/Zの正が**存在しない**ことを Phase 2J Wave 1 で
+   * 実測したためである。比較対象が無いところで MATCH を返すのは、
+   * 「Evidenceの有無」を「数値の一致」で置き換える最も静かな形になる。
+   */
+  var RECONCILIATION_APPLICABLE = {
+    pane_width_mm: true,
+    pane_height_mm: true,
+    positive_pressure: true,
+    negative_pressure: true,
+    evaluation_height: false
+  };
+
+  /**
+   * 報告用の概念カテゴリ。**EvidenceLedgerのfactKeyではない。**
+   * 12 slot（機械的な観測単位）と 4 category（案件として未解決な論点）は
+   * 別の数であり、混同すると進捗の読みを誤る。
+   */
+  var CATEGORY_IDS = [
+    'pane_visible_dimensions',
+    'positive_pressure_source',
+    'negative_pressure_source',
+    'floor_evaluation_height_mapping'
+  ];
+
+  var CANDIDATE_SCHEMA_VERSION = 1;
+  var CANDIDATE_TYPE = 'project_evidence_promotion_candidate';
+  var CANDIDATE_WARNING =
+    'This is a promotion candidate, not current project truth. It has not been applied.';
+
+  // builderが作ったcandidateだけをexporterへ通す（Phase 2I Review Packageと同じ形）。
+  var PROMOTION_CANDIDATES = new WeakSet();
+
   /**
    * scope値（階key / 区分key）として公開してよいtokenの形。
    *
@@ -491,6 +544,436 @@
     return Evidence.deepFreeze(normalized);
   }
 
+  // ============================================================
+  // Wave 3: current claim resolver
+  // ============================================================
+
+  /**
+   * 現在のpresetが**いま主張している**scalar値を解決する（module private）。
+   *
+   * 返り値の意味は「現在のpresetの主張」だけである。
+   * verified である / Evidenceに裏付けられている / 承認済みである、のいずれでもない。
+   * ここで現在の verificationStatus を持ち出して closure の根拠にしてはならない
+   * （reconciliation が問うのは「昇格十分なEvidenceが現在の主張と一致するか」であって
+   *   「現在の主張がすでに信用できるか」ではない）。
+   *
+   * 案件固有の数値も floor/zone 語彙もこのmoduleに持たない。presetから引く。
+   */
+  function resolveCurrentClaim(config, factKey, scope) {
+    if (factKey === 'pane_width_mm') {
+      return config.dimensions.defaultW.value;
+    }
+    if (factKey === 'pane_height_mm') {
+      return config.dimensions.defaultH.value;
+    }
+    if (factKey === 'positive_pressure') {
+      return config.wind.positivePressureByFloor[scope.floor].value;
+    }
+    if (factKey === 'negative_pressure') {
+      return config.wind.negativePressureByZone[scope.zone].value;
+    }
+    // evaluation_height: 正が存在しない。null は「まだ観測していない」ではなく
+    // 「突き合わせるべき現在の主張が無い」を意味する。
+    return null;
+  }
+
+  function entrySpecFor(observation) {
+    return {
+      factKey: observation.factKey,
+      value: observation.observedValue,
+      unit: observation.unit,
+      verificationStatus: 'verified',
+      evidence: observation.evidence,
+      sourceReference: observation.sourceReference
+    };
+  }
+
+  // ============================================================
+  // Wave 3: Layer 1 — fact / slot closure
+  // ============================================================
+
+  /**
+   * 1 slot 分の closure を評価する。
+   *
+   * 判定順序は Phase 2F と同じく **Evidenceが先、数値は後**である。
+   * gateを通らないObservationは、値が完全一致していても READY にならない。
+   */
+  function evaluateFactSlot(slot, observation, config) {
+    var applicable = RECONCILIATION_APPLICABLE[slot.factKey] === true;
+    var currentValue = applicable ? resolveCurrentClaim(config, slot.factKey, slot.scope) : null;
+    var blockerKinds = [];
+    var evidenceGateStatus = null;
+    var evidenceGateReason = null;
+    var reconciliationStatus = null;
+    var ledgerEntry = null;
+
+    if (!observation) {
+      blockerKinds.push(BLOCKER_KINDS.MISSING_OBSERVATION);
+      if (applicable) {
+        // 「Evidenceが無い」の正規表現は既存にある。別アルゴリズムを作らない。
+        reconciliationStatus = Ledger.reconcileFact(currentValue, null).status;
+      }
+    } else {
+      try {
+        // 昇格十分性の唯一の正。ここで規則を作り直さない。
+        Evidence.assertPromotionGate(
+          'verified', observation.evidence, slot.slotKey,
+          { sourceReference: observation.sourceReference });
+        evidenceGateStatus = 'PASS';
+      } catch (e) {
+        evidenceGateStatus = 'FAIL';
+        // gate自身の理由だけを残す。生のObservationやsource入力は貼らない。
+        evidenceGateReason = e.message;
+        blockerKinds.push(BLOCKER_KINDS.INSUFFICIENT_EVIDENCE);
+      }
+
+      if (evidenceGateStatus === 'PASS') {
+        // gateが通って初めて 'verified' を名乗るentryを作れる。
+        // Evidence levelから verificationStatus を自前でmappingしない。
+        // createEntry は gate を再実行する（entry生成自体がtrust boundaryなので、
+        // ここでの二重チェックは意図的である）。
+        ledgerEntry = Ledger.createEntry(entrySpecFor(observation));
+        if (applicable) {
+          reconciliationStatus = Ledger.reconcileFact(currentValue, ledgerEntry).status;
+          if (reconciliationStatus === 'MISMATCH') {
+            // 自動修復しない。現在のpresetも変えない。Human Gateへ回付する。
+            blockerKinds.push(BLOCKER_KINDS.MISMATCH);
+          }
+        }
+      } else if (applicable) {
+        reconciliationStatus = Ledger.reconcileFact(currentValue, null).status;
+      }
+    }
+
+    var ready;
+    if (applicable) {
+      ready = !!observation && evidenceGateStatus === 'PASS' && reconciliationStatus === 'MATCH';
+    } else {
+      // 突き合わせる現在の主張が無いfactは、昇格十分なEvidenceが付いた時点で
+      // 「欠けていたfactが埋まった候補」になる。「現在値と一致した」ではない。
+      ready = !!observation && evidenceGateStatus === 'PASS';
+    }
+
+    return {
+      result: Evidence.deepFreeze({
+        slotKey: slot.slotKey,
+        factKey: slot.factKey,
+        scope: slot.scope,
+        unit: slot.unit,
+        observationPresent: !!observation,
+        candidateValue: observation ? observation.observedValue : null,
+        currentValue: currentValue,
+        evidenceGateStatus: evidenceGateStatus,
+        evidenceGateReason: evidenceGateReason,
+        reconciliationApplicable: applicable,
+        reconciliationStatus: reconciliationStatus,
+        closureStatus: ready ? 'READY_CANDIDATE' : 'BLOCKED',
+        blockerKinds: blockerKinds.slice()
+      }),
+      observation: observation,
+      hasLedgerEntry: ledgerEntry !== null
+    };
+  }
+
+  // ============================================================
+  // Wave 3: Layer 2 — conceptual categories と case scope
+  // ============================================================
+
+  function buildCategory(categoryId, requiredSlotKeys, resultsBySlot) {
+    var blocked = requiredSlotKeys.filter(function (k) {
+      return resultsBySlot[k].closureStatus !== 'READY_CANDIDATE';
+    });
+    return Evidence.deepFreeze({
+      categoryId: categoryId,
+      status: (requiredSlotKeys.length > 0 && blocked.length === 0) ? 'READY_CANDIDATE' : 'BLOCKED',
+      requiredSlotKeys: requiredSlotKeys.slice(),
+      blockedSlotKeys: blocked
+    });
+  }
+
+  function buildCategories(contract, slots, resultsBySlot) {
+    var keysFor = function (factKey) {
+      return slots.filter(function (s) { return s.factKey === factKey; })
+        .map(function (s) { return s.slotKey; });
+    };
+
+    // floor ↔ Z の対応は「Z観測がn件ある」では閉じない。
+    // 同じ階について 正圧 と 評価高さ の**両方**が揃って初めて対応が言える。
+    // 3階のZは2階の対応を閉じない。
+    var mappingKeys = [];
+    contract.floors.forEach(function (floor) {
+      mappingKeys.push(slotKeyFor('positive_pressure', { floor: floor }));
+      mappingKeys.push(slotKeyFor('evaluation_height', { floor: floor }));
+    });
+
+    return Evidence.deepFreeze([
+      buildCategory('pane_visible_dimensions',
+        keysFor('pane_width_mm').concat(keysFor('pane_height_mm')), resultsBySlot),
+      buildCategory('positive_pressure_source', keysFor('positive_pressure'), resultsBySlot),
+      buildCategory('negative_pressure_source', keysFor('negative_pressure'), resultsBySlot),
+      buildCategory('floor_evaluation_height_mapping', mappingKeys, resultsBySlot)
+    ]);
+  }
+
+  /**
+   * floor × zone の各case scopeについて、**そのscopeのfactだけ**を入れた
+   * 一時Ledgerを作り、case-level契約（Phase 2F）へ判定を委ねる。
+   *
+   * ここで `if (W && H && positive && negative && Z)` と書かない。
+   * critical factの定義はPhase 2F側にあり、二重に持つと片方だけ変わる。
+   */
+  function buildCaseReadiness(contract, evaluated, resultsBySlot) {
+    var cases = [];
+    contract.floors.forEach(function (floor) {
+      contract.zones.forEach(function (zone) {
+        var wanted = [
+          slotKeyFor('pane_width_mm', null),
+          slotKeyFor('pane_height_mm', null),
+          slotKeyFor('positive_pressure', { floor: floor }),
+          slotKeyFor('negative_pressure', { zone: zone }),
+          slotKeyFor('evaluation_height', { floor: floor })
+        ];
+        var ledger = Ledger.createLedger();
+        wanted.forEach(function (slotKey) {
+          if (resultsBySlot[slotKey].closureStatus !== 'READY_CANDIDATE') {
+            return;
+          }
+          ledger.add(entrySpecFor(evaluated[slotKey].observation));
+        });
+
+        var promotion = Ledger.evaluateCasePromotion(
+          ledger, 'glass_pane', { claimsCalculationProvenance: true });
+
+        // 既存APIの `verified` をそのまま外へ出さない。
+        // あれはPhase 2J以前からある名前で、ここでの意味は
+        // 「候補として揃っているか」であって「いま検証済みか」ではない。
+        cases.push(Evidence.deepFreeze({
+          scope: { floor: floor, zone: zone },
+          readinessStatus: promotion.verified === true ? 'READY_CANDIDATE' : 'BLOCKED',
+          requiredFactKeys: promotion.requiredFactKeys.slice(),
+          missingFactKeys: promotion.missing.slice(),
+          reasons: promotion.reasons.slice(),
+          consideredSlotKeys: wanted
+        }));
+      });
+    });
+    return Evidence.deepFreeze(cases);
+  }
+
+  // ============================================================
+  // Wave 3: Layer 3 — project closure と Promotion Candidate
+  // ============================================================
+
+  function buildPromotionCandidate(projectId, slots, resultsBySlot, evaluated, summary) {
+    var proposedFacts = slots.map(function (slot) {
+      var r = resultsBySlot[slot.slotKey];
+      var o = evaluated[slot.slotKey].observation;
+      return {
+        slotKey: slot.slotKey,
+        factKey: slot.factKey,
+        scope: slot.scope,
+        observedValue: o.observedValue,
+        unit: o.unit,
+        evidence: {
+          level: o.evidence.level,
+          checkedAt: o.evidence.checkedAt,
+          publicDescription: o.evidence.publicDescription,
+          privateReferenceAvailable: o.evidence.privateReferenceAvailable
+        },
+        sourceReference: o.sourceReference,
+        reconciliationApplicable: r.reconciliationApplicable,
+        reconciliationStatus: r.reconciliationStatus,
+        // 呼び出し側は供給できない。canonical gateを通った後に本moduleが生成する。
+        // `verificationStatus` という名前は使わない（現在の真実と読まれるため）。
+        proposedVerificationStatus: 'verified'
+      };
+    });
+
+    var candidate = Evidence.deepFreeze({
+      schemaVersion: CANDIDATE_SCHEMA_VERSION,
+      candidateType: CANDIDATE_TYPE,
+      projectId: projectId,
+      candidateStatus: 'READY_CANDIDATE',
+      proposedFacts: proposedFacts,
+      gateSummary: {
+        requiredSlotCount: summary.requiredSlotCount,
+        readySlotCount: summary.readySlotCount,
+        categoryCount: summary.categoryCount,
+        readyCategoryCount: summary.readyCategoryCount,
+        caseScopeCount: summary.caseScopeCount,
+        readyCaseScopeCount: summary.readyCaseScopeCount,
+        allCriticalFactsSatisfied: true
+      },
+      notApplied: true,
+      currentConfigMutated: false,
+      warning: CANDIDATE_WARNING
+    });
+    PROMOTION_CANDIDATES.add(candidate);
+    return candidate;
+  }
+
+  /**
+   * Closure Evaluation の入口。
+   *
+   * 呼び出し側は projectId と生のObservation配列だけを渡す。
+   * current値・reconciliation結果・case readiness・project readiness・
+   * promotion status を**呼び出し側から受け取らない**。
+   * 現在の真実は必ずregistry経由で本moduleが引く。
+   */
+  function evaluateClosure(projectId, observations) {
+    // Wave 2 の検証（schema / scope / 単位 / privacy / 構造 / 重複 / 決定性）を
+    // 必ず通す。正規化済みObservationを外から受け取る経路は作らない。
+    var normalized = normalizeObservationSet(observations, projectId);
+    var contract = createProjectScopeContract(projectId);
+    var config = Registry.getPreset(projectId);
+    var slots = listRequiredObservationSlots(projectId);
+
+    var bySlotKey = Object.create(null);
+    normalized.forEach(function (o) {
+      bySlotKey[slotKeyFor(o.factKey, o.scope)] = o;
+    });
+
+    var evaluated = Object.create(null);
+    var resultsBySlot = Object.create(null);
+    var factResults = slots.map(function (slot) {
+      var one = evaluateFactSlot(slot, bySlotKey[slot.slotKey] || null, config);
+      evaluated[slot.slotKey] = one;
+      resultsBySlot[slot.slotKey] = one.result;
+      return one.result;
+    });
+
+    var categoryResults = buildCategories(contract, slots, resultsBySlot);
+    var caseReadiness = buildCaseReadiness(contract, evaluated, resultsBySlot);
+
+    var readySlotCount = factResults.filter(function (r) {
+      return r.closureStatus === 'READY_CANDIDATE';
+    }).length;
+    var readyCategoryCount = categoryResults.filter(function (c) {
+      return c.status === 'READY_CANDIDATE';
+    }).length;
+    var readyCaseScopeCount = caseReadiness.filter(function (c) {
+      return c.readinessStatus === 'READY_CANDIDATE';
+    }).length;
+
+    // 3つの条件はわざと重複させている。
+    //   slot全件   : 完全性を守る
+    //   category全件: 概念的な閉じを守る（対応関係を含む）
+    //   case全件   : Phase 2F の case critical-fact 契約を再利用する
+    // 1本のboolean条件に畳むと、どれか1つが壊れたときに黙って通る。
+    var allSlotsReady = factResults.length > 0 && readySlotCount === factResults.length;
+    var allCategoriesReady = categoryResults.length > 0 &&
+      readyCategoryCount === categoryResults.length;
+    var allCasesReady = caseReadiness.length > 0 &&
+      readyCaseScopeCount === caseReadiness.length;
+    var ready = allSlotsReady && allCategoriesReady && allCasesReady;
+
+    var blockerKinds = [];
+    factResults.forEach(function (r) {
+      r.blockerKinds.forEach(function (k) {
+        if (blockerKinds.indexOf(k) === -1) { blockerKinds.push(k); }
+      });
+    });
+    if (!allCasesReady && blockerKinds.indexOf(BLOCKER_KINDS.CASE_NOT_READY) === -1) {
+      blockerKinds.push(BLOCKER_KINDS.CASE_NOT_READY);
+    }
+    blockerKinds.sort();
+
+    var summary = {
+      requiredSlotCount: factResults.length,
+      readySlotCount: readySlotCount,
+      categoryCount: categoryResults.length,
+      readyCategoryCount: readyCategoryCount,
+      caseScopeCount: caseReadiness.length,
+      readyCaseScopeCount: readyCaseScopeCount
+    };
+
+    return Evidence.deepFreeze({
+      projectId: contract.projectId,
+      status: ready ? 'READY_CANDIDATE' : 'BLOCKED',
+      blockerKinds: blockerKinds,
+      requiredSlotCount: summary.requiredSlotCount,
+      readySlotCount: summary.readySlotCount,
+      categoryCount: summary.categoryCount,
+      readyCategoryCount: summary.readyCategoryCount,
+      caseScopeCount: summary.caseScopeCount,
+      readyCaseScopeCount: summary.readyCaseScopeCount,
+      factResults: factResults,
+      categoryResults: categoryResults,
+      caseReadiness: caseReadiness,
+      // 「だいたい揃っている」candidateは作らない。部分的な進捗は
+      // factResults / categoryResults に残るので、失われるものは無い。
+      promotionCandidate: ready
+        ? buildPromotionCandidate(projectId, slots, resultsBySlot, evaluated, summary)
+        : null
+    });
+  }
+
+  // ============================================================
+  // Wave 3: Candidate の一方向export
+  // ============================================================
+
+  /**
+   * Promotion Candidate を決定的なJSONへ書き出す（**一方向**）。
+   *
+   * `JSON.stringify(candidate)` をそのまま契約にしない。
+   * それでは内部shapeの変更がそのまま出力契約の変更になり、
+   * 何を出さないかという約束（private参照・現在config・verifiedCases）を
+   * 構造的に守れない。key順も明示する。
+   *
+   * 読み戻すAPIは**作らない**。candidate JSON が入力経路になった瞬間、
+   * 「外から持ち込んだJSON」で trust を上げられるようになる。
+   */
+  function serializePromotionCandidate(candidate) {
+    if (!candidate || typeof candidate !== 'object' || !PROMOTION_CANDIDATES.has(candidate)) {
+      throw new Error(
+        'serializePromotionCandidate() requires a candidate created by evaluateClosure()'
+      );
+    }
+    var payload = {
+      schemaVersion: candidate.schemaVersion,
+      candidateType: candidate.candidateType,
+      projectId: candidate.projectId,
+      candidateStatus: candidate.candidateStatus,
+      notApplied: candidate.notApplied,
+      currentConfigMutated: candidate.currentConfigMutated,
+      warning: candidate.warning,
+      gateSummary: {
+        requiredSlotCount: candidate.gateSummary.requiredSlotCount,
+        readySlotCount: candidate.gateSummary.readySlotCount,
+        categoryCount: candidate.gateSummary.categoryCount,
+        readyCategoryCount: candidate.gateSummary.readyCategoryCount,
+        caseScopeCount: candidate.gateSummary.caseScopeCount,
+        readyCaseScopeCount: candidate.gateSummary.readyCaseScopeCount,
+        allCriticalFactsSatisfied: candidate.gateSummary.allCriticalFactsSatisfied
+      },
+      proposedFacts: candidate.proposedFacts.map(function (f) {
+        return {
+          slotKey: f.slotKey,
+          factKey: f.factKey,
+          scope: f.scope === null ? null : (
+            Object.prototype.hasOwnProperty.call(f.scope, 'floor')
+              ? { floor: f.scope.floor } : { zone: f.scope.zone }),
+          observedValue: f.observedValue,
+          unit: f.unit,
+          proposedVerificationStatus: f.proposedVerificationStatus,
+          reconciliationApplicable: f.reconciliationApplicable,
+          reconciliationStatus: f.reconciliationStatus,
+          evidence: {
+            level: f.evidence.level,
+            checkedAt: f.evidence.checkedAt,
+            publicDescription: f.evidence.publicDescription,
+            privateReferenceAvailable: f.evidence.privateReferenceAvailable
+          },
+          sourceReference: f.sourceReference === null ? null : {
+            kind: f.sourceReference.kind,
+            url: f.sourceReference.url
+          }
+        };
+      })
+    };
+    return JSON.stringify(payload, null, 2);
+  }
+
   return {
     OBSERVATION_SCHEMA_VERSION: OBSERVATION_SCHEMA_VERSION,
     OBSERVATION_TYPE: OBSERVATION_TYPE,
@@ -502,6 +985,13 @@
     normalizeObservation: normalizeObservation,
     getObservationSlotKey: getObservationSlotKey,
     listRequiredObservationSlots: listRequiredObservationSlots,
-    normalizeObservationSet: normalizeObservationSet
+    normalizeObservationSet: normalizeObservationSet,
+    CLOSURE_STATUSES: Evidence.deepFreeze(CLOSURE_STATUSES),
+    BLOCKER_KINDS: Evidence.deepFreeze(BLOCKER_KINDS),
+    CATEGORY_IDS: Evidence.deepFreeze(CATEGORY_IDS),
+    CANDIDATE_SCHEMA_VERSION: CANDIDATE_SCHEMA_VERSION,
+    CANDIDATE_TYPE: CANDIDATE_TYPE,
+    evaluateClosure: evaluateClosure,
+    serializePromotionCandidate: serializePromotionCandidate
   };
 });

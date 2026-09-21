@@ -43,7 +43,8 @@ expected : >= 500 / 0 fail  → 一致
 |---|---|---|---|
 | 0 | Fresh Gate / Run Artifact / Phase 2I closeout / baseline / 一次資料の可用性判定 | `5bb8b2baa280d710c79ba825366118905775b0de` | 500 / 0 |
 | 1 | Evidence architecture inventory / trust boundary 修理 | `c8dea2a7087c37bec0637574079ed7e5ea77654e` | 518 / 0 |
-| 2 | Observation v1 / scope contract | `RESOLVE_DYNAMICALLY` | 557 / 0 |
+| 2 | Observation v1 / scope contract | `42c8f7096b20450997bfe2739728cc45b433b3b3` | 557 / 0 |
+| 3 | Closure Evaluation / Promotion Candidate | `RESOLVE_DYNAMICALLY` | 581 / 0 |
 
 ## Wave別の変更ファイル
 
@@ -56,6 +57,10 @@ Wave 1: project-config/evidence.js        （canonical assertOrdinaryObject 追�
 Wave 2: project-config/evidence-closure.js（新規）
         tests/evidence-closure.test.js    （新規）
         index.html                        （**変更なし** / Wave 2はUIを持たない）
+
+Wave 3: project-config/evidence-closure.js（evaluateClosure / candidate / export を追加）
+        tests/evidence-closure.test.js    （Wave 2の境界testをWave 3の境界へ更新 + 追加）
+        index.html                        （**変更なし** / Wave 3もUIを持たない）
 ```
 
 自己参照commit SHAは固定しない。各ファイルがどのheadで最終化されたかを併記する

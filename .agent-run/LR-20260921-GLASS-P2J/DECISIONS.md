@@ -257,3 +257,107 @@ packetの指定と実際の表記が食い違っていれば、正規化の入�
 本moduleを要求していないことを確認済み（未配線でも全テスト緑）。
 Wave 4 で read-only status UI を作る場合は、
 `registry.js` より後に読み込む必要がある（依存順）。
+
+## D-013 — 現在の真実は呼び出し側から受け取らない（§3 / §11 / §12）
+
+`evaluateClosure(projectId, observations)` は projectId と生のObservationだけを受け取る。
+current値・reconciliation結果・case readiness・project readiness・promotion statusを
+**引数として一切受け付けない**。現在の主張は必ず `Registry.getPreset()` 経由で引く。
+
+呼び出し側から現在値を受け取れる設計にすると、「何と突き合わせたか」を
+呼び出し側が決められることになり、closure評価が自分の前提を検証できなくなる。
+
+あわせて `currentValue` の意味を限定した。これは
+**「現在のpresetがいま主張している値」**だけを意味し、
+verified / Evidence裏付けあり / 承認済み のいずれでもない。
+現在の verificationStatus を closure の根拠として持ち込まない。
+reconciliation が問うのは「昇格十分なEvidenceが現在の主張と一致するか」であって
+「現在の主張がすでに信用できるか」ではない。
+
+## D-014 — Evidence level から verificationStatus を自前でmappingしない（§9 / §10）
+
+`primary → verified` のような対応表を作らない。
+`assertPromotionGate('verified', ...)` が**実際に通った後**にのみ、
+`verificationStatus: 'verified'` を持つ一時Ledger entryを作る。
+
+`createEntry()` はそこで gate を再実行する。これは無駄な二重実行ではない。
+Ledger entry の生成自体が trust boundary であり、
+「gateを通した」と「gateを通ったentryである」は別の主張だからである。
+
+実際、mutation W3-03（levelを見て indirect を PASS 扱いにする）は、
+この2つ目の gate にも当たって落ちた。二重化が効いていることの実測になっている。
+
+## D-015 — 3層の判定をわざと重複させ、1本のbooleanに畳まない（§26）
+
+project が READY_CANDIDATE になる条件は3つを**すべて**満たすこと:
+
+```text
+slot完全性     : 12 slot すべてが READY_CANDIDATE
+category完全性 : 4 概念カテゴリすべてが READY_CANDIDATE（対応関係を含む）
+case完全性     : floor × zone の全scopeが READY_CANDIDATE（Phase 2Fのcase契約）
+```
+
+1本の条件に畳むと、どれか1つが壊れたときに黙って通る。
+
+### W3-20 は equivalent mutant である（言い換えない）
+
+`allSlotsReady` を空虚に真にする mutant は**生存した**。
+理由を実測で詰めたところ、4つのカテゴリが必須slotを**漏れなく覆っている**ため、
+slot完全性はcategory完全性に**包含**されており、単独では落ちない。
+
+これはテストの穴ではなく、§26 が要求する冗長性がそのまま現れたものである。
+無理に kill するためにテストを捻じ曲げるのではなく、
+**包含が成り立っているという前提そのもの**を P2J-C62 で固定した。
+将来 closure fact を足してカテゴリに入れ忘れれば、C62 が落ちて前提の崩れを知らせる。
+
+`allSlotsReady` は §26 の明文どおり残す。生存を「kill した」と言い換えない。
+
+## D-016 — floor↔Z 対応は正圧側の対応も要求する（§21 / mutationで発見）
+
+mutation W3-08（対応カテゴリから正圧slotを落とす）が**生存**し、
+テストの穴であることが分かった。§21 の対応関係は
+「階 ↔ 現在の正圧の主張 ↔ 根拠のある評価高さ」であり、
+Zが揃っただけでは対応が言えない。
+
+Z側しか見ない実装を許すと、正圧が MISMATCH のままでも
+対応カテゴリが READY と読めてしまう。P2J-C61 を追加して塞いだ。
+
+## D-017 — Candidate は一方向であり、読み戻す経路を作らない（§34 / §35）
+
+`serializePromotionCandidate()` は明示的なkey順で書き出す。
+`JSON.stringify(candidate)` をそのまま契約にしない
+（内部shapeの変更がそのまま出力契約の変更になり、
+「何を出さないか」という約束を構造的に守れない）。
+
+読み戻すAPIは**作らない**。candidate JSON が入力経路になった瞬間、
+外から持ち込んだJSONで trust を上げられるようになる。
+module内に `JSON.parse` が存在しないことをテストで固定した。
+
+exporter は builder が作った candidate しか受け付けない（WeakSet）。
+形だけ真似た偽object・構造を複製したclone・JSONを読み戻したobjectは
+いずれも拒否される。Phase 2I の Review Package と同じ形である。
+
+## D-018 — Candidate Markdown は作らない（§36）
+
+JSON が一方向の機械可読監査成果物として十分であり、
+Markdown を足すと escaping / 出力契約がもう1つ増える。
+Phase 2I の Markdown escaping ロジックを利便性のために複製しない。
+人間可読の提示が要るなら Wave 4 の read-only DOM UI 側で扱う。
+
+## D-019 — 合成preset test は vm ではなく同一realmで隔離する（§40）
+
+packet は Node `vm` を挙げていたが、**実測して採らなかった**。
+
+```text
+vm realm で作った object の prototype !== host realm の Object.prototype
+→ host realm の evidence.js が持つ Wave 1 構造ガードがそれを拒否する
+```
+
+closure module が内部で組み立てる ledger entry spec まで落ちるため、
+moduleのロジックと無関係な理由でテスト不能になる。
+Wave 1 のガードは realm 依存で、これは仕様どおりの挙動である。
+
+そこで §40 の「equivalent isolated UMD context」として、同一realmで隔離した:
+`globalThis.PresetRegistry` を一時差し替えし、require cache を落として再評価する。
+**本番registryに合成presetを登録しない**ことは P2J-C44 で固定した
+（差し替え後も `BUILT_IN_PRESET_IDS` が変わらず、実案件評価が従来どおり動くこと）。

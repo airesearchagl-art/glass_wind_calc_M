@@ -10,7 +10,7 @@
 - Base SHA: 44e4032a2fb3bd3a48bab04d3a5a76c5a6a912eb
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 2 — Observation v1 / scope contract 完了
+- Current wave: Wave 3 — Closure Evaluation / Promotion Candidate 完了
 - Task Packet ID: LRP-20260921-GLASS-P2J
 - Task Packet revision: 1
 - Task Packet SHA-256: aa9ce07dac4767afc0ad9ff4b13663ae8cc2ab1be98e9e44ef80498da3acc446
@@ -123,6 +123,53 @@ mutation 5件: M1/M2/M3/M5 は KILLED。M4（`hasOwnProperty`→`in`）は **SUR
 §29 の「inherited-field defectが見つかったらWave 2の前にFIXする。
 さもなくばWave 1はBLOCKED」は満たしている。
 
+## Wave 3 結果（Closure Evaluation / Promotion Candidate）
+
+```text
+npm test : 581 pass / 0 fail（Wave 2の557 → +24）
+拡張     : project-config/evidence-closure.js（evaluateClosure / serializePromotionCandidate）
+index.html: 未変更（Wave 3もUIを持たない）
+```
+
+### 実案件の closure 状態（**これが現在の案件の状態**）
+
+```text
+evaluateClosure('miyoshi', []) →
+  status      : BLOCKED
+  slots       : 0 / 12
+  categories  : 0 / 4
+  case scopes : 0 / 8（4 floors × 2 zones、topologyから導出）
+  blockerKinds: [CASE_NOT_READY, MISSING_OBSERVATION]
+  candidate   : null
+operational reason : BLOCKED_BY_MISSING_EVIDENCE
+```
+
+合成presetのテストで READY_CANDIDATE 経路を確認しているが、
+**それは実案件の状態ではない**。実案件のObservationは 0 件のままである。
+
+### 3層を1本のbooleanに畳まない（§26）
+
+```text
+slot完全性 / category完全性 / case完全性 をすべて要求する
+```
+
+mutation W3-20（slot完全性を空虚に真にする）は**生存した**。
+4カテゴリが必須slotを漏れなく覆っているため slot完全性が包含されているからで、
+これは §26 の冗長性がそのまま現れた結果である。
+kill するためにテストを捻じ曲げず、**包含の前提**を P2J-C62 で固定した。
+生存を「kill した」と言い換えていない（詳細は EVIDENCE.md §14 / D-015）。
+
+### mutation
+
+```text
+distinct 20 / KILLED 19 / EQUIVALENT 1 / PATCH-MISS 0
+```
+
+W3-08（floor↔Z対応から正圧を外す）は当初生存し、**テストの穴**だったため
+P2J-C61 を追加して塞いだ。W3-19（blockerKinds非ソート）も契約未定義だったため
+P2J-C63 で正規形を固定した。byte一致mutantの二重計上は
+実行前のsource hash照合で仕組みとして防いだ（Wave 2の反省）。
+
 ## Wave 2 結果（Observation v1 / scope contract）
 
 ```text
@@ -160,6 +207,23 @@ distinct mutants 16 / KILLED 16 / SURVIVED 0 / PATCH-MISS 0
 初回実行で O10 と O11 に同一patchを当てていた（同じmutantを2回数えていた）。
 真の last-one-wins と first-one-wins を別々に実装して再実行した。
 詳細と訂正の記録は EVIDENCE.md §9。
+
+## Wave 3 final state
+
+```text
+Software Closure Evaluation   : implemented / PASS
+Primary Evidence availability : UNAVAILABLE
+Actual project observations   : 0
+Actual required slots         : 12
+Actual ready slots            : 0
+Actual categories             : 0 / 4
+Actual case scopes            : 8（derived）/ ready 0
+Actual project status         : BLOCKED
+Operational reason            : BLOCKED_BY_MISSING_EVIDENCE
+Promotion Candidate           : NONE
+verifiedCases                 : []
+current config mutation       : none
+```
 
 ## Wave 2 final state
 
@@ -202,30 +266,29 @@ none
 ## Remaining tasks
 
 ```text
-Wave 3-7（TASK_QUEUE.md参照）
+Wave 4-7（TASK_QUEUE.md参照）
 ```
 
 ## Next action
 
-Wave 3: Evidence gate / scalar reconciliation / Closure Evaluation /
-temporary per-case ledger / project completeness / Promotion Candidate。
+Wave 4: 一次資料の可用性は **UNAVAILABLE のまま**である（§58）。
+Evidence取得を発明しない。選択は2つ:
 
 ```text
-- Evidence gate は ProjectEvidence.assertPromotionGate() を呼ぶ（再実装しない）
-- reconciliation は EvidenceLedger.reconcileFact() を **scalar leaf単位**で呼ぶ
-- case readiness は EvidenceLedger.evaluateCasePromotion() を呼ぶ
-  （W && H && positive && negative && Z の並行条件を書かない）
-- project completeness は 12 slot が揃って初めて成立。欠ければ BLOCKED
-- Promotion Candidate は non-mutating。apply / import API を作らない
+(a) read-only の Evidence Closure Status 表示を index.html に足す
+    - 表示するのは「何が足りないか」であって「現在の真実」ではない
+    - evidence-closure.js は registry.js の後に読み込む（D-012）
+    - 実案件の表示は常に BLOCKED / 0 of 12 / candidate なし になる
+
+(b) UIが価値を足さないと判断するならUIを省き、
+    security / privacy / trust campaign（Wave 5）へ直接進む
 ```
 
-§13 の注意（Wave 1で実測済み・Wave 3で効く）: current config に評価高さ/Z の
-キーは**存在しない**ため、evaluation_height について `MATCH` を報告してはならない。
-`reconciliationApplicable: false` / `reconciliationStatus: null` を用いる。
+判断基準: read-only表示が Evidence Request Matrix として
+**実際に使えるか**（何を集めれば閉じるのかが読み取れるか）。
 
-実案件Observationは 0 件のままなので、実際の closure は
-`BLOCKED_BY_MISSING_EVIDENCE` / promotion `NONE` で確定する。
-Wave 3 が作るのは「閉じる仕組み」であって「閉じた結果」ではない。
+いずれの場合も、実案件の状態は
+`BLOCKED_BY_MISSING_EVIDENCE` / promotion `NONE` / `verifiedCases: []` のままである。
 
 ## Stop conditions status
 

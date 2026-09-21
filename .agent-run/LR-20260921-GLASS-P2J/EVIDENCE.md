@@ -278,3 +278,129 @@ facts closed             : 0 / 4
 
 P2J-C39 で、Observation正規化とslot列挙を実行した**後**にこの状態を再確認している
 （呼び出しが現状に副作用を持たないことの確認）。
+
+## §12 — Wave 3: 実案件の closure 状態（実測）
+
+**これが現在の案件の状態である。** 合成テストの結果と混同しない。
+
+```yaml
+software_closure_evaluation: implemented / PASS
+actual_evidence_availability: UNAVAILABLE
+actual_project_observations: 0
+actual_required_slots: 12
+actual_ready_slots: 0
+actual_categories: 0 / 4
+actual_prospective_case_scopes: 8        # 4 floors × 2 zones（topologyから導出）
+actual_ready_case_scopes: 0
+actual_project_status: BLOCKED
+operational_reason: BLOCKED_BY_MISSING_EVIDENCE
+promotion_candidate: NONE
+verifiedCases: []
+current_config_mutation: none
+```
+
+`evaluateClosure('miyoshi', [])` の実測出力:
+
+```text
+status            : BLOCKED
+slots             : 0 / 12
+categories        : 0 / 4
+case scopes       : 0 / 8
+blockerKinds      : [CASE_NOT_READY, MISSING_OBSERVATION]
+promotionCandidate: null
+```
+
+fact単位では、突き合わせ対象のある fact が canonical な `INSUFFICIENT_EVIDENCE` を返し、
+`evaluation_height` は `reconciliationApplicable: false` / `reconciliationStatus: null` /
+`currentValue: null` になる（Wave 1 実測の結論がそのまま効いている）。
+
+## §13 — Wave 3: 合成preset test（**実案件の状態ではない**）
+
+READY 経路を確かめるために、合成preset（`synthetic_closure_test`）を使った。
+これは実案件が primary Evidence を持っていることを意味**しない**。
+
+```text
+合成topology : floors 2 / zones 2 → 8 slots / 4 case scopes
+合成値       : 777 / 1888 / 3111 / 3222 / 4111 / 4222（明らかに人工的）
+```
+
+| テスト | 結果 |
+|---|---|
+| 全slot充足 + 全Evidence昇格十分 | project READY_CANDIDATE / candidate 生成 |
+| 1件を indirect に変更（値は一致のまま） | gate FAIL → INSUFFICIENT_EVIDENCE → BLOCKED |
+| 1件の値を変更（Evidenceは十分） | gate PASS → MISMATCH → BLOCKED / 自動修復なし |
+| evaluation_height 昇格十分 | gate PASS / applicable false / status null / READY |
+| floor A の Z を欠落（floor B の Z はある） | 対応カテゴリ BLOCKED / floor A の case のみ BLOCKED |
+| 負圧をすべて欠落 | 3 / 4 カテゴリ READY のまま部分進捗が残る |
+
+**本番registryは汚染されていない**ことを実測で確認した（P2J-C44）:
+差し替え後も `BUILT_IN_PRESET_IDS` は `['miyoshi']` のままで、
+実案件の評価も従来どおり `BLOCKED` を返す。
+
+## §14 — Wave 3 mutation 結果（§53）
+
+```text
+W3-01 assertPromotionGate を飛ばす            KILLED (3)
+W3-02 gate失敗でも値一致で十分とする          KILLED (2)
+W3-03 levelからstatusをmapping（indirect=PASS）KILLED (3)  ← createEntry側の再gateにも当たった
+W3-04 evaluation_height を突き合わせ可能に     KILLED (11)
+W3-05 MISMATCH を READY 扱い                  KILLED (1)
+W3-06 欠測を READY 扱い                        KILLED (6)
+W3-07 部分カテゴリを READY 扱い                KILLED (3)
+W3-08 floor/Z対応から正圧を外す                SURVIVED → P2J-C61 追加後 KILLED (1)
+W3-09 evaluateCasePromotion を迂回             KILLED (4)
+W3-10 claimsCalculationProvenance=false        KILLED (3)
+W3-11 全caseで最初の階の正圧を使う             KILLED (1)
+W3-12 全caseで最初の区分の負圧を使う           KILLED (1)
+W3-13 全caseで最初の階のZを使う                KILLED (2)
+W3-14 BLOCKEDでもcandidateを生成               KILLED (11)
+W3-15 評価がcurrent configを書き換える         KILLED (5)
+W3-16 exporterが偽candidateを受理              KILLED (1)
+W3-17 candidate JSONにcurrent configを含める   KILLED (1)
+W3-18 apply/import APIを追加                   KILLED (1)
+W3-19 blockerKinds を sort しない              SURVIVED → P2J-C63 追加後 KILLED (1)
+W3-20 slot完全性を空虚に真にする               **EQUIVALENT（生存のまま）**
+
+distinct mutants : 20
+KILLED           : 19
+EQUIVALENT       : 1（W3-20。下記の分析を経て生存のまま記録する）
+PATCH-MISS       : 0
+```
+
+### W3-20 を「kill した」と言い換えない
+
+`allSlotsReady` を空虚に真にしても、4つの概念カテゴリが必須slotを
+**漏れなく覆っている**ため、slot完全性は category完全性に包含されており単独では落ちない。
+どのテストも区別できないのは、§26 が要求する冗長性がそのまま現れた結果である。
+
+テストを捻じ曲げて kill するのではなく、**包含が成り立っているという前提**を
+P2J-C62 で固定した。将来 closure fact を足してカテゴリに入れ忘れれば C62 が落ちる。
+`allSlotsReady` は §26 の明文どおり残す。
+
+byte一致するmutantの二重計上も避けた（実行前にsource hashで重複検出）。
+Wave 2 で O10/O11 を二重計上した反省を仕組みに落とした。
+
+## §15 — Wave 3: 保護対象の計算値（再実測）
+
+```text
+FL6 1250×2050 : 1756.09756097561      （直接再計算して一致）
+FL6 1500×2050 : 1463.4146341463415    （直接再計算して一致）
+Er            : 0.8516557589672942    （known-answerテストで緑）
+qBar          : 503.08024004410464    （known-answerテストで緑）
+手入力 1400   : manual-config suite で緑
+```
+
+Wave 3 はこれらに影響していない。
+
+## §16 — Wave 3: 現案件のfactは変更していない
+
+```text
+verifiedCases           : []
+dimensions              : sample_default / unverified / 1250 × 2050
+positivePressureByFloor : 1297 / 1525 / 1695 / 1729（partially_verified のまま）
+negativePressureByZone  : 918 / 1122（partially_verified のまま）
+V0                      : 34    roughnessCategory : III
+```
+
+P2J-C58 で、closure評価 → candidate生成 → serialize を実行した**前後**の
+config構造が等しいことを確認している（一連の操作に副作用が無いことの確認）。
