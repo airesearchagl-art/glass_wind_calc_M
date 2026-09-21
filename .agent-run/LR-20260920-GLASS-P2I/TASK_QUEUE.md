@@ -51,3 +51,23 @@ Wave 5: security / privacy / injection / mutation / size limits
 ```
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管 / §47）。
+
+## §40 攻撃セット突合（Wave 5 / §9。未分類の行を残さない）
+
+| §40 attack | 測定した場所 | 状態 |
+|---|---|---|
+| `<script>` in title/note/label | W3 md tests / W4 browser §41 | PASS — 既存evidence有効 |
+| `<img onerror>` | W3 / W4 §41 | PASS — 既存evidence有効 |
+| `5<Z<40`（内部trace由来） | W3 md / W4 preview / W5 §10 | PASS — 既存evidence有効 |
+| `\|` / backtick / `# heading` | W3 injection / W4 §41 | PASS — 既存evidence有効 |
+| `javascript:` link構文 | W3 / W4 §41 | PASS — 既存evidence有効 |
+| file path風 / URL風 text | W4 §41 note | PASS — 既存evidence有効 |
+| 秘密らしき診断値 | W2 §26 / W3 W3-21 / W4 §34 / **W5 §12** | RE-RUN PASS（Full positive control付きで再測） |
+| prototype keys | **W5 §2-§8** | **FIXED IN W5**（D-019。3入口すべてで継承値を採用していた） |
+| unknown / duplicate caseId | W2 J/K | PASS — 既存evidence有効 |
+| INVALID を detail に選択 | W2 M / W4 selectors | PASS — 既存evidence有効 |
+| 生成後のWorkspace変更 | W2 U/V / W4 §33 / 4H C・D / **W5 §18** | RE-RUN PASS（UI helperを通さない直接変更でも検出） |
+| Redacted漏れ | W2（snapshot漏れ→修正）/ W3 W3-6 / 4H RF-P1 / **W5 §10** | RE-RUN PASS（4面 × 5 marker、Full positive control付き） |
+| report JSON の再取り込み | W2 R/S / W3 W3-8..10 | PASS — 既存evidence有効 |
+
+未分類の行なし。

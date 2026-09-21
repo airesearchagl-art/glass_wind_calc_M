@@ -168,6 +168,33 @@
   function isPlainObject(v) { return !!v && typeof v === 'object' && !Array.isArray(v); }
 
   /**
+   * 素性の分かる object だけを入口で通す。
+   *
+   * 実測（Wave 5）: `Object.create({title: '...'})` で渡した metadata の
+   * 継承 title がそのまま資料の表題になった。build options も diagnostic も同じで、
+   * 継承した workspace / privacyMode / status / source が採用された。
+   * own-key検査（Object.keys / hasOwnProperty）は継承を見ないため、
+   * 「未知のfieldは無い」と判断したあとで、値だけが prototype から読まれていた。
+   *
+   * これは prototype pollution ではない（Object.prototype は汚れていない）。
+   * **利用者が用意した prototype の値を、契約の値として消費していた**という話である。
+   *
+   * 直し方は Phase 2H D-010 と同じにする。継承の判定は**ここ1か所**だけに置き、
+   * 各fieldごとの継承チェックを増やさない。増やすと、前段が生きている限り
+   * 後段が発火せず、どちらが効いているのか分からなくなる。
+   *
+   * null prototype は通す。継承元が無い＝継承値が入り得ないためで、
+   * Object.prototype 付きより素直なデータである。
+   */
+  function assertOrdinaryObject(value, label) {
+    var proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+      throw new Error(label + ' must be a plain object with no inherited properties');
+    }
+    return value;
+  }
+
+  /**
    * source objectから切り離したcopyを作る。
    *
    * 生成後にWorkspaceやmetadataを触られても、既に作ったreportが
@@ -238,6 +265,7 @@
     if (!isPlainObject(entry)) {
       throw new Error(where + ' must be a canonical INVALID result object');
     }
+    assertOrdinaryObject(entry, where);
     if (entry.status !== 'INVALID') {
       throw new Error(where + ' must have status INVALID');
     }
@@ -306,6 +334,7 @@
     if (!isPlainObject(meta)) {
       throw new Error('buildReviewPackage(): metadata must be an object');
     }
+    assertOrdinaryObject(meta, 'metadata');
     assertAllowedKeys(meta, ['title', 'subtitle', 'note'], 'metadata');
 
     var title = optionalText(meta.title, MAX_TITLE_LENGTH, 'metadata.title');
@@ -627,6 +656,7 @@
     if (!isPlainObject(options)) {
       throw new Error('buildReviewPackage(): an options object is required');
     }
+    assertOrdinaryObject(options, 'buildReviewPackage() options');
     PRECOMPUTED_OPTION_KEYS.forEach(function (key) {
       if (Object.prototype.hasOwnProperty.call(options, key)) {
         throw new Error(
@@ -962,7 +992,7 @@
       lines.push('- A: ' + escapeMarkdown(c.aCaseId) + ' — ' + escapeMarkdown(c.aLabel));
       lines.push('- B: ' + escapeMarkdown(c.bCaseId) + ' — ' + escapeMarkdown(c.bLabel));
       lines.push('');
-      lines.push(mdRow(['項目', 'A', 'B', '差分 (B - A)']));
+      lines.push(mdRow(['項目', 'A', 'B', '差分 (B − A)']));
       lines.push(mdRow(['---', '---', '---', '---']));
       c.fields.forEach(function (f) {
         var isNumeric = typeof f.a === 'number' || typeof f.b === 'number';

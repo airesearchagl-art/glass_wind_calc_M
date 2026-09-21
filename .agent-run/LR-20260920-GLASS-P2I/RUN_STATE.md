@@ -10,7 +10,7 @@
 - Base SHA: 6a5232f65d02e2a8bfa8c2c87049b5865c584855
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 4H — Boundary Closure（RF-P1 / RF-P2）完了
+- Current wave: Wave 5 — residual security / privacy / injection 完了
 - Task Packet ID: LRP-20260920-GLASS-P2I
 - Task Packet revision: 1
 - Task Packet SHA-256: 901afdc2317e0b38ca90dcb69ba1fb8d8b271b1e073acd40e20d0e784c8f229e
@@ -343,6 +343,73 @@ KILLED 8 / SURVIVED 0 / PATCH-MISS 0
 P3 / P4 の挙動面の証拠は、修正前の再現実測そのものである
 （印刷媒体で display: block かつ marker 在り）。
 
+## Wave 5 — 残っていた1件と、面をまたいだ確認（実測）
+
+```text
+npm test : 488 pass / 0 fail（Wave 4H 478 → +10）
+browser  : W5 sweep 58 checks / 0 fail / pageError 0 / consoleError 0
+回帰      : 4H 27 / W4 48 / p2g 84 / p2h 29 いずれも 0 fail
+```
+
+### 突合表で唯一残っていた攻撃 = prototype 経由の入力
+
+修正前の実測。3つの入口すべてが継承値を採用していた。
+
+```text
+metadata   : Object.create({title:'INHERITEDTITLEMARKER991'})
+             → 継承titleが資料の表題になった
+options    : Object.create({workspace, privacyMode:'redacted'})
+             → 継承workspaceで資料が作れた
+diagnostic : Object.create({status:'INVALID', source:'tsv', …})
+             → 偽の診断行が資料に載った
+```
+
+`Object.prototype` はどの経路でも汚れていない。
+起きていたのは pollution ではなく、**継承値の消費**である（D-019）。
+
+§6が求める3形態の区別も実測で分けて記録した:
+
+```text
+A  Object.create({...})           → 構造ゲートで拒否（今回追加）
+B  {__proto__: {...}}（リテラル）  → prototype差し替えなのでAと同じ形
+C  JSON.parse('{"__proto__":…}')  → own の "__proto__" ができる
+                                    → 未知fieldとして以前から拒否されていた
+```
+
+mutation 5件（ゲート本体 / 3入口 / 判定条件）すべて KILLED、SURVIVED 0、PATCH-MISS 0。
+
+### 面をまたいだ確認（§10-§18）
+
+```text
+§10 redaction   : marker 5種 × 4面（preview / Markdown / JSON / print media）
+                  **Full の positive control を先に取り**、各markerが実際に
+                  各面へ届くことを確認してから Redacted での不在を確認した
+§11 直接経路    : 変更イベントを出さずに privacy を変えても SETTINGS_DIRTY、
+                  JSON / Markdown / native print すべて遮断、古いbufferは消える
+§12 診断privacy : 秘密を**実際に落ちる列**（glass_type）へ入れて canonical 経路を通す。
+                  Full でも4面のどこにも出ない。行番号・安全なcaseId・理由は残る
+§13 trust       : manual / notification / imported / registered_preset の
+                  sourceKind と verificationStatus が3面とも実態どおり。格上げ無し
+§14 式と入力     : formula / input の検証状況は3面で別項目のまま。
+                  trace を持つのは告示caseの1件だけ（qBar の出現数で確認）
+§15 governing   : summary が WorkspaceCore.summarize と deepEqual。
+                  OK複数 + NO_SOLUTION + INVALID が揃った状態で確認
+§16 比較        : 3面とも A / B / B−A のみ。評価語は出力に存在しない
+§17 片側比較     : none/none → 有効、A のみ → dirty かつ生成は fail closed、
+                  A+B → 有効、B 解除 → dirty
+§18 直接変更     : UIのrefresh helperを一切通さずに batchWorkspace を変えても、
+                  beforeprint が WORKSPACE_STALE を検出して印刷を止める
+```
+
+### Wave 5 packet の欠落について
+
+```text
+受け取った Wave 5 指示は §19「Attack text:」の途中で切れていた。
+§1-§18 は完結していたためすべて実施した。
+§19 以降（print media content safety の残り、および §20 以降）は未実施。
+推測で補っていない。残りを受け取れば差分を実施する。
+```
+
 ## Quality Debt
 
 QUALITY_DEBT.md 参照（Wave 0時点で none）。
@@ -361,9 +428,9 @@ Wave 1-7（TASK_QUEUE.md参照）
 
 ## Next action
 
-Wave 5: coverage reconciliation / residual attack sweep /
-cross-surface privacy sweep / 残りのmutation / large-report / network・storage audit。
-Wave 4・4Hで実測済みの項目は再実行せず、突合表で参照する。
+Wave 5 §19以降の残りを受領後に実施。
+未受領のまま先へ進まない（§19は print media content safety の途中で切れている）。
+その後 Wave 6: full regression / browser / independent verifier。
 
 ## Stop conditions status
 

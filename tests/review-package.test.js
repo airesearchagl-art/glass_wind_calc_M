@@ -1087,3 +1087,228 @@ test('§19: 最大構成のreportと上限の距離を実測で固定する（M1
   assert.equal(json.length * 2 < Review.MAX_EXPORT_JSON_BYTES, true,
     '最大構成でも上限の半分未満であること（余裕が消えたら見直す）');
 });
+
+// ============================================================
+// Wave 5: 継承した値を契約の値として消費しない
+//
+// これは prototype pollution ではない。Object.prototype は汚れていない。
+// own-key検査（Object.keys / hasOwnProperty）が継承を見ないため、
+// 「未知のfieldは無い」と判断したあとで、値だけが prototype から読まれていた。
+// ============================================================
+
+test('W5-proto-A: 継承した metadata を採用しない', () => {
+  const ws = makeWorkspace();
+  assert.throws(
+    () => Review.buildReviewPackage({
+      workspace: ws, metadata: Object.create({ title: 'INHERITEDTITLEMARKER991' }) }),
+    /plain object with no inherited properties/);
+
+  // object literal の __proto__: は prototype を差し替えるので同じ形
+  assert.throws(
+    () => Review.buildReviewPackage({
+      workspace: ws, metadata: { __proto__: { title: 'LITERALMARKER992' } } }),
+    /plain object with no inherited properties/);
+});
+
+test('W5-proto-B: 継承した build options を採用しない', () => {
+  const ws = makeWorkspace();
+  assert.throws(
+    () => Review.buildReviewPackage(Object.create({ workspace: ws, privacyMode: 'redacted' })),
+    /options must be a plain object with no inherited properties/);
+
+  // 一部だけ継承させる形も同じく拒否する
+  const half = Object.create({ privacyMode: 'redacted' });
+  half.workspace = ws;
+  assert.throws(() => Review.buildReviewPackage(half),
+    /plain object with no inherited properties/);
+});
+
+test('W5-proto-C: 継承した診断を canonical として扱わない', () => {
+  const ws = makeWorkspace();
+  const forged = Object.create({
+    status: 'INVALID', source: 'tsv', error: 'safe reason', caseId: 'BAD1', label: 'diag' });
+  assert.throws(() => Review.buildReviewPackage({ workspace: ws, diagnostics: [forged] }),
+    /diagnostics\[0\] must be a plain object with no inherited properties/);
+
+  // 本物（Phase 2G境界を通ったもの）は通る
+  assert.doesNotThrow(() => Review.buildReviewPackage({
+    workspace: ws, diagnostics: makeDiagnostics('no_such_glass') }));
+});
+
+test('W5-proto: 形の違う3つを別々に記録する（§6）', () => {
+  const ws = makeWorkspace();
+
+  // A: custom prototype → 構造ゲートが拒否
+  assert.throws(() => Review.buildReviewPackage({
+    workspace: ws, metadata: Object.create({ title: 'A' }) }),
+    /no inherited properties/);
+
+  // C: JSON.parse は **own** の "__proto__" を作る → 未知fieldとして拒否
+  assert.throws(() => Review.buildReviewPackage({
+    workspace: ws, metadata: JSON.parse('{"__proto__":{"title":"C"}}') }),
+    /unexpected field/);
+
+  // どちらの経路でも Object.prototype は汚れない
+  assert.equal({}.title, undefined);
+  assert.equal({}.workspace, undefined);
+  assert.equal({}.privacyMode, undefined);
+});
+
+test('W5-proto: 普通のobjectと null-prototype は通す（選択を明示的に固定する）', () => {
+  const ws = makeWorkspace();
+  assert.equal(
+    Review.buildReviewPackage({ workspace: ws, metadata: { title: 'Ordinary' } }).metadata.title,
+    'Ordinary');
+
+  // null prototype は「継承元が無い」ので通す、と決めた（D-019）
+  const clean = Object.create(null);
+  clean.title = 'NullProtoTitle';
+  assert.equal(
+    Review.buildReviewPackage({ workspace: ws, metadata: clean }).metadata.title,
+    'NullProtoTitle');
+
+  // class instance / Date のような非ordinary objectは通さない
+  class Meta { constructor() { this.title = 'FromClass'; } }
+  assert.throws(() => Review.buildReviewPackage({ workspace: ws, metadata: new Meta() }),
+    /no inherited properties/);
+  assert.throws(() => Review.buildReviewPackage({ workspace: ws, metadata: new Date() }),
+    /no inherited properties/);
+});
+
+test('W5-proto: 継承の判定は1か所だけ（重複guardを作らない）', () => {
+  const code = stripComments(fs.readFileSync(REVIEW_SRC, 'utf8'));
+  // 構造ゲートの定義は1つ
+  assert.equal((code.match(/function assertOrdinaryObject\(/g) || []).length, 1);
+  // 公開入口3つがそれを呼ぶ
+  assert.equal((code.match(/assertOrdinaryObject\(/g) || []).length, 4,
+    '定義1 + 呼び出し3');
+  // field単位の継承チェックを増やしていない
+  assert.equal(/\bin\s+meta\b/.test(code), false);
+  assert.equal(/\bin\s+entry\b/.test(code), false);
+  assert.equal(/\bin\s+options\b/.test(code), false);
+});
+
+// ============================================================
+// Wave 5: 面をまたいだ一貫性（model / Markdown / JSON）
+// ============================================================
+
+/** 4つの出所をすべて含むWorkspace。 */
+function allSourceKindsWorkspace() {
+  const ws = Workspace.createWorkspace();
+  ws.addCase(manualPkg(), { caseId: 'MAN', label: 'ManualCase' });
+  ws.addCase(notificationPkg(), { caseId: 'NOT', label: 'NotifCase' });
+  ws.addCase(presetPkg(), { caseId: 'PRE', label: 'PresetCase' });
+  ws.addCase(ProjectInput.deserialize(ProjectInput.serialize(manualPkg()),
+    { forceUntrustedProvenance: true }), { caseId: 'IMP', label: 'ImportedCase' });
+  ws.addCase(manualPkg({ positivePressure: 90000, negativePressure: -90000 }),
+    { caseId: 'NOSOL', label: 'HeavyCase' });
+  return ws;
+}
+
+test('W5-13: 4つの出所の trust 表示が、どの面でも実態のまま', () => {
+  const ws = allSourceKindsWorkspace();
+  const rev = Review.buildReviewPackage({
+    workspace: ws, detailCaseIds: ['MAN', 'NOT', 'PRE', 'IMP'] });
+  const json = Review.serializeReviewPackage(rev);
+  const md = Review.toMarkdown(rev);
+
+  const expected = {
+    MAN: ['manual', 'unverified'],
+    NOT: ['notification_calculation', 'unverified'],
+    PRE: ['registered_preset', 'partially_verified'],
+    IMP: ['imported_unverified', 'unverified']
+  };
+  for (const [caseId, [kind, status]] of Object.entries(expected)) {
+    const row = rev.cases.find((c) => c.caseId === caseId);
+    assert.equal(row.sourceKind, kind, caseId + ' sourceKind');
+    assert.equal(row.verificationStatus, status, caseId + ' verificationStatus');
+
+    const detail = rev.selectedDetails.find((d) => d.caseId === caseId);
+    assert.equal(detail.input.sourceKind, kind);
+    assert.equal(detail.input.verificationStatus, status);
+
+    assert.equal(json.includes('"sourceKind": "' + kind + '"'), true, 'JSON: ' + kind);
+    assert.equal(md.includes(Review.MAX_DETAIL_CASES ? kind.replace(/_/g, '\\_') : kind), true,
+      'Markdown: ' + kind);
+  }
+  // 格上げしていない
+  assert.equal(json.includes('"verificationStatus": "verified"'), false);
+  assert.equal(rev.cases.some((c) => c.verificationStatus === 'verified'), false);
+});
+
+test('W5-14: 式の検証と入力の検証は3面すべてで別項目', () => {
+  const ws = allSourceKindsWorkspace();
+  const rev = Review.buildReviewPackage({
+    workspace: ws, detailCaseIds: ['NOT', 'MAN', 'PRE'] });
+  const json = Review.serializeReviewPackage(rev);
+  const md = Review.toMarkdown(rev);
+
+  const notif = rev.selectedDetails.find((d) => d.caseId === 'NOT');
+  assert.equal(notif.windTrace.provenance.formulaVerificationStatus, 'verified_primary_source');
+  assert.equal(notif.windTrace.provenance.inputVerificationStatus, 'user_input_unverified');
+  assert.equal(json.includes('"formulaVerificationStatus": "verified_primary_source"'), true);
+  assert.equal(json.includes('"inputVerificationStatus": "user_input_unverified"'), true);
+  assert.equal(md.includes('式の検証: verified\\_primary\\_source'), true);
+  assert.equal(md.includes('入力の検証: user\\_input\\_unverified'), true);
+  // ひとつの "verified" へ潰していない
+  assert.equal(json.includes('"verified": true'), false);
+  assert.equal(md.includes('検証: verified\n'), false);
+
+  // manual / preset は trace不在のまま（Er / qBar を作らない）
+  for (const id of ['MAN', 'PRE']) {
+    const d = rev.selectedDetails.find((x) => x.caseId === id);
+    assert.equal(d.traceAvailable, false);
+    assert.equal(d.windTrace, null);
+  }
+  const traceCount = (json.match(/"qBar":/g) || []).length;
+  assert.equal(traceCount, 1, 'traceは告示caseの1件だけ');
+});
+
+test('W5-15: governing は3面で同一で、独自に選び直していない', () => {
+  const ws = allSourceKindsWorkspace();
+  const diagnostics = makeDiagnostics('no_such_glass');
+  const rev = Review.buildReviewPackage({ workspace: ws, diagnostics });
+
+  const allResults = Workspace.mergeEvaluationResults(
+    Workspace.evaluateWorkspace(ws), diagnostics);
+  const expected = Workspace.summarize(allResults);
+
+  assert.deepEqual(JSON.parse(JSON.stringify(rev.summary)), expected);
+  assert.equal(rev.governingCase.caseId, expected.governingCaseId);
+  assert.equal(rev.governingCase.basis, expected.governingBasis);
+
+  // OK / NO_SOLUTION / INVALID が揃った状態での確認であること
+  assert.equal(expected.okCount > 1, true);
+  assert.equal(expected.noSolutionCount, 1);
+  assert.equal(expected.invalidCount, 1);
+
+  const json = JSON.parse(Review.serializeReviewPackage(rev));
+  assert.equal(json.governingCase.caseId, expected.governingCaseId);
+  assert.equal(json.summary.governingCaseId, expected.governingCaseId);
+  const md = Review.toMarkdown(rev);
+  assert.equal(md.includes('ケースID: ' + expected.governingCaseId), true);
+  assert.equal(md.includes('選定根拠: ' + expected.governingBasis.replace(/_/g, '\\_')), true);
+});
+
+test('W5-16: 比較は3面で A / B / B−A のみ、評価語を持たない', () => {
+  const ws = allSourceKindsWorkspace();
+  const rev = Review.buildReviewPackage({ workspace: ws, comparisonCaseIds: ['MAN', 'NOT'] });
+  const results = Workspace.evaluateWorkspace(ws);
+  const a = results.find((r) => r.caseId === 'MAN');
+  const b = results.find((r) => r.caseId === 'NOT');
+
+  const dp = rev.comparison.fields.find((f) => f.field === 'designPressure');
+  assert.equal(dp.delta, b.designPressure - a.designPressure);
+
+  const json = Review.serializeReviewPackage(rev);
+  const md = Review.toMarkdown(rev);
+  assert.equal(JSON.parse(json).comparison.deltaDefinition, 'delta = B - A');
+  assert.equal(md.includes('差分 (B − A)'), true);
+
+  // 出力だけを見る（この test 自身の文言に当てない）
+  for (const text of [json, md, JSON.stringify(rev)]) {
+    for (const w of ['winner', 'better', 'worse', 'safer', 'best']) {
+      assert.equal(text.toLowerCase().includes(w), false, w + ' が出力に無い');
+    }
+  }
+});

@@ -257,3 +257,39 @@ Phase 2D〜2Hと同一。Resume時に再計算して一致を確認する。
   export bufferを隠し、値も消す。同じ再計算が print 可否と buffer の両方を守る。
 - 既にexport済みのテキストを取り消すものではない。
   古い出力が「現在の内容」を名乗り続けるのを止めるだけである。
+
+## D-019 — 継承した値を契約の値として消費しない（Wave 5 / §40 残り1件）
+
+- **実測（修正前）**: 3つの入口すべてが継承値を採用していた。
+  ```text
+  metadata   : Object.create({title:'…'})        → 継承titleが資料の表題になった
+  options    : Object.create({workspace, privacyMode}) → 継承workspaceで資料が作れた
+  diagnostic : Object.create({status:'INVALID',…}) → 偽の診断行が資料に載った
+  ```
+  原因は単純で、`Object.keys` / `hasOwnProperty` が継承を見ないため、
+  「未知のfieldは無い」と判断したあとで、値だけが prototype から読まれていた。
+- **これは prototype pollution ではない**。`Object.prototype` はどの経路でも汚れていない。
+  起きていたのは「利用者が用意した prototype の値を契約値として消費する」ことである。
+  名前を混ぜると、対策の位置を間違える。
+- **§6 の3形態は別物**（実測で分けて記録した）:
+  ```text
+  A  Object.create({...})          → 構造ゲートで拒否
+  B  {__proto__: {...}}（リテラル） → prototypeの差し替えなのでAと同じ形
+  C  JSON.parse('{"__proto__":…}') → **own** の "__proto__" が出来る
+                                     → 未知fieldとして以前から拒否されていた
+  ```
+- **決定**: `assertOrdinaryObject()` を1つ置き、
+  build options / metadata / 各diagnostic の3入口で呼ぶ。
+  `Object.getPrototypeOf(v) === Object.prototype || null` のみ通す。
+  field単位の継承チェックを足さない（Phase 2H D-010 と同じ理由。
+  重複させると前段が生きている限り後段が発火せず、どちらが効いているか分からなくなる）。
+- **null prototype は通す**と決めた。継承元が無いので継承値が入り得ず、
+  `Object.prototype` 付きより素直なデータである。この選択自体をtestで固定した。
+- mutation 5件（ゲート本体の削除 / 3入口からの削除 / 判定条件の骨抜き）すべて KILLED。
+
+## D-020 — surfaceごとに表記がずれていた（Wave 5で発見）
+
+- 比較表の見出しが preview では `差分 (B − A)`、Markdown では `差分 (B - A)` と
+  別の文字だった（U+2212 と ASCII hyphen）。
+- 機能上の害は無いが、同じ資料の別surfaceとして読むものなので preview 側へそろえた。
+- 自分のtestが拾った。3面を同じ基準で突き合わせると、こういう差が出る。
