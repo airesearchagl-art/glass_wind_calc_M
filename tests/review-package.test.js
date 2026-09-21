@@ -1312,3 +1312,66 @@ test('W5-16: 比較は3面で A / B / B−A のみ、評価語を持たない', 
     }
   }
 });
+
+// ============================================================
+// Wave 5 continuation: 記録として固定しておく事実（§26 / §27 / §34）
+// ============================================================
+
+test('W5-34: sourceSnapshotは内部に残り、外向きのどの面にも出ない', () => {
+  const ws = makeWorkspace();
+  const rev = Review.buildReviewPackage({ workspace: ws, detailCaseIds: ['NOTIF'] });
+
+  // 内部には在る（stale判定に要る）
+  assert.equal(typeof rev.sourceSnapshot.workspace, 'string');
+  assert.equal(typeof rev.sourceSnapshot.diagnostics, 'string');
+  assert.equal(Review.isReviewStale(rev, ws, []), false);
+
+  // 外には出ない
+  assert.equal(Object.keys(rev).includes('sourceSnapshot'), false);
+  for (const text of [Review.serializeReviewPackage(rev), Review.toMarkdown(rev),
+                      JSON.stringify(rev)]) {
+    assert.equal(text.includes('sourceSnapshot'), false);
+    assert.equal(text.includes('inputPackage'), false);
+    assert.equal(text.includes('workspaceType'), false);
+  }
+  // labelを含むからといって内部snapshotを消さない（消すと厳密比較ができなくなる）
+  assert.equal(rev.sourceSnapshot.workspace.includes('Sample OK'), true,
+    '内部snapshotは canonical な元データのままで良い');
+});
+
+test('W5-27: case行は今も primitive のみ（M10の理由が変わっていないことの確認）', () => {
+  const rev = Review.buildReviewPackage({
+    workspace: makeWorkspace(), diagnostics: makeDiagnostics('no_such_glass') });
+
+  // REVIEW_CASE_KEYS に nested field が入ったら detach(cases) が load-bearing になる。
+  // その日まで M10 は SURVIVED のままで良い、という根拠をここで固定する。
+  for (const row of rev.cases) {
+    for (const [k, v] of Object.entries(row)) {
+      assert.equal(v === null || typeof v !== 'object', true,
+        'case row の ' + k + ' は primitive か null');
+    }
+  }
+  assert.equal(Review.REVIEW_CASE_KEYS.includes('recommendedCandidate'), false,
+    'nested な候補objectを行へ持ち込んでいない');
+});
+
+test('W5-26: 最大構成の実測値と上限の関係（M15の根拠を最新の実測で保つ）', () => {
+  const ws = Workspace.createWorkspace();
+  for (let i = 0; i < Workspace.MAX_CASES; i++) {
+    ws.addCase(notificationPkg(), {
+      caseId: 'C' + i, label: 'x'.repeat(Workspace.MAX_LABEL_LENGTH) });
+  }
+  const ids = [];
+  for (let i = 0; i < Review.MAX_DETAIL_CASES; i++) ids.push('C' + i);
+  const rev = Review.buildReviewPackage({
+    workspace: ws, detailCaseIds: ids,
+    metadata: { title: 'x'.repeat(200), note: 'y'.repeat(2000) } });
+
+  const json = Review.serializeReviewPackage(rev);
+  const md = Review.toMarkdown(rev);
+  // 上限に対して余裕が2倍以上あること。余裕が消えたらここが落ちて、値を見直す合図になる。
+  assert.equal(json.length * 2 < Review.MAX_EXPORT_JSON_BYTES, true,
+    'JSON ' + json.length + ' vs cap ' + Review.MAX_EXPORT_JSON_BYTES);
+  assert.equal(md.length * 2 < Review.MAX_EXPORT_MARKDOWN_BYTES, true,
+    'MD ' + md.length + ' vs cap ' + Review.MAX_EXPORT_MARKDOWN_BYTES);
+});

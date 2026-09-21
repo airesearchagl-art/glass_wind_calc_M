@@ -277,3 +277,46 @@ test('4H-6: 古くなったらexport bufferを残さない（§13 / §14）', ()
   // 同じ再計算が print 可否とbufferの両方を守る
   assert.match(fresh, /applyPrintEligibility\(/);
 });
+
+test('W5-37: Report操作のコードに通信・保存の呼び出しが無い（実行コードのみを見る）', () => {
+  const code = scriptCode();
+  // Review UIの実行コード範囲だけを対象にする
+  const start = code.indexOf('var activeReview');
+  assert.notEqual(start, -1);
+  const reviewCode = code.slice(start);
+
+  for (const api of ['fetch(', 'XMLHttpRequest', 'sendBeacon', 'WebSocket', 'EventSource',
+                     'localStorage', 'sessionStorage', 'indexedDB', 'document.cookie',
+                     'navigator.send', 'caches.open', 'serviceWorker']) {
+    assert.equal(reviewCode.includes(api), false, api + ' を持たない');
+  }
+  // Report操作の各関数にも無い
+  for (const fn of ['generateReview', 'exportReviewMarkdown', 'exportReviewJson',
+                    'printReview', 'renderReviewReport', 'renderReviewFreshness']) {
+    const body = bodyOf(code, fn);
+    for (const api of ['fetch(', 'localStorage', 'sessionStorage', 'indexedDB', 'XMLHttpRequest']) {
+      assert.equal(body.includes(api), false, fn + ' が ' + api + ' を使わない');
+    }
+  }
+});
+
+test('W5-30: previewは支配ケースを自分で選び直さない', () => {
+  const code = scriptCode();
+  const render = bodyOf(code, 'renderReviewReport');
+
+  // rev は activeReview から1度だけ束縛し、以後差し替えない
+  const assignments = render.match(/\brev\s*=\s*[^=][^;]*/g) || [];
+  assert.equal(assignments.length, 1, 'rev への代入は1回だけ: ' + JSON.stringify(assignments));
+  assert.match(assignments[0], /rev\s*=\s*activeReview/);
+
+  // governing は model の値をそのまま読む
+  assert.match(render, /rev\.governingCase\.caseId/);
+  assert.match(render, /rev\.governingCase\.basis/);
+  // preview側で governingCase を組み立てない
+  assert.equal(/governingCase\s*:/.test(render), false,
+    'preview が governingCase を自作していない');
+  assert.equal(/Object\.assign\(\s*\{\}\s*,\s*rev/.test(render), false,
+    'rev を差し替えたcopyで描画しない');
+  // summary 由来の値も同様に model から読む
+  assert.equal(render.includes('summarize('), false);
+});

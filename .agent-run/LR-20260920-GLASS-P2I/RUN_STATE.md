@@ -10,7 +10,7 @@
 - Base SHA: 6a5232f65d02e2a8bfa8c2c87049b5865c584855
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 5 — residual security / privacy / injection 完了
+- Current wave: Wave 5 — §1-§49 完了 / Wave 6（independent verifier）待ち
 - Task Packet ID: LRP-20260920-GLASS-P2I
 - Task Packet revision: 1
 - Task Packet SHA-256: 901afdc2317e0b38ca90dcb69ba1fb8d8b271b1e073acd40e20d0e784c8f229e
@@ -410,6 +410,135 @@ mutation 5件（ゲート本体 / 3入口 / 判定条件）すべて KILLED、SU
 推測で補っていない。残りを受け取れば差分を実施する。
 ```
 
+## Wave 5 continuation — §19-§49 実測
+
+```text
+npm test : 493 pass / 0 fail（Wave 5前半 488 → +5）
+browser  : §19-§25 sweep 31 checks / 0 fail
+           既存 W5 58 / 4H 27 / W4 48 / p2g 84 / p2h 29 / p2h-repair 17 いずれも 0 fail
+pageError / consoleError : すべて 0
+```
+
+### §19 print media content safety
+
+Full の positive control（攻撃文字列が実際に資料へ届くこと）を先に確認したうえで、
+印刷媒体で測った。
+
+```text
+5<Z<40                      : そのまま読める形で残る
+# heading / ```code / [x](javascript:...) : 文字のまま。新しい構造を作らない
+script要素 / img要素 / anchor : 印刷媒体の report 内に 0 件
+handler実行                  : 無し（window.__n は undefined のまま）
+表の構造                     : 崩れない
+操作要素                     : 印刷されない
+```
+
+### §20 blocked print content（5状態すべて）
+
+```text
+NO_REPORT / SETTINGS_DIRTY / WORKSPACE_STALE / BOTH_STALE : 本文非表示 + 静的な通知
+FRESH                                                      : 本文表示 + 通知非表示
+古い本文が通知の裏に残らないことも確認（marker が印刷媒体に出ない）
+```
+
+### §21 直接経路の再確認
+
+```text
+変更イベントを出さずに privacy を書き換え → beforeprint で遮断
+UIのrefresh helper を一切呼ばずに batchWorkspace.addCase → WORKSPACE_STALE で遮断
+```
+
+### §22 / §23 / §42 network・storage accounting（観測範囲を明記する）
+
+```text
+測定方法: ページ読み込み完了後に計測を開始し、Review操作
+         （生成 / 詳細選択 / 比較 / Markdown / JSON / beforeprint / 再生成）
+         が発生させたrequestだけを数えた。
+
+Review操作が発生させた追加request : 0
+Review操作による storage 書き込み  : 0
+  localStorage / sessionStorage / cookie : 前後で同一
+  indexedDB.databases()                  : 0
+
+※ ページ自体の静的資産の読み込みは計測対象外（Review操作が起点ではないため）。
+   「network 0」ではなく「Review操作が追加したrequestが0」である。
+```
+
+### §24 / §25 1000-case browser run（観測値。SLAではない）
+
+```text
+workspace構築（browser） : 1000 case / 31 ms
+Review生成               : 226 ms
+Markdown                 : 11 ms / 157,389 bytes
+Review JSON              : 57 ms / 805,850 bytes
+preview                  : 1000行超を描画
+print media              : 表 1014 行が残り、操作要素は非表示、
+                           detail card と解釈注意書きは break-inside: avoid
+page / console error     : 0
+```
+
+### §26 export size 再実測（M15の根拠を最新に保つ）
+
+```text
+最大構成（1000 case / detail 50 / label 200字 / note 2000字）
+  Review JSON : 1,273,444 bytes = 1.21 MiB（Wave 3時点 1.02 MiB → 詳細追加で増加）
+  Markdown    :   383,278 bytes = 0.37 MiB
+  cap         : 8 MiB（据え置き。変更する実測上の理由が無い）
+  headroom    : JSON で約 6.6 倍
+```
+
+M15 は SURVIVED のまま。core側の上限の下では到達しないためで、
+「到達しない外枠」であることを記録として残す（KILLEDへ書き換えない）。
+
+### §36 residual mutation で見つかった1件
+
+```text
+W5-09 preview が支配ケースを自分で選び直す → 初回 SURVIVED
+
+  renderReviewReport 内で rev を差し替え、cases[0] を governing として描いても
+  どのtestも落ちなかった。model / export とpreviewで支配ケースが食い違う余地が
+  残っていたことになる（§30が禁じている状態）。
+
+  対処: preview が rev を1度だけ束縛し、governing を model から読むことを
+        source contract で固定。さらに browser 側で
+        「画面に出ている支配ケース == activeReview の governing」を実測。
+        同じmutantを再実行して KILLED を確認した。
+```
+
+### §37 network / storage の mutation は実際に仕込んで確かめた
+
+```text
+fetch('/example') を exportReviewJson へ         → KILLED
+localStorage.setItem(...) を generateReview へ   → KILLED
+source scan に単語が出ないことだけを根拠にしていない。
+```
+
+### §38-§41 regression
+
+```text
+privacy scan（repository content / base→HEAD）: 新規の private URL・内部path・
+  資格情報・実案件名 いずれも無し。検出された2行は
+  「その文字列が出ないこと」を確かめる自分のassertionだった
+protected calculations : Er 0.8516557589672942 / qBar 503.08024004410464 /
+  FL6 1756.09756097561 / 1463.4146341463415 / Manual 1400 いずれも MATCH
+Evidence : Review を 50 回生成・export しても before === after
+read-only : Review の生成・preview・JSON・Markdown・stale判定の前後で
+  serializeWorkspace() が完全一致
+```
+
+### Wave 5 で見つけた自分のprobe欠陥2件（記録として残す）
+
+```text
+1. break-inside を screen media で測っていた
+   printState() が media を screen へ戻したあとに getComputedStyle を読んでいたため
+   'auto' が返り、印刷用の規則を見たことになっていなかった。
+   → print media の内側で測る。
+
+2. textContent は隣接要素を空白なしで連結する
+   /ケースID: (\S+)/ が値の先まで拾い、"L54選定根拠:" になっていた。
+   値として使う文字種で区切るよう直した。
+```
+
 ## Quality Debt
 
 QUALITY_DEBT.md 参照（Wave 0時点で none）。
@@ -428,9 +557,10 @@ Wave 1-7（TASK_QUEUE.md参照）
 
 ## Next action
 
-Wave 5 §19以降の残りを受領後に実施。
-未受領のまま先へ進まない（§19は print media content safety の途中で切れている）。
-その後 Wave 6: full regression / browser / independent verifier。
+Wave 6: full regression（§50）/ 1つにつながった browser flow（§51）/
+independent verifier（§52、別context・read-only）。
+verifier の指摘は本Campaign内で修理する（§53）。
+その後 implementation verification head を固定（§54）。
 
 ## Stop conditions status
 

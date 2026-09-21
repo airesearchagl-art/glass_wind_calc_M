@@ -36,3 +36,29 @@ Review Package は現在の Workspace 状態から作る **derived snapshot** �
 3. 負圧 918 / 1122 N/m^2 の元計算根拠
 4. 各階評価高さ Z と preset の exact mapping
 ```
+
+## §5 Wave 5 実測（regression evidence のみ。Evidence状態は変えていない）
+
+```text
+verifiedCases             : []
+project-specific promotion: NONE
+dimensions                : mode sample_default / status unverified（1250 × 2050）
+validateAllEvidence()     : []
+階別正圧 1F/2F/3F/RF       : 1297 / 1525 / 1695 / 1729
+負圧 general / corner      : 918 / 1122
+explicit unresolved items : 4件のまま
+
+Review を 50 回生成し、その都度 JSON / Markdown を出力しても
+上記はすべて同一（実測で before === after を確認）。
+```
+
+Review core（review-package.js）に案件固有のEvidence値は無い（実測）:
+
+```text
+explicitUnresolvedItemCount : 無し
+projectSpecificPromotion    : 無し
+verifiedCaseCount           : 無し
+```
+
+これは regression evidence であり、Evidence の昇格ではない。
+Phase 2I は Evidence を1件も動かしていない。

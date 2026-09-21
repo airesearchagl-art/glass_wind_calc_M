@@ -52,22 +52,65 @@ Wave 5: security / privacy / injection / mutation / size limits
 
 Ready化・merge・Productionは本CampaignのNext Actionに含めない（Human Gate専管 / §47）。
 
-## §40 攻撃セット突合（Wave 5 / §9。未分類の行を残さない）
+## §40 攻撃セット突合 — 最終（§43。未分類・推測の行を残さない）
 
-| §40 attack | 測定した場所 | 状態 |
-|---|---|---|
-| `<script>` in title/note/label | W3 md tests / W4 browser §41 | PASS — 既存evidence有効 |
-| `<img onerror>` | W3 / W4 §41 | PASS — 既存evidence有効 |
-| `5<Z<40`（内部trace由来） | W3 md / W4 preview / W5 §10 | PASS — 既存evidence有効 |
-| `\|` / backtick / `# heading` | W3 injection / W4 §41 | PASS — 既存evidence有効 |
-| `javascript:` link構文 | W3 / W4 §41 | PASS — 既存evidence有効 |
-| file path風 / URL風 text | W4 §41 note | PASS — 既存evidence有効 |
-| 秘密らしき診断値 | W2 §26 / W3 W3-21 / W4 §34 / **W5 §12** | RE-RUN PASS（Full positive control付きで再測） |
-| prototype keys | **W5 §2-§8** | **FIXED IN W5**（D-019。3入口すべてで継承値を採用していた） |
-| unknown / duplicate caseId | W2 J/K | PASS — 既存evidence有効 |
-| INVALID を detail に選択 | W2 M / W4 selectors | PASS — 既存evidence有効 |
-| 生成後のWorkspace変更 | W2 U/V / W4 §33 / 4H C・D / **W5 §18** | RE-RUN PASS（UI helperを通さない直接変更でも検出） |
-| Redacted漏れ | W2（snapshot漏れ→修正）/ W3 W3-6 / 4H RF-P1 / **W5 §10** | RE-RUN PASS（4面 × 5 marker、Full positive control付き） |
-| report JSON の再取り込み | W2 R/S / W3 W3-8..10 | PASS — 既存evidence有効 |
+| Attack | 最初のevidence | 以後に境界が変わったか | Wave 5で再実行 | 最終状態 |
+|---|---|---|---|---|
+| `<script>` in title/note/label | W3 md / W4 §41 | NO | YES（§19 print media） | RE-RUN PASS |
+| `<img onerror>` | W3 / W4 §41 | NO | YES（§19） | RE-RUN PASS |
+| `5<Z<40`（内部trace由来） | W3 / W4 | NO | YES（§19 print で literal 維持） | RE-RUN PASS |
+| `\|` / backtick / `# heading` / code fence | W3 / W4 §41 | NO | YES（§19 構造不変を確認） | RE-RUN PASS |
+| `javascript:` link構文 | W3 / W4 §41 | NO | YES（§19 anchor 0件） | RE-RUN PASS |
+| file path風 / URL風 text | W4 §41 | NO | YES（§19 subtitle / note） | RE-RUN PASS |
+| 秘密らしき診断値 | W2 §26 / W3 / W4 §34 | NO | YES（§12 / §32 4面） | RE-RUN PASS |
+| prototype 経由の入力 | （W5まで未測定） | YES（W5で入口を追加） | YES | **FIXED IN W5** |
+| unknown / duplicate caseId | W2 J/K | NO | NO（境界不変） | PASS |
+| INVALID を detail に選択 | W2 M / W4 | NO | NO（境界不変） | PASS |
+| 生成後のWorkspace変更 | W2 U/V / W4 §33 | YES（4H で beforeprint 追加） | YES（§20 / §21） | RE-RUN PASS |
+| Redacted漏れ | W2（漏れ→修正）/ W3 / 4H | YES（4H RF-P1） | YES（§10 / §33 / §19） | RE-RUN PASS |
+| report JSON の再取り込み | W2 R/S / W3 W3-8..10 | NO | NO（境界不変） | PASS |
 
-未分類の行なし。
+未分類なし。`unknown` / `assumed` / `probably covered` は使用していない。
+
+## mutation 集計（§44。campaignごとに分けて記録する）
+
+| campaign | KILLED | SURVIVED | PATCH-MISS |
+|---|---|---|---|
+| Wave 2（Review core） | 11 | 1 | 0 |
+| Wave 2H（evidenceSummary genericity） | 4 | 0 | 0 |
+| Wave 3（exporters） | 14 | 1 | 0 |
+| Wave 4（Review UI） | 10 | 0 | 0 |
+| Wave 4H（print / comparison boundary） | 8 | 0 | 0 |
+| Wave 5 prototype gate | 5 | 0 | 0 |
+| Wave 5 residual | 5 | 0 | 0 |
+
+生存2件の正体（名前を付け替えない）:
+
+```text
+M10  detach(cases)
+     case行が primitive のみで構成されるため、copyの効果が観測できない。
+     Wave 4 / 5 で REVIEW_CASE_KEYS に nested field は入っていない（testで確認）。
+     よって理由は変わらず SURVIVED のまま。
+
+M15  export size cap 8 MiB
+     core側の上限（1000 case / detail 50 / label 200 / note 2000）の下では到達しない。
+     §19が core-side の上限を要求するため残す。防御的な外枠であり、
+     「今効いているguard」ではない。
+```
+
+Wave 5 residual の内訳:
+
+```text
+W5-07 診断の生reasonを通す                KILLED
+W5-09 previewが支配ケースを選び直す        SURVIVED → test追加後 KILLED（下記）
+W5-10 比較の差分を A−B へ反転              KILLED
+W5-12 Report操作に fetch を仕込む          KILLED
+W5-13 Review生成に localStorage を仕込む   KILLED
+```
+
+W5-01〜W5-04（ordinary-object gate）は prototype campaign として別掲。
+W5-05 / W5-06（Redacted復活）は Wave 3 M10 / M11、
+W5-08（formula/input 統合）は Wave 3 M12、
+W5-11（beforeprint 迂回）は Wave 4H P1 / P2、
+W5-14（sourceSnapshot を JSON へ）は Wave 3 M3 で既に KILLED 済み。
+対象コードが Wave 5 で変わっていないため再実行していない（§36の指示どおり）。
