@@ -894,3 +894,117 @@ W7-06 markup構文に `-->` を含める  KILLED (P2J-S20)
 広すぎれば S17、崩れた形が漏れれば S18、無効化すれば S01、
 markup構文が漏れれば S20、矢印を巻き込めば S20 が落ちる。
 5方向から固定されている。
+
+## §35 — 3回目の独立検証（head `1556fc4`）: 同じガードで3度目の欠陥
+
+```text
+verdict : PASS WITH FINDINGS
+findings: Hard Gate 0 / **Required Fix 2** / Advisory 2 / Info 1
+npm     : 621 pass / 0 fail（独立実測）
+browser : VERIFIED（独自harness）
+probes  : 14 KILLED / 0 SURVIVED
+privacy : production 0 hits
+```
+
+verifier は「14/14 死ぬことはガードが正しい証拠では**ない**」と明記している。
+Finding 1 / 2 は**出荷済みの挙動**であり、mutation では原理的に露出しない。
+これがテスト側の盲点（Finding 5）そのものである。
+
+### Finding 1（Required Fix / 自分で再現）— 1文字で回避できる
+
+```text
+<img src=x onerror=alert(1)>            rejected
+<img src=x onerror=alert(1) あ>         ACCEPTED
+<img src=x alt="図面" onerror=alert(1)> ACCEPTED   ← 自然な日本語HTML
+<img src=x onerror=alert(1) Ａ>         ACCEPTED   ← 全角Latin
+bypass: 29/29 タグ名（検証者計測 114/114）
+```
+
+verifier は Chromium で「これらは実際に解釈され onerror が発火する
+本物のタグ」であることまで確認している（4/4 fired）。
+
+「日本語があれば散文」という前提が誤りだった。
+日本語のHTMLは属性値に日本語を持つのが普通である。
+
+### Finding 2（Required Fix / 自分で再現）— 誤検知は移動しただけだった
+
+```text
+rejected  範囲は 5<Z<40 で、W<H R>S を満たす
+rejected  W<H かつ P>Q。R<S T>U も成立      ← S17のmust-accept文に節を足しただけ
+rejected  A<B C>D のとき注意する
+rejected  条件 W<H and P>Q を確認した
+```
+
+規則が位置依存（日本語が `<…>` の**中**にあるか）だったため、
+日本語がスパンの外にある散文は依然として落ちていた。
+
+### Finding 5（Info / 最も重い指摘）— テストが欠陥を仕様として固定していた
+
+旧 S17 の must-accept 一覧は `見付幅W<見付高さH となる場合>注意` を含み、
+**CJKを含む角括弧スパンの受理を要求していた**。
+テストが欠陥を正常動作として固定していたため、
+mutation が全滅しても実際の穴は残る構造になっていた。
+
+## §36 — 3度目の修理: 賢い規則をやめ、広い形へ戻した
+
+`A<B C>D`（散文）と `<td nowrap>`（タグ）は文字構成が同一であり、
+`<…>` の中だけを見る規則では原理的に分離できない。
+どちらの誤りを選ぶかを決めるしかなく、**誤検知(fail closed)を選んだ**。
+
+決め手は回避方法が実在すること:
+
+```text
+W<H かつ P>Q      拒否   → 空白を置けば通る
+W < H かつ P > Q  通る
+5<Z<40            通る
+```
+
+実測:
+
+```text
+must-reject corpus : 508形（26タグ名 × 各種本体形 + markup構文） → すべて拒否
+must-accept corpus :  16形（空白付き比較・非英字始まり・矢印など） → すべて受理
+既存 publicDescription 11件 : すべて通過（validateAllEvidence() === []）
+```
+
+### mutation（3つの旧規則すべてへの復帰を含む・挙動変化を先に確認）
+
+```text
+X-01 CJK本体規則へ戻す（3度目の欠陥）  cjk=ACCEPTED → KILLED(3)  S17/S18/S22
+X-02 属性の形だけ規則へ戻す（F1）      tick=ACCEPTED → KILLED(3)
+X-03 タグ判定を無効化                  すべてACCEPTED → KILLED(4)  S01
+X-04 `/`区切りを外す                   slash=ACCEPTED → KILLED(1)  S18
+X-05 本体を必須にする（裸タグ素通り）  bare=ACCEPTED → KILLED(2)  S01
+```
+
+過去3つの誤った規則のどれに戻しても落ちる状態になった。
+
+### テストの作り直し
+
+```text
+S17 → 「空白を置けば通る」回避方法の固定 + 受け入れたコストを assert.throws で明示
+S18 → 26タグ名 × 22本体形（1000形超）の網羅。CJK混入・全角・崩れた属性を含む
+S22 → 1文字回避を単体で読めるよう独立させた（あ ア 図 中 「 全角空白 Ａ ｡ 𠮷 …）
+S19 → 散文例を空白付きへ更新
+S21 → タグ判定の線形性のみを固定（他パターンの二次性は QD-J04 へ）
+```
+
+## §37 — 3度目の修理後の実測
+
+```text
+npm test        : 622 pass / 0 fail
+browser         : 34 + 8 + 10 + 10 = 62 checks / 0 fail
+protected values: 5件すべて一致
+validateAllEvidence(): []
+project state   : BLOCKED / 0 of 12 / 0 of 4 / 0 of 8 / candidate null
+                  verifiedCases [] / V0 34 / roughness III
+```
+
+### Finding 4 の自己再測定（既存問題・本変更由来ではない）
+
+```text
+email-like  N=1000 → 8ms / 2000 → 25ms / 4000 → 98ms / 8000 → 401ms  （二次）
+tag pattern 280KB → 7ms                                              （線形）
+```
+
+タグ判定は線形。二次なのは本Phaseで触っていないパターンであり QD-J04 に記録した。

@@ -48,7 +48,8 @@ expected : >= 500 / 0 fail  → 一致
 | 4 | Evidence Request Matrix（read-only UI） | `4dfafae93628d0bf3674a05467bafd860ac3bef4` | 600 / 0 + browser 34 / 0 |
 | 5 | security / privacy / trust / prototype | `1784fe3a72c2d038d74a8cc48ed1f3119cabd1fc` | 616 / 0 + browser 34 / 0 |
 | 6 | Stage A regression / 独立検証 / 修理 | `978ab6b60bc4952dca8aaafbe589abe971de4dc3` | 619 / 0 + browser 62 / 0 |
-| 6b | 再検証F1 の修理（タグ判定の置換） | `RESOLVE_DYNAMICALLY` | 621 / 0 + browser 62 / 0 |
+| 6b | 再検証F1 の修理（タグ判定の置換） | `1556fc4c616f547c9422c369d4ae16e7e00f2267` | 621 / 0 + browser 62 / 0 |
+| 6c | 3回目検証の Required Fix 2件（広い形へ戻す） | `RESOLVE_DYNAMICALLY` | 622 / 0 + browser 62 / 0 |
 
 ## Wave別の変更ファイル
 

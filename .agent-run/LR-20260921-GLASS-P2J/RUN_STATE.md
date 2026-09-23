@@ -10,7 +10,7 @@
 - Base SHA: 44e4032a2fb3bd3a48bab04d3a5a76c5a6a912eb
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 6 — 独立再検証まで完了 / F1再修理済み（再々検証待ち）
+- Current wave: Wave 6 — 独立検証3回 / 同一ガードを3度修理（4回目の検証待ち）
 - Task Packet ID: LRP-20260921-GLASS-P2J
 - Task Packet revision: 1
 - Task Packet SHA-256: aa9ce07dac4767afc0ad9ff4b13663ae8cc2ab1be98e9e44ef80498da3acc446
@@ -123,7 +123,60 @@ mutation 5件: M1/M2/M3/M5 は KILLED。M4（`hasOwnProperty`→`in`）は **SUR
 §29 の「inherited-field defectが見つかったらWave 2の前にFIXする。
 さもなくばWave 1はBLOCKED」は満たしている。
 
-## Wave 6 再検証結果（head 978ab6b）と F1 再修理
+## Wave 6c — 3回目の独立検証で同じガードに3度目の欠陥
+
+```text
+3回目 verdict : PASS WITH FINDINGS
+                Hard Gate 0 / **Required Fix 2** / Advisory 2 / Info 1
+                npm 621/0（独立実測）/ browser VERIFIED / probes 14 KILLED
+```
+
+verifier の要点: **14/14 死ぬことはガードが正しい証拠ではない。**
+Finding 1/2 は出荷済みの挙動であり mutation では原理的に露出しない。
+
+### 3度とも自分で壊している
+
+```text
+元の規則 一律拒否            → A1: 比較の散文を巻き込む（誤検知）
+修理1    属性の形だけ拒否    → F1: 崩れたタグが素通り
+修理2    日本語が無い時だけ  → 3rd: **1文字混ぜると全タグ素通り（114/114）**
+                                  しかも誤検知は移動しただけで消えていない
+```
+
+`alt="図面"` は日本語HTMLとして自然な記述であり、
+「日本語があれば散文」という前提そのものが誤りだった。
+
+### 原理的に分離できないと認めた
+
+```text
+A<B C>D        散文
+<td nowrap>    タグ      ← 文字構成が同一
+```
+
+`<…>` の中だけを見る規則では分離できない。
+3度とも「例外を作り込む」方向で壊しているのは、
+分離できないものを分離しようとしたからである。
+
+### 決定: 誤検知を受け入れ、素通りを無くした
+
+規則は**元の広い形へ戻した**（`/`区切り修正と markup-construct は維持）。
+決め手は回避方法が実在すること:
+
+```text
+W<H かつ P>Q      拒否   → 空白を置けば通る
+W < H かつ P > Q  通る
+```
+
+「書けなくなる」のではなく「書き方が決まる」だけである。
+受け入れたコストは P2J-S17 に `assert.throws` として明示した（QD-J05）。
+
+### テストが欠陥を仕様として固定していた
+
+旧 S17 は `見付幅W<見付高さH となる場合>注意` を must-accept に含めており、
+CJK入り角括弧スパンの受理を**要求**していた。
+S17/S18 を書き換え、1文字回避を単体で読める S22 を追加した。
+
+## Wave 6b — 2回目の独立検証（head 978ab6b）と F1 再修理
 
 ```text
 独立再検証 verdict : PASS WITH FINDINGS
@@ -372,7 +425,18 @@ distinct mutants 16 / KILLED 16 / SURVIVED 0 / PATCH-MISS 0
 真の last-one-wins と first-one-wins を別々に実装して再実行した。
 詳細と訂正の記録は EVIDENCE.md §9。
 
-## Wave 6 final state（再々検証待ち）
+## Wave 6c final state（4回目の検証待ち）
+
+```text
+npm                        : 622 pass / 0 fail
+browser                    : 62 checks / 0 fail
+protected values           : 5件すべて一致
+validateAllEvidence()      : []
+tag guard mutation         : 過去3つの誤った規則すべてへの復帰が KILLED
+Implementation verification head : **未確定**（§44・§47）
+```
+
+## Wave 6b final state
 
 ```text
 再修理後 head              : RESOLVE_DYNAMICALLY（本コミット）
@@ -492,21 +556,24 @@ Wave 6再検証 → Wave 7（TASK_QUEUE.md参照）
 
 ## Next action
 
-F1 再修理後の**新しい exact head** に対する独立再々検証（§44）。
+3度目の修理後の**新しい exact head** に対する4回目の独立検証（§44）。
 
 ```text
 - 実装セッションは自己認証しない
-- 重点: タグ判定の置換が
-    (a) 崩れたタグ形を取りこぼさないこと（F1の再発が無いこと）
-    (b) 日本語の技術散文を巻き込まないこと
-    (c) markup構文クラスが矢印 `-->` を巻き込まないこと
-  を、S17 / S18 / S20 / S21 が5方向から固定できているか
-- F3（QD-J02）を debt に留めた判断が妥当か
-- 再検証が閉じてから §47 の implementation verification head を確定する
+- 重点:
+  (a) 1文字回避（CJK / 全角 / 属性値内）が本当に塞がったか
+  (b) 誤検知の受け入れが「回避方法あり」で妥当か、
+      既存11件と将来の散文が実務上書けるか
+  (c) テストが再び欠陥を仕様として固定していないか
+      （S17/S18/S22 が「正しい挙動」を固定しているか）
+  (d) QD-J04（二次コスト）/ QD-J05（受け入れたコスト）の記録が妥当か
+- 検証が閉じてから §47 の implementation verification head を確定する
 ```
 
-同じ箇所を2度直している（A1 → F1）ため、3度目が無いことを特に確かめる。
-再検証が PASS になるまで Wave 7 へ進まない。
+**同じ箇所を3度直している。** 4度目が無いことを特に確かめる。
+mutation が全滅しても正しさの証明にならないことは3回目の検証で示された
+（出荷済みの挙動は mutation では露出しない）ため、
+仕様そのものを疑う視点で見る必要がある。
 
 実案件の状態は変わらない:
 `BLOCKED_BY_MISSING_EVIDENCE` / promotion `NONE` / `verifiedCases: []` /

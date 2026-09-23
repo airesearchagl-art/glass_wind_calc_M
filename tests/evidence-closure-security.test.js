@@ -494,53 +494,87 @@ test('P2J-S16: 実案件の空集合closureは BLOCKED のまま動かない', (
 // Wave 6: 独立検証の指摘 A1 に対する回帰
 // ============================================================
 
-test('P2J-S17: タグ判定はドメイン変数を使った不等式散文を巻き込まない', () => {
-  // 独立検証の指摘（A1）。旧パターンは「`<`+英字 … `>`」なら何でも拒否しており、
-  // `W<H かつ P>Q である。` を html-like-tag として落としていた。
-  // W / H / P / Q / Z は本ドメインの変数名そのものなので、この形の散文は
-  // 現実に書かれうる。fail closed 側の誤りではあるが、
-  // 将来のEvidence散文が理由の分からないまま書けなくなる。
-  const mustAccept = [
-    'W<H かつ P>Q である。',
-    'P<Q かつ R>S のとき',
-    '見付幅W<見付高さH となる場合>注意',
-    '5<Z<40',
-    '5<Z<40 かつ W>1000',
+test('P2J-S17: 比較の散文は「空白を置く」書き方で通る（誤検知の受け入れ方）', () => {
+  // ここは3度間違えた箇所である。経緯:
+  //   (1) 一律拒否 → `W<H かつ P>Q である。` を巻き込む（A1指摘）
+  //   (2) 属性の形だけ拒否 → 崩れたタグが素通り（F1指摘）
+  //   (3) 本体に日本語が無い場合だけ拒否 → 1文字混ぜると全タグ素通り（実測114/114）
+  //
+  // `A<B C>D`（散文）と `<td nowrap>`（タグ）は文字構成が同一であり、
+  // `<…>` の中だけを見る規則では**原理的に分離できない**。
+  // そこで誤検知(fail closed)を選び、素通りを無くした。
+  // 誤検知は書き方で回避できる。ここではその回避方法が
+  // 実際に機能することを固定する（「書けなくなる」のではない）。
+  const spacedFormsAccepted = [
     'W < H かつ P > Q',
-    'a<b'
+    '5 < Z < 40',
+    'P < Q かつ R > S のとき',
+    '評価高さは 5 < Z < 40 の範囲で確認した',
+    '条件 W < H and P > Q を確認した'
   ];
-  mustAccept.forEach((s) => {
+  spacedFormsAccepted.forEach((s) => {
     assert.equal(Evidence.assertPublicSafeEvidenceText(s, 'prose'), true, s);
   });
+
+  // `>` で閉じない形、および `<` の直後が非英字の形は、空白無しでも通る
+  const alsoAccepted = [
+    '5<Z<40', 'A<B<C<D', 'x>y', '1<2',
+    '見付幅W<見付高さH となる場合>注意',
+    'index.html の初期値として導入された値',
+    'A --> B の順で確認した', 'P -> Q と表記する'
+  ];
+  alsoAccepted.forEach((s) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(s, 'prose'), true, s);
+  });
+
+  // 受け入れたコスト: 空白の無い比較は拒否される。隠さず固定する。
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('W<H かつ P>Q である。', 'prose'),
+    /matched known-unsafe pattern: html-like-tag/,
+    '空白無しの比較は拒否される（既知・文書化済みのコスト）');
 });
 
-test('P2J-S18: タグ形の内容は、本体の書式が崩れていても拒否される', () => {
-  // 独立再検証 F1 の回帰。最初の修理は「本体が**属性の形**のものだけ拒否」
-  // という書き方で、意図を裏返していた。属性文法に合わない本体は素通りし、
-  // **崩れたタグほど通る**という逆転が起きていた:
-  //   <img src=x onerror=alert(1)>  拒否
-  //   <img src=x onerror=alert`1`>  素通り  ← バッククォートだけの差
-  // 現在は「本体に日本語が無いタグ形」を書式を問わず拒否する。
-  const wellFormed = [
-    '<b>x</b>', '</b>', '<script>x</script>', '</script>', '<script src="x">',
-    '<img src=x onerror=1>', '<img src="x" onerror="alert(1)">',
-    '<svg onload=1>', '<iframe src="javascript:1">', '<iframe srcdoc="x">',
-    '<a href="#">y</a>', '<div class="a b">', '<input disabled>', '<BR/>', '<br />',
-    '<META charset=utf8>', '<a\nhref=x>', '<b\tid=y>'
+test('P2J-S18: タグ形は本体の書式・言語によらず拒否される', () => {
+  // 独立検証3回ぶんの回帰をまとめて固定する。
+  //   F1: 崩れた属性（バッククォート値・数字始まりの属性名 等）
+  //   3rd: 本体に1文字でも日本語/全角を混ぜると素通りしていた（実測114/114）
+  //        `alt="図面"` は**日本語HTMLとして自然な記述**であり、
+  //        「日本語があれば散文」という前提そのものが誤りだった。
+  const TAGS = ['a', 'b', 'i', 'p', 'br', 'hr', 'td', 'h1', 'img', 'svg', 'div',
+    'span', 'script', 'iframe', 'object', 'embed', 'input', 'style', 'form',
+    'meta', 'base', 'link', 'table', 'marquee', 'textarea', 'button'];
+  const BODIES = [
+    '', ' src=x onerror=1', ' src=x onerror=alert(1)', ' src=x onerror=alert`1`',
+    ' src=x onerror=alert(1) あ',          // 末尾にCJK1文字（旧: 素通り）
+    ' alt="図面" onerror=alert(1)',        // 属性値にCJK（旧: 素通り / 自然な日本語HTML）
+    ' src=x onerror=alert(1) Ａ',          // 全角Latin（旧: 素通り）
+    ' src=x onerror=alert(1)\u3000',       // 全角スペース（旧: 素通り）
+    ' "q"', ' =v', ' 1=2', ' -x=1', ' .x=1', ' x=1 2', " x=a'b", ' x=a"b',
+    ' disabled', ' 日本語', '/', '/onload=1', ' \n href=x', ' \t id=y'
   ];
-  // F1 が素通りさせていた「崩れた」形。ここが空だと穴が再発しても気付けない。
-  const malformed = [
-    '<img src=x onerror=alert`1`>', '<script "q">', '<script =v>',
-    '<img 1=2>', '<iframe 0x=1>', '<img -x=1>', '<img .x=1>',
-    '<img x=1 2>', '<img x=`v`>', "<img x=a'b>", '<img x=a"b>'
-  ];
-  // 区切りが空白ではなく `/` の形（旧パターンも取りこぼしていた）
-  const slashForms = ['<svg/onload=1>', '<img/src=x onerror=alert(1)>'];
-
-  [].concat(wellFormed, malformed, slashForms).forEach((s) => {
-    assert.throws(() => Evidence.assertPublicSafeEvidenceText(s, 'prose'),
-      /matched known-unsafe pattern: html-like-tag/, s);
+  let checked = 0;
+  TAGS.forEach((tag) => {
+    BODIES.forEach((body) => {
+      [`<${tag}${body}>`, `</${tag}${body}>`].forEach((s) => {
+        checked++;
+        assert.throws(() => Evidence.assertPublicSafeEvidenceText(s, 'prose'),
+          /matched known-unsafe pattern: html-like-tag/, s);
+      });
+    });
   });
+  assert.equal(checked >= 1000, true, '網羅数: ' + checked);
+});
+
+test('P2J-S22: 1文字混ぜてもタグ判定は回避できない', () => {
+  // 3度目の欠陥の核心を、単体で読めるように独立して固定する。
+  const base = '<img src=x onerror=alert(1)';
+  ['あ', 'ア', '図', '中', '「', '\u3000', 'Ａ', '｡', '\uD842\uDFB7', '…']
+    .forEach((ch) => {
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(base + ' ' + ch + '>', 'prose'),
+        /matched known-unsafe pattern: html-like-tag/, 'char: ' + JSON.stringify(ch));
+    });
+  // 属性値の中に入れても同じ
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('<img alt="図面" onerror=1>', 'prose'),
+    /matched known-unsafe pattern: html-like-tag/);
 });
 
 test('P2J-S20: タグ以外のmarkup構文も拒否される', () => {
@@ -554,10 +588,10 @@ test('P2J-S20: タグ以外のmarkup構文も拒否される', () => {
   assert.equal(Evidence.assertPublicSafeEvidenceText('P -> Q と表記する', 'prose'), true);
 });
 
-test('P2J-S21: タグ判定に入れ子の量指定子が無い（backtracking懸念の構造的解消）', () => {
-  // 再検証は旧パターンの入れ子量指定子を計測し「線形・実害なし」と結論したが、
-  // 現在の形はそもそも入れ子量指定子を持たない（否定文字クラス1つ）。
-  // 病的入力でも線形であることを実測で固定する。
+test('P2J-S21: タグ判定は病的入力でも線形時間で走る', () => {
+  // 現在の形は入れ子の量指定子を持たない（否定文字クラス1つ）。
+  // 他パターン（email-like / url-scheme / private-document-filename）には
+  // 二次的なコストが測定されている（QD-J04）。ここで固定するのはタグ判定のみ。
   const shapes = [
     '<a ' + 'b='.repeat(20000) + '!',
     '<a' + ' b=c'.repeat(20000) + '!',
@@ -586,7 +620,7 @@ test('P2J-S19: A1修正後も現行configとObservation経路は通る', () => {
   // 不等式を含む説明でもObservationは成立する
   const o = Closure.normalizeObservation(
     obsOf('pane_width_mm', null, 987, 'mm', {
-      evidence: ev({ publicDescription: '合成fixture: W<H かつ P>Q の条件で確認' })
+      evidence: ev({ publicDescription: '合成fixture: W < H かつ P > Q の条件で確認' })
     }), 'miyoshi');
-  assert.match(o.evidence.publicDescription, /W<H/);
+  assert.match(o.evidence.publicDescription, /W < H/);
 });
