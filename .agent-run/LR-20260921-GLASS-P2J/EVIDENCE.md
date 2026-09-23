@@ -1515,7 +1515,8 @@ vs e336428 : 11411  同上
 ### F11-02: dot 写像 12 メンバの固定
 
 ```text
-修正前: 12 中 2 のみ固定。残り 10 を削除する変異がすべて 639/0 で生存
+修正前: 12 中 2 のみ固定。残り 10 を削除する変異がすべて **638/0** で生存
+（【検証12 F12-03 による訂正】当時の suite は 638。639 は HEAD の件数だった）
 修正後: 12/12 KILLED（P2J-S37 が定数とは独立に全員列挙）
 ```
 
@@ -1526,6 +1527,49 @@ npm test        : 639 pass / 0 fail
 browser         : 62 pass / 0 fail
 parser boundary : 42形 / bypass 0
 mutation        : 14/14 KILLED
+protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
+```
+
+## §48 — 独立検証12 の修理実測（D-045）
+
+### F12-01: 左隣接
+
+```text
+witness                                      7685e64  HEAD
+資料_www.example.com                          受理     拒否
+一次資料_https://internal.example.jp/docs/plan   受理     拒否
+図面は/home/user/案件/最新版 に置いた            受理     拒否
+原本は~/Documents/案件 にある                  受理     拒否
+検討2https://x.example.jp/p                   受理     拒否
+```
+
+### F12-06: 挿入型の回避（種類の欠落）
+
+```text
+www<ZWSP>.example.com          受理 → 拒否
+https<ZWSP>://…               受理 → 拒否
+tanaka<ZWSP>@example.co.jp     受理 → 拒否
+構造計算書.p<ZWSP>df             受理 → 拒否
+www<SOFT HYPHEN>.example.com   受理 → 拒否
+数学用英字 w ×3 + .example.com    受理 → 拒否（NFKC）
+別字（g ×3）は受理のまま——過剰拒否していない
+```
+
+### F12-04: dot 集合の一貫性
+
+```text
+構造計算書。pdf / ｡pdf / ․pdf   拒否（full stop）
+PDF・doc形式 / PDF·doc形式 / PDF‧doc形式  受理（中黒・高さ付きドット）
+→ 字形が同じ U+0387 / U+00B7 を同じ扱いにした
+```
+
+### 回帰（修理後・全量）
+
+```text
+npm test        : 642 pass / 0 fail
+browser         : 62 pass / 0 fail
+parser boundary : 42形 / bypass 0
+mutation        : 9/9 KILLED
 protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
 ```
 

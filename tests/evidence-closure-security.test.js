@@ -828,6 +828,93 @@ test('P2J-S36: control-character 規則は宣言した範囲を全数覆う', ()
   });
 });
 
+test('P2J-S38: 規則は**左に何があっても**発火する', () => {
+  // 独立検証12 F12-01。`url-scheme` / `www` / `unix-home-or-absolute-path` は
+  // 左文脈アンカー（`\\b` / `(^|\\s)`）を持っており、
+  // 日本語の散文が URL / path の前に空白を置かないため実質発火しなかった。
+  //
+  // test も corpus もこの軸を**アンカーに都合のよい値に固定**していた——
+  // 先頭 / 空白の後 / 全角の後。単語文字を直前に置いた形が 1 つも無かった。
+  // 集合の中身ではなく**規則を試す文脈**が射影されていた。
+  const PAYLOADS = [
+    ['https://internal.example.jp/docs/plan', /url-scheme/],
+    ['http://internal.example.jp/p', /url-scheme/],
+    ['www.internal.example.jp/docs', /www/],
+    ['/home/user/案件/最新版', /unix-home-or-absolute-path/],
+    ['/Users/tanaka/Documents/案件', /unix-home-or-absolute-path/],
+    ['/mnt/share/案件', /unix-home-or-absolute-path/],
+    ['~/Documents/案件', /unix-home-or-absolute-path/]
+  ];
+  // 左に置くものを網羅する: 無 / 空白 / 単語文字 / 記号 / 和文 / 全角。
+  const PREFIXES = ['', ' ', '資料_', '検討2', 'a', 'Z', '_', '9', '図面は', '原本は',
+    '参考:', '（', '「', '資料＿', '一次資料-', '添付.', 'x/'];
+  let checked = 0;
+  const leaked = [];
+  PREFIXES.forEach((pre) => {
+    PAYLOADS.forEach(([core, rule]) => {
+      checked++;
+      const text = pre + core;
+      try { Evidence.assertPublicSafeEvidenceText(text, 'prose'); leaked.push(text); }
+      catch (e) { if (!rule.test(e.message)) leaked.push(text + ' (wrong rule: ' + e.message.slice(-32) + ')'); }
+    });
+  });
+  assert.deepEqual(leaked.slice(0, 8), [], '左に何か置くと通った (全' + leaked.length + '件 / ' + checked + '中)');
+  assert.equal(checked, PREFIXES.length * PAYLOADS.length);
+});
+
+test('P2J-S39: normalizer 集合は**種類**を網羅する（置換・削除・正規化）', () => {
+  // 独立検証12 F12-06——「集合の全員を押さえたか」では見つからない欠陥。
+  // 集合は完全に押さえられていた（S34 が名前で、S37 が全員を）が、
+  // 全員が**置換写像**だったので、文字を**挿入**する回避には届かなかった。
+  // メンバシップのテストは「集合が正しい種類か」を検査できない。
+
+  // 削除: 宣言した不可視文字を**全数**回す。
+  const FORMAT_CHARS = ['\u00ad', '\u034f', '\u061c', '\u180e', '\u200b', '\u200c', '\u200d',
+    '\u200e', '\u200f', '\u202a', '\u202b', '\u202c', '\u202d', '\u202e',
+    '\u2060', '\u2061', '\u2062', '\u2063', '\u2064', '\u2066', '\u2067', '\u2068', '\u2069', '\ufeff'];
+  FORMAT_CHARS.forEach((ch) => {
+    assert.equal(Evidence.stripFormatChars('a' + ch + 'b'), 'ab',
+      'U+' + ch.charCodeAt(0).toString(16).toUpperCase() + ' が削除されていない');
+    // 行動でも固定する（写像だけでは規則へ繋がっている保証が無い）。
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText('www' + ch + '.example.com', 'prose'),
+      /www/, 'www' + JSON.stringify(ch));
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText('tanaka' + ch + '@example.co.jp', 'prose'),
+      /email-like/, 'email' + JSON.stringify(ch));
+  });
+
+  // 正規化: astral lookalike。手書きの畳みでは追えない範囲。
+  assert.equal(Evidence.foldCompatibility('\u{1D5D0}\u{1D5D0}\u{1D5D0}.example.com'), 'www.example.com');
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('\u{1D5D0}\u{1D5D0}\u{1D5D0}.example.com', 'prose'), /www/);
+  // ただし別の字は別の字のまま（過剰拒否しない）。
+  assert.equal(Evidence.assertPublicSafeEvidenceText('\u{1D5C0}\u{1D5C0}\u{1D5C0}.example.com', 'prose'), true);
+
+  // 種類が 3 つ居ることを名前で固定する。
+  ['foldFullwidthAscii', 'stripFormatChars', 'foldCompatibility'].forEach((fn) => {
+    assert.equal(typeof Evidence[fn], 'function', fn + ' が無い');
+  });
+});
+
+test('P2J-S40: ファイル名用畳みの 4 範囲を全数写像する', () => {
+  // 独立検証12 F12-05。新しく戻した狭い畳みを代表文字 2 つで押さえていたため、
+  // 4 範囲の端点をずらす変異が 5 件生き残っていた（S32 で広い畳みにやったのと同じ処置を
+  // 新しい定数にしていなかった）。
+  const fold = Evidence.foldFullwidthFilenameChars;
+  const RANGES = [[0xff10, 0xff19], [0xff21, 0xff3a], [0xff41, 0xff5a], [0xff0e, 0xff0e]];
+  let checked = 0;
+  RANGES.forEach(([lo, hi]) => {
+    for (let c = lo; c <= hi; c++) {
+      assert.equal(fold(String.fromCharCode(c)), String.fromCharCode(c - 0xfee0),
+        'U+' + c.toString(16).toUpperCase() + ' が畳まれていない');
+      checked++;
+    }
+  });
+  assert.equal(checked, 10 + 26 + 26 + 1);
+  // 範囲外は触らない（特に `＿` ——これを畳むと www 規則の境界が壊れる）。
+  ['＿', '（', '）', '＠', '：', '。', '～'].forEach((ch) => {
+    assert.equal(fold(ch), ch, JSON.stringify(ch) + ' を畳んではならない');
+  });
+});
+
 test('P2J-S34: normalizer は**名前で**固定する（個数ではなく）', () => {
   // 独立検証11 F11-01。旧版は `TEXT_NORMALIZER_COUNT === 2` だけを見ていた。
   // 前回の diff は normalizer を 1 つ**削除して 1 つ追加**したので、
@@ -873,8 +960,8 @@ test('P2J-S37: dot 写像集合は**全員を個別に**押さえる', () => {
   //
   // 定数を読んで回すと定数を縮める変更に気づけないので、
   // P2J-TB19 と同じく**定数とは独立に**列挙する。
-  const EXPECTED_DOTS = ['。', '｡', '︒', '․', '﹒', '‧',
-                         '⸳', '·', '۔', '܁', 'ꓸ', '˙'];
+  // 基準（独立検証12 F12-04）: full stop は入れる / 中黒・高さ付きドットは除く。
+  const EXPECTED_DOTS = ['。', '｡', '︒', '․', '﹒', '۔', '܁', 'ꓸ'];
   EXPECTED_DOTS.forEach((ch) => {
     assert.equal(Evidence.DOT_EQUIVALENTS.indexOf(ch) !== -1, true,
       'dot 写像集合から U+' + ch.charCodeAt(0).toString(16).toUpperCase() + ' が消えている');
@@ -888,8 +975,11 @@ test('P2J-S37: dot 写像集合は**全員を個別に**押さえる', () => {
     '定数側にここで列挙していないメンバがある');
 
   // 除外しているものも固定する（行き過ぎの検出）。
-  ['・', '･'].forEach((ch) => {
-    assert.equal(Evidence.DOT_EQUIVALENTS.indexOf(ch), -1, '中黒を写像に入れてはならない');
+  // 除外側も全部固定する。U+00B7 と U+0387 は字形がほぼ同じなので、
+  // 片方だけ入れるのは基準が無いことの証拠だった（検証12 F12-04）。
+  ['・', '･', '·', '·', '‧', '⸳', '˙'].forEach((ch) => {
+    assert.equal(Evidence.DOT_EQUIVALENTS.indexOf(ch), -1,
+      '中黒・高さ付きドットを写像に入れてはならない: U+' + ch.charCodeAt(0).toString(16));
     assert.equal(Evidence.assertPublicSafeEvidenceText('PDF' + ch + 'doc形式で提出', 'prose'), true);
   });
 });

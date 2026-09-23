@@ -220,7 +220,22 @@
   // 中黒（U+30FB `・` / U+FF65）は**意図的に除外**する。
   // 「仕様・図面」のように散文の並列区切りとして普通に使われ、
   // `PDF・doc形式で提出` のような普通の技術文を落としてしまう。
-  var DOT_EQUIVALENTS = '\u3002\uff61\ufe12\u2024\ufe52\u2027\u2e33\u0387\u06d4\u0701\ua4f8\u02d9';
+  // 採用基準（独立検証12 F12-04 を受けて言い直した）:
+  //   **文末ピリオド類は入れる / 中黒・高さ付きドット類は入れない**。
+  //
+  // 旧基準は「ファイル名の拡張子区切りとして現れるか」だったが、
+  // 12 メンバ中 9 はそれを満たさない（縦書き提示形、ギリシャ文字等）。
+  // さらに U+0387（ギリシャの高さ付きドット）を入れながら
+  // 字形がほとんど同じ U+00B7 を除外しており、どちらの基準でも
+  // 実際の 12/2 の分け方を説明できていなかった——基準が
+  // 「`。` と `・` を分ける」だけのために逆算されていた。
+  //
+  // 今の基準は形式的に適用できる:
+  //   入れる: 。 ｡ ︒ ․ ﹒ ۔ ܁ ꓸ —— いずれも full stop
+  //   除く: ・ ･ · · ‧ ⸳ —— いずれも中黒・高さ付きドットで、
+  //         文中の並列区切りとして普通に使われる（`PDF・doc形式`）。
+  // U+02D9（上付き点）もドット類だが full stop ではないので除く。
+  var DOT_EQUIVALENTS = '\u3002\uff61\ufe12\u2024\ufe52\u06d4\u0701\ua4f8';
   function foldDotEquivalents(text) {
     var out = '';
     for (var i = 0; i < text.length; i++) {
@@ -256,11 +271,38 @@
     return out;
   }
 
+  // 不可視の書式制御文字を**削除**する。
+  //
+  // 独立検証12 F12-06。これまでの normalizer はすべて**置換**写像だったので、
+  // 文字を**挿入**する回避には原理的に届かなかった:
+  //   `www\u200b.example.com` / `https\u200b://…` / `tanaka\u200b@…` / `構造計算書.p\u200bdf`
+  // これは「集合の全員を押さえたか」では見つからない——
+  // 集合は完全だったが、**種類**が欠けていた。
+  // U+00AD や U+FEFF は Word / PDF / メーラからの貼り付けで**事故的に**入る。
+  var FORMAT_CHARS = /[\u00ad\u034f\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
+  function stripFormatChars(text) {
+    return text.replace(FORMAT_CHARS, '');
+  }
+
+  // Unicode 正規化（NFKC）。数学用英字等の astral lookalike
+  // （`\ud835\uddc0\ud835\uddc0\ud835\uddc0.example.com`）を ASCII へ戻す。
+  // 手書きの畳みでは追いきれない範囲なので、標準の写像を使う。
+  function foldCompatibility(text) {
+    try {
+      return text.normalize('NFKC');
+    } catch (e) {
+      return text;
+    }
+  }
+
   // この配列は**追加のみ単調**である。削除と差し替えは回帰しうる。
   // P2J-S34 は**どの normalizer が居るか**を名前で固定する——
   // 以前は個数（=== 2）しか見ておらず、削除と追加を同時にやると
   // 個数が変わらず **guard が黙って通した**（検証11 F11-01）。
-  var TEXT_NORMALIZERS = [foldFullwidthFilenameChars, foldFullwidthAscii, foldDotEquivalents];
+  // 集合は 3 つの**種類**を持つ: 置換写像 / 削除 / 標準正規化。
+  // 「全員を押さえたか」だけでは種類の欠落は見えない（検証12 F12-06）。
+  var TEXT_NORMALIZERS = [foldFullwidthFilenameChars, foldFullwidthAscii, foldDotEquivalents,
+                          stripFormatChars, foldCompatibility];
 
   // 拡張子集合は**ここが唯一の定義**である。
   // 消費側の一つは project-config/miyoshi.js の FILENAME_LIKE_CASE_ID_PATTERN
@@ -298,12 +340,19 @@
   // 正式案件名・機密名称等の非パターン文字列までは検出できない
   // （repository-wide review・Human reviewが別途必要）。
   var PUBLIC_UNSAFE_TEXT_PATTERNS = [
-    { name: 'url-scheme', pattern: /\b[a-z][a-z0-9+.-]*:\/\//i },
-    { name: 'www', pattern: /\bwww\./i },
+    // 左文脈のアンカー（`\b` / `(^|\s)`）は外してある（独立検証12 F12-01）。
+    // 日本語の散文は URL や path の前に空白を置かないので、
+    // `図面は/home/user/案件/最新版 に置いた` はアンカー付きでは**一度も発火しない**。
+    // 221 入力（13 payload × 17 配置）中 68 が通っていた。
+    // 最も痛いのは、この規則が `資料＿ｗｗｗ．…`（全角）を拒否しながら
+    // それが正規化された先の `資料_www.example.com` を通していたこと。
+    // 過剰拒否側のコスト（`showwww.` 等）は受け入れる——fail closed。
+    { name: 'url-scheme', pattern: /[a-z][a-z0-9+.-]*:\/\//i },
+    { name: 'www', pattern: /www\./i },
     { name: 'known-private-provider', pattern: /drive\.google|docs\.google|notion\.(so|com)|sharepoint|dropbox/i },
     { name: 'windows-absolute-path', pattern: /[A-Za-z]:\\/ },
     { name: 'unc-path', pattern: /\\\\[^\\\s]+\\[^\\\s]*/ },
-    { name: 'unix-home-or-absolute-path', pattern: /(^|\s)(~\/|\/Users\/|\/home\/|\/mnt\/)/ },
+    { name: 'unix-home-or-absolute-path', pattern: /(~\/|\/Users\/|\/home\/|\/mnt\/)/ },
     { name: 'opaque-long-token', pattern: /\b[A-Za-z0-9_-]{28,}\b/ },
 
     // ── Phase 2J Wave 5 で実測により追加 ───────────────────────
@@ -936,6 +985,8 @@
     foldFullwidthAscii: foldFullwidthAscii,
     foldFullwidthFilenameChars: foldFullwidthFilenameChars,
     foldDotEquivalents: foldDotEquivalents,
+    stripFormatChars: stripFormatChars,
+    foldCompatibility: foldCompatibility,
     DOT_EQUIVALENTS: DOT_EQUIVALENTS,
     TEXT_NORMALIZER_COUNT: TEXT_NORMALIZERS.length,
     isValidCheckedAt: isValidCheckedAt,

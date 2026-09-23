@@ -54,8 +54,23 @@ export function buildCorpus(extensionSource) {
   const out = [];
   STEMS.forEach((st) => DECORATIONS.forEach((dc) => DOTS.forEach((d) =>
     extForms.forEach((ef) => TRAILING.forEach((tr) => out.push(st + dc + d + ef + tr))))));
+  // Left context is its own axis. The first version of this file emitted each
+  // core at string start, after a space, and after a fullwidth character — all
+  // three of which are favourable to the `\b` and `(^|\s)` anchors the rules
+  // used to carry. Independent review 12 (F12-01) found a live bypass there and
+  // noted that this corpus reproduced the blind spot exactly.
+  const LEFT_CONTEXTS = ['', ' ', '資料_', '検討2', 'a', 'Z', '_', '9',
+    '図面は', '参考:', '（', '「', '資料＿', '一次資料-', '添付.', 'x/'];
   RULE_CORES.forEach((core) => {
-    out.push(core, fw(core), '資料＿' + fw(core), '前置き ' + core);
+    LEFT_CONTEXTS.forEach((pre) => { out.push(pre + core, pre + fw(core)); });
+  });
+  // Invisible format characters and compatibility lookalikes: normalization
+  // kinds, not members (F12-06).
+  const INVISIBLE = ['\u200b', '\u00ad', '\ufeff', '\u2060', '\u200c'];
+  RULE_CORES.forEach((core) => {
+    INVISIBLE.forEach((ch) => {
+      if (core.length > 4) out.push(core.slice(0, 3) + ch + core.slice(3));
+    });
   });
   PROSE.forEach((t) => { out.push(t, fw(t)); });
   return out;

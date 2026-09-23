@@ -905,3 +905,35 @@ Evidence protected state : verifiedCases [] / promotion NONE /
 Human Gate 送り: QD-J06 / QD-J10 / QD-J11 / QD-J12。Wave 7 は blocked。
 ```
 
+## Wave 6l final state（独立検証12 の修理 / D-045）
+
+```text
+npm                        : 642 pass / 0 fail
+browser                    : 62 checks / 0 fail
+parser boundary            : 42形 / bypass 0
+mutation                   : 9/9 KILLED（この 9 件について。網羅の主張ではない）
+protected values           : 5件すべて一致
+validateAllEvidence()      : []
+Implementation verification head : **未確定**（13 回目の独立検証が必要 / §44・§47）
+```
+
+### この Wave で確定したこと
+
+```text
+- 3 規則の左文脈アンカーを外した。日本語の散文では実質発火していなかった
+- normalizer に**種類**を追加（削除 / 標準正規化）。
+  メンバシップの test は種類の欠落を検査できない
+- dot 集合の基準を full stop / 中黒の軸へ言い直し、除外側も固定した
+- guard-diff corpus に左文脈軸と不可視文字軸を追加
+- D-044 の「14/14 KILLED」は 13/14 だった。R11-02 は死んだコードの変異で、
+  原理上殺せない。訂正済み
+```
+
+### 変わっていないこと
+
+```text
+Evidence protected state : verifiedCases [] / promotion NONE /
+                           1250×2050 sample_default unverified / V0 34 / roughness III
+Human Gate 送り: QD-J06 / QD-J10 / QD-J11 / QD-J12。Wave 7 は blocked。
+```
+
