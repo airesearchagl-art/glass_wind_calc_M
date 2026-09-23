@@ -611,3 +611,124 @@ verifier の観測: closure 側の gate だけを外しても slot は BLOCKED �
 
 これは設計意図（D-014 / D-015）どおりであり、修理対象ではない。
 単一のガードだけを読んで「ここを通れば終わり」と判断できないことの裏取りとして記録する。
+
+## D-030 — Wave 6 再検証: F1 は自分の修理が意図を裏返していた
+
+`978ab6b` に対する独立再検証は **PASS WITH FINDINGS**
+（Hard Gate 0 / Required Fix 0 / Advisory 1 / Info 3）。
+verifier は7つの wave commit すべてのテスト数も独立に再実行して一致を確認している
+（500 / 518 / 557 / 581 / 600 / 616 / 619）。
+
+### F1（修理した）— 「属性の形だけ拒否」は逆転していた
+
+再現（自分で確認）:
+
+```text
+<img src=x onerror=alert(1)>   REJECTED
+<img src=x onerror=alert`1`>   **ACCEPTED**   ← バッククォートだけの差
+<script "q"> <script =v> <img 1=2> <img -x=1> <img .x=1>
+<img x=1 2> <img x=`v`> <img x=a'b> <img x=a"b> <iframe 0x=1>  すべて ACCEPTED
+```
+
+Wave 6 の最初の修理は「タグ本体が**属性の形をしている**ものだけ拒否する」
+と書いた。これは意図を裏返している。属性の文法に**合わない**本体は
+どれも一致せずに素通りするため、**崩れたタグほど通る**。
+verifier の計測では 808形中 308が accept、うち約288が旧パターンからの後退だった。
+
+A1 の誤検知（`W<H かつ P>Q である。`）を直そうとして、
+その場しのぎに「正しいタグの形」を列挙したのが原因である。
+列挙は必ず漏れる側が緩くなる。
+
+### 正しい線引きに置き換えた
+
+本ガードの誤検知リスクは「ASCII変数名を使う**日本語の技術散文**」である。
+散文の本体には日本語が入り、タグの本体には入らない。そこで:
+
+```text
+タグ形の開き括弧は、**本体に日本語が含まれない限り**拒否する
+```
+
+```text
+<H かつ P>Q            本体に「かつ」   → 散文として通す
+<img src=x onerror=…>  本体に日本語なし → タグとして拒否（書式を問わない）
+5<Z<40                 `>` で閉じない   → 通す
+```
+
+本体の書式を問わないので、崩れたタグも同じ規則で落ちる。
+入れ子の量指定子も消えるため、verifier が計測した backtracking の論点は
+**構造的に無くなった**（再検証は旧形も線形で実害なしと結論していたが、
+形そのものを無くせるなら無くすほうがよい）。
+
+トレードオフは明示する: `<T 日本語>` のような日本語入りタグ形は散文として通る。
+privacy境界としては許容する（日本語を含む時点で機械的な運搬体ではない）。
+
+### 副次的に F2 の一部も閉じた
+
+`<svg/onload=1>` / `<img/src=x onerror=alert(1)>` は区切りが `/` のため
+旧パターンも新パターンも取りこぼしていた。今回 `[\s\/]` を区切りに含めたことで閉じた。
+`<!--` / `<!DOCTYPE` / `<?xml` / `<![CDATA[` は別クラス
+`markup-construct` として追加した。`-->` は技術散文の矢印（`A --> B`）と
+衝突するため**入れない**（S20 で固定）。
+
+### テストの穴も塞いだ
+
+verifier の指摘どおり、P2J-S18 が固定していた12例は**崩れた形を1つも含んでいなかった**。
+素通りしていた11形と `/` 区切り2形を S18 に追加し、
+markup構文を S20、backtracking を S21 で固定した。
+
+mutation 6件（いずれも挙動変化を先に確認）:
+
+```text
+W7-01 F1の「属性の形だけ」へ戻す     tick=ACCEPTED → KILLED (S18)  ← 新S18が効いている
+W7-02 元の広すぎる形へ戻す           prose=REJECTED → KILLED (S17)
+W7-03 タグ判定を無効化               すべてACCEPTED → KILLED (S01)
+W7-04 CJK除外を外す                  prose=REJECTED → KILLED (S17)
+W7-05 markup構文クラスを無効化       doctype=ACCEPTED → KILLED (S20)
+W7-06 markup構文に `-->` を含める    arrow=REJECTED → KILLED (S20)
+```
+
+## D-031 — F2 / F3 / F4 の扱い
+
+### F2（Info / 一部のみ対応）
+
+`<svg/onload=1>` `<img/src=x …>` `<!--` `<!DOCTYPE` `<?xml` `<![CDATA[` は
+上記 F1 修理の副産物として閉じた。
+
+**残す**もの:
+
+```text
+&lt;script&gt;   entity encode。散文が「エスケープの説明」で書く可能性があり、
+                 拒否すると誤検知側の実害が出る
+< b>  </ b>      `<` の直後が空白。タグの形というより散文の形である
+```
+
+いずれも verifier が「旧パターンでも通っていた（regression ではない）」と
+分類したものであり、DOM側は `textContent` / `createElement` で別に守られている。
+
+### F3（Info / **修理しない**）— `ProjectProfile.createProfile` の継承field消費
+
+再現は verifier が示したとおり:
+`createProfile(Object.create({label, windDefaults}))` が受理される。
+`assertAllowedKeys` が `Object.keys` ベースなので空虚に真になり、
+`input.windDefaults` が prototype chain から読まれる。
+
+**修理しない理由**:
+
+```text
+- Phase 2H の API であり、Phase 2J の entry point ではない
+- trust elevation も値の注入も起きない（結果は user_input_unverified の素のobject。
+  攻撃者が直接渡せる値と同じものしか得られない）
+- custom-prototype の windDefaults 自体は拒否される
+- packet §46 が「scope を無関係な refactor へ広げない」と明示している
+```
+
+これは Wave 1 で名付けた inherited-field consumption と**同じクラス**である。
+現時点で到達可能な害は無いが、クラスとしては残っている。
+QUALITY_DEBT へ再現手順付きで記録し、将来phaseで
+`assertOrdinaryObject` を Phase 2H 側の入口にも適用する候補とする。
+「無害だから無い」ことにはしない。
+
+### F4（修理した）— RUN_MANIFEST の Wave 順序
+
+「Wave別の変更ファイル」ブロックで Wave 6 が Wave 5 より前に並んでいた。
+体裁のみだが、監査証跡は読み順が意味を持つので直した。

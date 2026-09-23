@@ -69,3 +69,60 @@ prototype boundary / verifiedCasesの変更 / 計算regression
 Phase 2Fから引き継ぐ Explicit unverified items 4件は Quality Debt ではない。
 一次資料が提供されるまで構造的に解消できない外部依存であり、
 Phase 2J はそれを**閉じる**phaseではなく、**閉じる条件を機械可読にする**phaseである。
+
+## QD-J02 — `ProjectProfile.createProfile` が継承fieldを消費する（Wave 6 再検証 F3）
+
+```text
+再現:
+  ProjectProfile.createProfile(Object.create({ label: 'x', windDefaults: <valid> }))
+  → ACCEPTED
+
+機序:
+  assertAllowedKeys(input, ['label','windDefaults']) は Object.keys ベースなので
+  継承keyを見ず**空虚に真**になり、input.windDefaults が prototype chain から読まれる。
+  createProfile は assertOrdinaryObject を呼んでいない
+  （呼んでいるのは assertRuntimeProfile 側だけ）。
+```
+
+これは Wave 1 で名付けた **inherited-field consumption** と同じクラスである。
+
+### 現時点で到達可能な害は無い（実測）
+
+```text
+- trust elevation なし: 結果は verificationStatus 'user_input_unverified' のまま
+- 値の注入なし        : 得られるのは呼び出し側が直接渡せる値と同じもの
+- custom-prototype の windDefaults 自体は拒否される
+- deserializeProfile は生JSON段階で FORBIDDEN_RAW_KEYS により
+  own "__proto__" / "constructor" / "prototype" を拒否する
+```
+
+### Phase 2J で修理しない理由
+
+```text
+- Phase 2H の API であり Phase 2J の entry point ではない
+- packet §46 が「scope を無関係な refactor へ広げない」と明示している
+- 独立検証も Info（Hard Gate でも Required Fix でもない）と分類している
+```
+
+**無害だから存在しない、ことにはしない。** クラスとしては残っているため、
+将来phaseで `assertOrdinaryObject` を Phase 2H 側の入口
+（`createProfile` の `input`）にも適用する候補として記録する。
+QD-J01 の統合案と同じ方向であり、まとめて扱えるとよい。
+
+## QD-J03 — public-safe prose ガードに残る既知の穴（Wave 6 再検証 F2 の残り）
+
+```text
+&lt;script&gt;   entity encode 形
+< b>  </ b>      `<` の直後が空白
+```
+
+いずれも旧パターンでも通っていた（Wave 6 の変更による後退ではない）。
+
+**塞いでいない理由**: entity形は散文が「エスケープの説明」として書く可能性があり、
+拒否すると誤検知側の実害が出る。`< b>` はタグの形というより散文の形である。
+
+本ガードは **known-pattern detector** であり、
+非パターンの私的名称（正式案件名・人名）は原理的に検出できない
+（`evidence.js` のコメントに明記）。DOM側は `textContent` / `createElement` で
+別に守られており、Production UI に Observation 投入経路は存在しない。
+公開前の repository privacy scan と Human review は引き続き必要である。

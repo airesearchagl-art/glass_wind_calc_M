@@ -47,7 +47,8 @@ expected : >= 500 / 0 fail  → 一致
 | 3 | Closure Evaluation / Promotion Candidate | `707b0aac8eb173641e04d59080676ec381cb0686` | 581 / 0 |
 | 4 | Evidence Request Matrix（read-only UI） | `4dfafae93628d0bf3674a05467bafd860ac3bef4` | 600 / 0 + browser 34 / 0 |
 | 5 | security / privacy / trust / prototype | `1784fe3a72c2d038d74a8cc48ed1f3119cabd1fc` | 616 / 0 + browser 34 / 0 |
-| 6 | Stage A regression / 独立検証 / 修理 | `RESOLVE_DYNAMICALLY` | 619 / 0 + browser 62 / 0 |
+| 6 | Stage A regression / 独立検証 / 修理 | `978ab6b60bc4952dca8aaafbe589abe971de4dc3` | 619 / 0 + browser 62 / 0 |
+| 6b | 再検証F1 の修理（タグ判定の置換） | `RESOLVE_DYNAMICALLY` | 621 / 0 + browser 62 / 0 |
 
 ## Wave別の変更ファイル
 
@@ -69,14 +70,16 @@ Wave 4: index.html                        （evidence-closure.js配線 / Matrix 
         tests/evidence-closure-ui.test.js （新規）
         tests/ui-mode-separation.test.js  （F10の参照先を renderPhase2FEvidencePanels へ更新）
 
-Wave 6: project-config/evidence.js              （A1: html-like-tag を属性形に限定）
-        tests/evidence-closure-security.test.js（A1回帰 S17/S18/S19 を追加）
-        .agent-run/.../RUN_STATE.md            （A2: 生の制御バイトを表記へ置換）
-        .agent-run/.../QUALITY_DEBT.md         （A3: QD-J01 の記述を訂正）
-        index.html                             （**変更なし**）
-
 Wave 5: project-config/evidence.js              （PUBLIC_UNSAFE_TEXT_PATTERNS に4クラス追加）
         tests/evidence-closure-security.test.js（新規）
+        index.html                             （**変更なし**）
+
+Wave 6: project-config/evidence.js              （A1 → 再検証F1 を経て、タグ判定を
+                                                「本体に日本語が無いタグ形を拒否」へ置換。
+                                                 markup-construct クラスを追加）
+        tests/evidence-closure-security.test.js（S17-S21。S18に「崩れた形」を追加）
+        .agent-run/.../RUN_STATE.md            （A2: 生の制御バイトを表記へ置換）
+        .agent-run/.../QUALITY_DEBT.md         （A3: QD-J01 訂正 / F3 を debt 化）
         index.html                             （**変更なし**）
 
 ブラウザ検証（Chromium / file://）はrepositoryに常設していない。

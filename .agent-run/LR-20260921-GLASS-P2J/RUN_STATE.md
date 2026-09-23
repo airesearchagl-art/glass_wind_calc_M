@@ -10,7 +10,7 @@
 - Base SHA: 44e4032a2fb3bd3a48bab04d3a5a76c5a6a912eb
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 6 — exact-head regression / 独立検証 / 修理 完了（再検証待ち）
+- Current wave: Wave 6 — 独立再検証まで完了 / F1再修理済み（再々検証待ち）
 - Task Packet ID: LRP-20260921-GLASS-P2J
 - Task Packet revision: 1
 - Task Packet SHA-256: aa9ce07dac4767afc0ad9ff4b13663ae8cc2ab1be98e9e44ef80498da3acc446
@@ -123,7 +123,52 @@ mutation 5件: M1/M2/M3/M5 は KILLED。M4（`hasOwnProperty`→`in`）は **SUR
 §29 の「inherited-field defectが見つかったらWave 2の前にFIXする。
 さもなくばWave 1はBLOCKED」は満たしている。
 
-## Wave 6 結果（Stage A → 独立検証 → 修理）
+## Wave 6 再検証結果（head 978ab6b）と F1 再修理
+
+```text
+独立再検証 verdict : PASS WITH FINDINGS
+                     Hard Gate 0 / Required Fix 0 / Advisory 1 / Info 3
+                     npm 619/0（独立実測）/ browser 78 assertions 0 fail（独自harness）
+                     probes 14 KILLED / 0 SURVIVED / 0 HARNESS ERROR
+                     R1 / R2 / R3 いずれも CONFIRMED REPAIRED
+                     wave commit 7点のテスト数も独立検証（すべて一致）
+```
+
+### F1: 自分の修理が意図を裏返していた（再修理した）
+
+```text
+<img src=x onerror=alert(1)>   REJECTED
+<img src=x onerror=alert`1`>   ACCEPTED   ← バッククォートだけの差
+```
+
+Wave 6 の最初の修理は「タグ本体が**属性の形**のものだけ拒否」と書いた。
+属性文法に合わない本体は素通りするため、**崩れたタグほど通る**逆転が起きていた
+（verifier計測: 808形中308が accept、うち約288が後退）。
+
+誤検知を直そうとして「正しいタグの形」を列挙したのが原因である。
+列挙は必ず漏れる側が緩くなる。線引きを置き換えた:
+
+```text
+タグ形の開き括弧は、**本体に日本語が含まれない限り**拒否する
+```
+
+書式を問わないので崩れたタグも同じ規則で落ちる。
+入れ子の量指定子も消え、backtracking の論点は構造的に無くなった。
+
+### F2 / F3 / F4
+
+```text
+F2 Info : `/`区切り形と markup構文（<!-- <!DOCTYPE <?xml <![CDATA[）は F1修理で閉じた
+          entity形 と `< b>` は残す（誤検知側の実害が大きい）→ QD-J03 に記録
+F3 Info : ProjectProfile.createProfile の継承field消費。Phase 2H の API であり
+          trust elevation も値注入も無いため §46 に従い修理しない → QD-J02 に記録
+F4 Info : RUN_MANIFEST の Wave 順序（Wave 6 が Wave 5 より前）→ 修正した
+```
+
+F3 は Wave 1 で名付けたクラスと同じものである。
+**無害だから存在しない、ことにはしない**ため、再現手順付きで debt 化した。
+
+## Wave 6 Stage A / 初回検証（head 1784fe3）
 
 ```text
 Stage A（exact head 1784fe3、repository無変更）:
@@ -327,7 +372,18 @@ distinct mutants 16 / KILLED 16 / SURVIVED 0 / PATCH-MISS 0
 真の last-one-wins と first-one-wins を別々に実装して再実行した。
 詳細と訂正の記録は EVIDENCE.md §9。
 
-## Wave 6 final state（再検証待ち）
+## Wave 6 final state（再々検証待ち）
+
+```text
+再修理後 head              : RESOLVE_DYNAMICALLY（本コミット）
+再修理後 npm               : 621 pass / 0 fail
+再修理後 browser           : 62 checks / 0 fail
+protected values           : 5件すべて一致
+validateAllEvidence()      : []
+Implementation verification head : **未確定**（新headでの再検証が必要 / §44・§47）
+```
+
+## Wave 6 初回 final state
 
 ```text
 Stage A head               : 1784fe3a72c2d038d74a8cc48ed1f3119cabd1fc（無変更で測定）
@@ -436,17 +492,21 @@ Wave 6再検証 → Wave 7（TASK_QUEUE.md参照）
 
 ## Next action
 
-修理後の**新しい exact head** に対する独立再検証（§44）。
+F1 再修理後の**新しい exact head** に対する独立再々検証（§44）。
 
 ```text
 - 実装セッションは自己認証しない
-- 再検証は新headを対象に、別コンテキストで行う
-- 重点: A1修正が広すぎず狭すぎないこと（S17 / S18 / S01 の両側固定）
-        A2/A3 が artifact の記述のみの変更で、挙動に影響していないこと
+- 重点: タグ判定の置換が
+    (a) 崩れたタグ形を取りこぼさないこと（F1の再発が無いこと）
+    (b) 日本語の技術散文を巻き込まないこと
+    (c) markup構文クラスが矢印 `-->` を巻き込まないこと
+  を、S17 / S18 / S20 / S21 が5方向から固定できているか
+- F3（QD-J02）を debt に留めた判断が妥当か
 - 再検証が閉じてから §47 の implementation verification head を確定する
 ```
 
-再検証が PASS になるまで Wave 7（README / Draft PR / convergence）へ進まない。
+同じ箇所を2度直している（A1 → F1）ため、3度目が無いことを特に確かめる。
+再検証が PASS になるまで Wave 7 へ進まない。
 
 実案件の状態は変わらない:
 `BLOCKED_BY_MISSING_EVIDENCE` / promotion `NONE` / `verifiedCases: []` /

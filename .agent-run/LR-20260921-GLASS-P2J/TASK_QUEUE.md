@@ -35,12 +35,12 @@
 | AC-J16 | trust spoof rejection | PASS | Observation側に加えcandidate側のfield（candidateStatus/notApplied/gateSummary等）も拒否（P2J-S07 / W5-14） |
 | AC-J17 | current verifiedCases unchanged | PASS | `[]` のまま。P2J-TB16で固定 |
 | AC-J18 | current preset status unchanged | PASS | W/H/圧力/V0=34/粗度IIIすべて不変。P2J-TB16で固定（D-006） |
-| AC-J19 | calculation regressionなし | PASS（Wave 6時点） | 619 pass / 0 fail。保護値5件を修理前後で直接再測定 |
+| AC-J19 | calculation regressionなし | PASS（Wave 6b時点） | 621 pass / 0 fail。保護値5件を再修理後も直接再測定 |
 | AC-J20 | Review/Batch/Profile regressionなし | PASS（Wave 5時点） | Phase 2F〜2Iの既存suiteを無改変のまま全緑 |
 | AC-J21 | actual evidence availabilityを正直に記録 | PASS | 開発セッションの調査結果（UNAVAILABLE）はRun Artifactに残し、UIにはruntime真実（Observation 0件）だけを出す（D-021 / P2J-U19） |
 | AC-J22 | private evidence unavailableならpromotion NONE | PASS | UI実測で candidate「なし」/ 0 of 12 / 0 of 4 / 0 of 8 |
 | AC-J23 | README/documentation sync | PENDING | |
-| AC-J24 | independent verifier | 部分PASS | Stage B は別コンテキストで read-only 実施。PASS WITH FINDINGS（Hard Gate 0）。指摘3件を修理済み。**新headでの再検証が未完** |
+| AC-J24 | independent verifier | 部分PASS | 2回実施（1784fe3 / 978ab6b）。いずれも PASS WITH FINDINGS・Hard Gate 0。指摘はすべて再現後に対応（F3はdebt化）。**再修理後headでの再々検証が未完** |
 | AC-J25 | Draft PR / Human Gate STOP | PENDING | |
 
 ## Next Action

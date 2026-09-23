@@ -839,3 +839,58 @@ project state   : BLOCKED / 0 of 12 / 0 of 4 / 0 of 8 / candidate null
                   verifiedCases [] / V0 34 / roughness III
 RUN_STATE.md    : UTF-8 text（git が行単位で差分を取れる状態へ復帰）
 ```
+
+## §33 — Wave 6 独立再検証（head `978ab6b`）
+
+```text
+verdict : PASS WITH FINDINGS
+findings: Hard Gate 0 / Required Fix 0 / Advisory 1（F1）/ Info 3（F2・F3・F4）
+npm     : 619 pass / 0 fail（独立実測）
+browser : VERIFIED — 独自harness 78 assertions / 0 fail / page error 0 / console error 0
+probes  : 14 KILLED / 0 SURVIVED / 0 EQUIVALENT / 0 PATCH-MISS / 0 HARNESS ERROR
+R1/R2/R3: いずれも CONFIRMED REPAIRED
+```
+
+verifier は wave commit 7点すべてを checkout してテスト数を独立検証した
+（500 / 518 / 557 / 581 / 600 / 616 / 619 すべて一致）。
+また自分の probe 6 が挙動差を出していなかったことを自己開示し、
+probe を直してから分類し直している（harness error を kill に数えていない）。
+
+### F1 の再現（自分で確認してから修理した）
+
+```text
+<img src=x onerror=alert(1)>   REJECTED
+<img src=x onerror=alert`1`>   ACCEPTED   ← バッククォートだけの差
+<script "q"> / <script =v> / <img 1=2> / <img -x=1> / <img .x=1> /
+<img x=1 2> / <img x=`v`> / <img x=a'b> / <img x=a"b> / <iframe 0x=1>
+すべて ACCEPTED（旧パターンでは REJECTED だった＝後退）
+```
+
+原因は Wave 6 の修理が「属性の形をしたタグだけ拒否」という**列挙**になっていたこと。
+列挙は漏れる側が緩くなる。「本体に日本語が無いタグ形は書式を問わず拒否」へ置換した。
+
+## §34 — Wave 6 再修理後の実測
+
+```text
+npm test        : 621 pass / 0 fail（619 → +2）
+browser         : 34 + 8 + 10 + 10 = 62 checks / 0 fail
+protected values: 5件すべて一致
+validateAllEvidence(): []（現行11件すべて通過）
+project state   : BLOCKED / 0 of 12 / 0 of 4 / 0 of 8 / candidate null
+                  verifiedCases [] / V0 34 / roughness III
+```
+
+### タグ判定の mutation（6件・すべて挙動変化を先に確認）
+
+```text
+W7-01 F1の「属性の形だけ」へ戻す   KILLED (P2J-S18)  ← 拡張したS18がF1を捕まえる
+W7-02 元の広すぎる形へ戻す         KILLED (P2J-S17)
+W7-03 タグ判定を無効化             KILLED (P2J-S01)
+W7-04 CJK除外を外す                KILLED (P2J-S17)
+W7-05 markup構文クラスを無効化     KILLED (P2J-S20)
+W7-06 markup構文に `-->` を含める  KILLED (P2J-S20)
+```
+
+広すぎれば S17、崩れた形が漏れれば S18、無効化すれば S01、
+markup構文が漏れれば S20、矢印を巻き込めば S20 が落ちる。
+5方向から固定されている。

@@ -514,18 +514,61 @@ test('P2J-S17: タグ判定はドメイン変数を使った不等式散文を�
   });
 });
 
-test('P2J-S18: 属性の形をしたタグは引き続き拒否される', () => {
-  // A1 の修正で緩めすぎていないことを固定する。
-  // 「タグ本体に属性の形をした内容だけを許す」という線引きが効いていること。
-  const mustReject = [
-    '<b>x</b>', '</b>', '<script>x</script>', '</script>',
+test('P2J-S18: タグ形の内容は、本体の書式が崩れていても拒否される', () => {
+  // 独立再検証 F1 の回帰。最初の修理は「本体が**属性の形**のものだけ拒否」
+  // という書き方で、意図を裏返していた。属性文法に合わない本体は素通りし、
+  // **崩れたタグほど通る**という逆転が起きていた:
+  //   <img src=x onerror=alert(1)>  拒否
+  //   <img src=x onerror=alert`1`>  素通り  ← バッククォートだけの差
+  // 現在は「本体に日本語が無いタグ形」を書式を問わず拒否する。
+  const wellFormed = [
+    '<b>x</b>', '</b>', '<script>x</script>', '</script>', '<script src="x">',
     '<img src=x onerror=1>', '<img src="x" onerror="alert(1)">',
-    '<svg onload=1>', '<iframe src="javascript:1">',
-    '<a href="#">y</a>', '<div class="a b">', '<input disabled>', '<BR/>'
+    '<svg onload=1>', '<iframe src="javascript:1">', '<iframe srcdoc="x">',
+    '<a href="#">y</a>', '<div class="a b">', '<input disabled>', '<BR/>', '<br />',
+    '<META charset=utf8>', '<a\nhref=x>', '<b\tid=y>'
   ];
-  mustReject.forEach((s) => {
+  // F1 が素通りさせていた「崩れた」形。ここが空だと穴が再発しても気付けない。
+  const malformed = [
+    '<img src=x onerror=alert`1`>', '<script "q">', '<script =v>',
+    '<img 1=2>', '<iframe 0x=1>', '<img -x=1>', '<img .x=1>',
+    '<img x=1 2>', '<img x=`v`>', "<img x=a'b>", '<img x=a"b>'
+  ];
+  // 区切りが空白ではなく `/` の形（旧パターンも取りこぼしていた）
+  const slashForms = ['<svg/onload=1>', '<img/src=x onerror=alert(1)>'];
+
+  [].concat(wellFormed, malformed, slashForms).forEach((s) => {
     assert.throws(() => Evidence.assertPublicSafeEvidenceText(s, 'prose'),
       /matched known-unsafe pattern: html-like-tag/, s);
+  });
+});
+
+test('P2J-S20: タグ以外のmarkup構文も拒否される', () => {
+  ['<!--comment-->', '<!DOCTYPE html>', '<?xml version="1" ?>', '<![CDATA[x]]>']
+    .forEach((s) => {
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(s, 'prose'),
+        /matched known-unsafe pattern: markup-construct/, s);
+    });
+  // `-->` 単体は技術散文の矢印と衝突するため対象にしない
+  assert.equal(Evidence.assertPublicSafeEvidenceText('A --> B の順で確認した', 'prose'), true);
+  assert.equal(Evidence.assertPublicSafeEvidenceText('P -> Q と表記する', 'prose'), true);
+});
+
+test('P2J-S21: タグ判定に入れ子の量指定子が無い（backtracking懸念の構造的解消）', () => {
+  // 再検証は旧パターンの入れ子量指定子を計測し「線形・実害なし」と結論したが、
+  // 現在の形はそもそも入れ子量指定子を持たない（否定文字クラス1つ）。
+  // 病的入力でも線形であることを実測で固定する。
+  const shapes = [
+    '<a ' + 'b='.repeat(20000) + '!',
+    '<a' + ' b=c'.repeat(20000) + '!',
+    '<a' + ' '.repeat(50000),
+    '<a b=c '.repeat(20000)
+  ];
+  shapes.forEach((s) => {
+    const t0 = Date.now();
+    try { Evidence.assertPublicSafeEvidenceText(s, 'prose'); } catch (e) { /* どちらでもよい */ }
+    const ms = Date.now() - t0;
+    assert.equal(ms < 1000, true, 'len=' + s.length + ' took ' + ms + 'ms');
   });
 });
 
