@@ -216,8 +216,17 @@
     '[^\\s<>"\'(),;:\uff1a\u3001\u3002\u300c\u300d\u300e\u300f]{1,120}\\.('
     + PRIVATE_DOCUMENT_EXTENSION_SOURCE + ')(?![A-Za-z0-9])', 'i');
 
+  // 畳んだテキスト**だけ**を見ると、畳みが逆に拒否を潰すケースがある。
+  // 例: `構造計算書.pdfＡ` は畳む前なら `(?![A-Za-z0-9])` が `Ａ` を見て
+  // 拒否できるが、畳むと `A` になり lookahead が失敗して通ってしまう
+  // （独立検証7 F7-03。D-039 で畳み範囲を狭めてもこのクラスは残っていた）。
+  //
+  // よって**両方**を見る。拒否集合が和になるので、畳みは
+  // 「拒否を増やすだけ」になり、決して減らせない（P2J-S29 で固定）。
+  // これがないと、畳みの範囲をいじるたびに「直したつもりで隣を壊す」が再発する。
   function containsPrivateDocumentFilename(text) {
-    return PRIVATE_DOCUMENT_FILENAME.test(foldFullwidthFilenameChars(text));
+    return PRIVATE_DOCUMENT_FILENAME.test(text) ||
+           PRIVATE_DOCUMENT_FILENAME.test(foldFullwidthFilenameChars(text));
   }
 
   // public-safe boundary（RF-02）: publicDescription（および将来

@@ -388,3 +388,50 @@ deep freeze するなら entry 単位で freeze すること。
 描画から黙って消える**。要素は生まないので DOM 安全性の問題ではなく、
 描画の欠落（読み手が記述を見失う）の問題である。privacy クラスとは無関係。
 
+## QD-J10 — caseId の filename-like 検査があるのは空の経路だけ（検証7 F7-04 / Human Gate）
+
+D-039 F3 で `PRIVATE_DOCUMENT_EXTENSION_SOURCE` を単一化し、
+`miyoshi.validateVerifiedCase` の caseId 検査を直した。それ自体は正しい。
+しかし**その validator が守っている `verifiedCases` は空配列**である。
+
+実際に export package へ到達する caseId は別の経路を通る:
+
+```text
+workspace.js        assertCaseId          → filename-like の検査 **無し**
+project-profile.js  SCENARIO_ID_PATTERN   → 同じパターン、検査 **無し**
+review-package.js   REVIEW_CASE_KEYS に caseId を含み、伏せるのは label のみ
+                    → privacyMode:'redacted' でも caseId はそのまま出る
+```
+
+自己実測（workspace.assertCaseId）:
+
+```text
+  ACCEPT  plan_jww          ← D-039 F3 が「閉じた」と書いたまさにその例
+  ACCEPT  plan_pdf          ← 拡張子を広げる前の一覧ですら検査されない
+  ACCEPT  A-102_dwg
+  ACCEPT  structural_xlsx
+```
+
+つまり問題は「片方だけ拡張した」ではなく、**もともと検査の無い経路がある**ことである。
+
+### 本Phase で直さない理由
+
+```text
+- workspace.js は「Evidence を持たない」ことを明示的な契約としているモジュールであり、
+  evidence.js への依存を足すのはその契約を破る
+- こちらは**空ではない経路**であり、検査を追加すると
+  既存の保存済み workspace（caseId が `plan_pdf` 等）が読めなくなる
+- よって「拒否を強めるのだから packet 変更不要」とは言えない——
+  ユーザデータの互換性を壊す変更である
+- §46（scope を広げない）
+```
+
+Human Gate の判断材料として残す。選択肢は
+(a) workspace/profile 側にも同じ検査を入れる（既存データの移行が必要）、
+(b) review-package.js の export 境界でだけ拒否または伏せる、
+(c) caseId を redacted モードで伏せる。
+
+なお `miyoshi.js` 側の根拠コメント（「caseId は export package にそのまま出る」）は
+一般論としては真だが、**この validator がその経路を守っていると読めてしまう**ので、
+誤読を防ぐ注記をコード側に入れた。
+

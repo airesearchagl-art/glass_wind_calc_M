@@ -742,3 +742,34 @@ Evidence protected state : verifiedCases [] / promotion NONE /
 Wave 7 は引き続き blocked——§44 により実装セッションは自己認定できない。
 ```
 
+## Wave 6g final state（独立検証7 の修理 / D-040）
+
+```text
+npm                        : 630 pass / 0 fail
+browser                    : 62 checks / 0 fail（tools/browser-checks/ へ commit 済み）
+parser boundary            : 42形 / bypass 0 / over-rejection 7（fail-closed）
+mutation                   : 5/5 KILLED（すべて 54b15a7 時点では生存）
+protected values           : 5件すべて一致
+validateAllEvidence()      : []
+Implementation verification head : **未確定**（8 回目の独立検証が必要 / §44・§47）
+```
+
+### この Wave で確定したこと
+
+```text
+- 畳みは「拒否を増やすだけ」という形へ構造的に変えた（union / P2J-S29）
+- 畳み 4 枝のうち未固定だった 2 枝を corpus へ追加
+- caseId 規則の `i` / `$` を固定
+- 反証不能だった `224/224` をグリッド定義付き 368/368 へ訂正
+- browser harness を repository へ commit（「62 checks」が初めて検算可能に）
+- QD-J10 を新設: caseId の検査があるのは空の経路だけ（Human Gate）
+```
+
+### 変わっていないこと
+
+```text
+Evidence protected state : verifiedCases [] / promotion NONE /
+                           1250×2050 sample_default unverified / V0 34 / roughness III
+Wave 7 は引き続き blocked。
+```
+

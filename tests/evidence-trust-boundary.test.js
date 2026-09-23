@@ -401,11 +401,24 @@ test('P2J-TB19: caseId の filename-like 判定は evidence.js の拡張子集�
   control.caseId = 'SYNTB19';
   assert.equal(MiyoshiProjectConfig.validateVerifiedCase(control), true);
 
+  // 大文字・混合形も見る。独立検証7 F7-02: 旧テストは小文字のみだったため、
+  // 規則から `i` フラグを外す変異が 629/0 で生き残っていた。
+  // 図面番号は慣習的に大文字なので、`PLAN_PDF` の方が現実にはありうる。
   exts.forEach((ext) => {
+    [ext, ext.toUpperCase(), ext.charAt(0).toUpperCase() + ext.slice(1)].forEach((form) => {
+      const c = synVerifiedCase();
+      c.caseId = 'SYN_' + form;
+      assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(c),
+        /caseId/, 'filename-like caseId が通った: ' + c.caseId);
+    });
+  });
+
+  // `$` アンカーを固定する。末尾でない `_pdf` はファイル名らしくないので通る。
+  // これが無いとアンカーを外す変異（= 過剰拒否）を検知できない。
+  ['SYN_pdf_x', 'SYN_dwg_rev2', 'PDF_SYN'].forEach((id) => {
     const c = synVerifiedCase();
-    c.caseId = 'SYN_' + ext;
-    assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(c),
-      /caseId/, 'filename-like caseId が通った: ' + c.caseId);
+    c.caseId = id;
+    assert.equal(MiyoshiProjectConfig.validateVerifiedCase(c), true, id);
   });
 
   // 同じ一覧を 2 か所で持たないこと自体を固定する。

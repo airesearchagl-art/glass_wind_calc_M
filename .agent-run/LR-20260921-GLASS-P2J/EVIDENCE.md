@@ -1240,3 +1240,50 @@ F1 を見逃した直接の原因。R5-05 の差分には「mutant の方が正�
 入っていた。KILLED は「両者が違う」しか意味しない。
 ```
 
+## §43 — 独立検証7 の修理実測（D-040）
+
+### F7-03: 畳みが拒否を減らしていた
+
+```text
+witness              2659e3c(畳み前)  54b15a7  HEAD
+構造計算書.pdfＡ          拒否          受理     拒否
+構造計算書.pdf１          拒否          受理     拒否
+図面.dwgｚ               拒否          受理     拒否
+見積書.xlsxＢ             拒否          受理     拒否
+構造計算書．ｐｄｆ           受理          拒否     拒否  ← 畳みの目的は保持
+```
+
+### D-039 の回帰幅をグリッド定義付きで再実測（F7-06）
+
+```text
+グリッド: 畳みで幹を壊す 8 文字 ＂＇（），；＜＞
+        × 展開後の具体拡張子 46 = 368 形
+        幹は「構造計算書<当該文字>」、比較対象は cb7a75b
+
+  cb7a75b で受理されていた（= 回帰） : 368 / 368
+  HEAD で拒否へ戻った                 : 368 / 368
+  control 構造計算書.pdf              : 両方とも拒否
+```
+
+当初書いた `224/224` はグリッドを記録していなかったので反証不能だった。
+
+### browser 検査の再現可能性（F7-06）
+
+```text
+問題: 「62 checks / 0 fail」を 6 wave にわたり載せてきたが、harness は
+      scratch にしか無く、読み手が検算する手段が無かった。
+対応: tools/browser-checks/ へ 5 つの harness と README を commit。
+      内訳: browser 34 / probe 8 / failopen 10 / stageA 10 = 62
+      加えて parser-boundary（42形の差分 harness）。
+```
+
+### 回帰（修理後・全量）
+
+```text
+npm test        : 630 pass / 0 fail
+browser         : 62 pass / 0 fail（repository 内の harness で再実行）
+parser boundary : 42形 / bypass 0 / over-rejection 7
+mutation        : 5/5 KILLED（すべて 54b15a7 時点では生存）
+protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
+```
+

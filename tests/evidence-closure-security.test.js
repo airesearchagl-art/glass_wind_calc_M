@@ -682,8 +682,8 @@ test('P2J-S24: 私的文書のファイル名判定は幹がASCIIであること
   //   現地写真(iPhone は .heic) / メール控え(.msg/.eml) /
   //   納品一式の圧縮(.zip/.rar/.7z/.lzh)
   // 実装がこのうち 1 つでも落とせなければこのテストが失敗する。
-  const EXTS = ['pdf', 'dwg', 'dxf', 'xls', 'xlsx', 'xlsm', 'doc', 'docx',
-    'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'zip', 'rvt', 'skp',
+  const EXTS = ['pdf', 'dwg', 'dxf', 'xls', 'xlsx', 'xlsm', 'doc', 'docx', 'docm',
+    'ppt', 'pptx', 'pptm', 'jpg', 'jpeg', 'png', 'zip', 'rvt', 'skp',
     'jww', 'jwc', 'xdw', 'sfc', 'p21', 'ifc', 'dwf', 'pln',
     'odt', 'ods', 'odp', 'gif', 'bmp', 'tif', 'tiff', 'heic', 'heif', 'webp',
     'rar', '7z', 'lzh', 'tar', 'gz', 'msg', 'eml', 'txt', 'csv', 'bak'];
@@ -724,8 +724,15 @@ test('P2J-S24: 私的文書のファイル名判定は幹がASCIIであること
 
   // 全角形（独立検証5 Finding 4）。日本語 IME は `．` や `ｐｄｆ` を
   // 容易に生むが、旧規則は半角しか見ていなかった。
+  // 畳みは 4 つの範囲を列挙する（． / 全角小文字 / 全角大文字 / 全角数字）。
+  // 独立検証7 F7-01: 旧 corpus は小文字と ． しか含まず、
+  // 大文字範囲と数字範囲を**削除する変異が 629/0 で生き残っていた**。
+  // ＰＤＦ も ｐ２１ も普通の IME 出力である（ｐ２１ は SXF）。
   ['構造計算書．ｐｄｆ', '構造計算書.ｐｄｆ', '構造計算書．pdf',
-   'ｐｌａｎ．ｐｄｆ', '図面．ｊｗｗ', '見積書．ｘｌｓｘ'].forEach((text) => {
+   'ｐｌａｎ．ｐｄｆ', '図面．ｊｗｗ', '見積書．ｘｌｓｘ',
+   '構造計算書．ＰＤＦ', '図面．ＤＷＧ', '見積書．ＸＬＳＸ',
+   '構造計算書.ＰＤＦ', '図面．ｐ２１', '納品．７ｚ',
+   '納品.７ｚ', '図面.ｐ２１'].forEach((text) => {
     assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
       /private-document-filename/, text);
   });
@@ -738,6 +745,38 @@ test('P2J-S24: 私的文書のファイル名判定は幹がASCIIであること
     .forEach((s) => {
       assert.equal(Evidence.assertPublicSafeEvidenceText(s, 'prose'), true, s);
     });
+});
+
+test('P2J-S29: 全角畳みは拒否を**増やすだけ**であり減らさない', () => {
+  // 独立検証7 F7-03。畳んだテキスト**だけ**を見ていたため、
+  // `構造計算書.pdfＡ` が畳みによって `...pdfA` になり、
+  // `(?![A-Za-z0-9])` が失敗して**通っていた**（畳み導入前は拒否）。
+  // D-039 で畳み範囲を狭めてもこのクラスは残っていた——
+  // 範囲をいじる限り同じ形の欠陥が隣で再発する。
+  //
+  // よって**実装に依存しない不変式**で固定する:
+  //   拒否されるテキストの末尾に全角英数字を 1 文字足しても、
+  //   受理に転じてはならない。
+  const REJECTED_BASES = ['構造計算書.pdf', '図面.dwg', '見積書.xlsx', 'plan.pdf',
+    '図面.jww', '書類.xdw', '納品.7z'];
+  const TRAILING = ['Ａ', 'Ｚ', 'ａ', 'ｚ', '０', '９', '１'];
+
+  // positive control: base が実際に拒否されていなければ下の assert は空だ。
+  REJECTED_BASES.forEach((base) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(base, 'prose'),
+      /private-document-filename/, 'base が拒否されていない: ' + base);
+  });
+
+  let checked = 0;
+  REJECTED_BASES.forEach((base) => {
+    TRAILING.forEach((ch) => {
+      checked++;
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(base + ch, 'prose'),
+        /private-document-filename/,
+        '末尾に全角英数字を足すと通った: ' + base + ch);
+    });
+  });
+  assert.equal(checked, REJECTED_BASES.length * TRAILING.length);
 });
 
 test('P2J-S25: tag name の継続文字は `[A-Za-z0-9-]` に限られない', () => {

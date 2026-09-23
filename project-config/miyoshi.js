@@ -456,6 +456,11 @@
   // 返さない）。呼び出し側は try/catch するか、事前に妥当性が既知の
   // ケースにのみ使うこと。
   // F9: caseIdはUI・export package・PR本文に**そのまま出る公開identifier**である。
+  // ただし注意（独立検証7 F7-04）: **この validator が守っているのは
+  // verifiedCases の経路だけ**であり、それは現在空配列である。
+  // 実際に export package へ到達する caseId は workspace.js / project-profile.js 経由で、
+  // そちらには filename-like の検査が無い（QD-J10）。
+  // このコメントを「だからここで塞げている」と読まないこと。
   // D-012が factKey に allowlist を課したのと同じ理由（key自体が公開情報になる）が
   // ここにも等しく当てはまる。図面番号やファイル名をそのままcaseIdに持ち込む経路を
   // 構造的に塞ぐため、公開して差し支えない短い記号IDだけを許す（fail closed）。
@@ -464,6 +469,18 @@
   // 以前はここに同じ一覧を**手で写して**おり、evidence.js 側だけを
   // 日本の実務形式へ拡張した結果 2 つがさし、caseId だけ `plan_jww` が
   // 通る状態になっていた。caseId は UI・export package・PR本文にそのまま出る。
+  // 存在を確かめてから使う。undefined のまま連結すると
+  // `/[._-](undefined)$/i` という**有効だが何も防がない正規表現**になり、
+  // guard が黙って無効化する（独立検証7 F7-05）。
+  // 他の輸入は関数・配列なので使用時に必ず例外になるが、
+  // これだけは文字列なので気づかれずに通ってしまう。
+  // （古い evidence.js がキャッシュされているブラウザで実際に起きうる）
+  if (typeof ProjectEvidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE !== 'string' ||
+      !ProjectEvidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE) {
+    throw new Error(
+      'MiyoshiProjectConfig: ProjectEvidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE is required but not available'
+    );
+  }
   var FILENAME_LIKE_CASE_ID_PATTERN = new RegExp(
     '[._-](' + ProjectEvidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE + ')$', 'i');
 
