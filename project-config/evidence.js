@@ -144,7 +144,40 @@
     { name: 'windows-absolute-path', pattern: /[A-Za-z]:\\/ },
     { name: 'unc-path', pattern: /\\\\[^\\\s]+\\[^\\\s]*/ },
     { name: 'unix-home-or-absolute-path', pattern: /(^|\s)(~\/|\/Users\/|\/home\/|\/mnt\/)/ },
-    { name: 'opaque-long-token', pattern: /\b[A-Za-z0-9_-]{28,}\b/ }
+    { name: 'opaque-long-token', pattern: /\b[A-Za-z0-9_-]{28,}\b/ },
+
+    // ── Phase 2J Wave 5 で実測により追加 ───────────────────────
+    //
+    // 下の4クラスは Wave 5 の probe で**実際に通り抜け**、
+    // 合成READY contextでは Promotion Candidate JSON まで到達した。
+    // publicDescription は公開リポジトリと Candidate JSON の両方に出るため、
+    // ここが唯一の canonical な関門である。
+    // evidence-closure.js / candidate serializer / Matrix UI 側に
+    // 個別のsanitizationを足して塞がない（関門を増やすと、どれが効いているか
+    // 分からなくなり、どれも単独では信用できなくなる）。
+
+    // 担当者のメールアドレス等。個人を特定しうる連絡先は公開しない。
+    { name: 'email-like', pattern: /[A-Za-z0-9._%+-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}/ },
+
+    // 私的文書・図面のファイル名。拡張子集合は caseId 側の既存ポリシー
+    // （FILENAME_LIKE_CASE_ID_PATTERN）と**同じ**ものを使う。
+    // 「ドットを含む語」を一律に弾かない: 既存のEvidence散文は
+    // `index.html` のようなリポジトリ内ファイルに正当に言及しており、
+    // それを新たに拒否すると現行configが読み込めなくなる（実測で2件該当）。
+    { name: 'private-document-filename', pattern: /\b[A-Za-z0-9_-]+\.(pdf|dwg|dxf|xls[xm]?|doc[xm]?|ppt[xm]?|jpe?g|png|zip|rvt|skp)\b/i },
+
+    // タグの形をした内容。これは**privacy/内容の境界**であって、
+    // XSS対策そのものではない（DOM側は textContent / createElement で別に守る）。
+    // `<` を一律に拒否しない: `5<Z<40` のような不等式は正当な技術散文である。
+    // 開きタグ相当の構造（`<` の直後に英字が続き `>` で閉じる）だけを拒否する。
+    { name: 'html-like-tag', pattern: /<\/?[A-Za-z][A-Za-z0-9-]*(?:\s[^<>]*)?>/ },
+
+    // 非印字の制御文字。黙って落とさず fail closed にする。
+    // 改行 (\n \r) と タブ (\t) は**意図的に許容**する:
+    // 現行の publicDescription 11件はいずれも使っていないが、
+    // 使うこと自体は privacy 上の危険ではなく、
+    // ここで新たに拒否すると理由のない挙動変更になる（Wave 5 で実測して決めた）。
+    { name: 'control-character', pattern: /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/ }
   ];
 
   function assertPublicSafeEvidenceText(text, label) {

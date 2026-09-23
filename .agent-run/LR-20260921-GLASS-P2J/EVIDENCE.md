@@ -586,3 +586,182 @@ promotion     : NONE
 ```
 
 UI操作（mode切替・計算実行・Matrix描画）の**後**にブラウザ内で再測定して確認した。
+
+## §22 — Wave 5: public-safe prose boundary（実測 → 修正 → 再実測）
+
+### 修正前（Wave 5 probe / §3・§4）
+
+```text
+クラス                入力                                          結果
+email-like            PRIVATEEMAILMARKER991@example.com             ACCEPTED
+document filename     PRIVATEFILEMARKER992.pdf / .dwg / .xlsx       ACCEPTED
+HTML / script tag     <b>…</b> / <script>…</script>                 ACCEPTED
+control char          \u0001 / \u0000 / \u007F                      ACCEPTED
+--- 既知の遮断済みcontrol ---
+drive.google URL      https://drive.google.com/PRIVATEURLMARKER995  REJECTED
+Windows path          C:\private\PRIVATEPATHMARKER996.dwg           REJECTED
+--- 正当な散文（壊してはいけない） ---
+inequality            評価高さは 5<Z<40 の範囲で確認した             ACCEPTED
+repository file       index.html の初期値として導入された値          ACCEPTED
+```
+
+既知の遮断済みcontrolが REJECTED であることが、
+「判定器が動いている」ことの裏取りである（全ACCEPTEDなら検証器が
+死んでいるだけかもしれない）。
+
+### 到達可能性（§3）
+
+合成READY contextで、4クラスすべてが **Promotion Candidate JSON まで到達**した。
+
+```text
+email-like    *** REACHES Candidate JSON ***
+filename      *** REACHES Candidate JSON ***
+HTML tag      *** REACHES Candidate JSON ***
+control char  *** REACHES Candidate JSON ***
+```
+
+### 分類と修正場所（§5）
+
+Closure renderer の欠陥ではない。`publicDescription` は Closure が受け取る前に
+`ProjectEvidence` が検証する。したがって **generic public-safe Evidence
+boundary gap** であり、canonical な `PUBLIC_UNSAFE_TEXT_PATTERNS` に
+4クラスを追加した。closure module / serializer / UI 側には
+個別のsanitizationを足していない。
+
+### 修正後（再実測）
+
+```text
+email / pdf / dwg / xlsx / <b> / <script> / \u0001 / \u0000 / \u007F  → すべて REJECTED
+5<Z<40 / index.html / 通常の説明 / 改行 / タブ                        → すべて ACCEPTED
+現行 miyoshi config                                                   → 読み込み OK
+```
+
+### 現行Evidenceは変更していない（§10）
+
+```text
+publicDescription 11件  : すべて強化後の検証器を通る（書き換えなし）
+V0 / roughness          : 34 / III（不変）
+evidence level          : defaultW=none / defaultH=indirect（不変）
+checkedAt               : defaultH='2026-09-17'（不変）
+verifiedCases           : []（不変）
+```
+
+validator hardening であって Evidence mutation ではない。
+
+## §23 — Wave 5: Candidate の privacy sweep（§11 / §12 / §25 / §26）
+
+```text
+private Evidence : privateReferenceAvailable=true のみが残り
+                   sourceReference は null（所在は一切保持しない）
+public Evidence  : canonical形 { kind:'public_primary', url } のみ
+evidence の key   : checkedAt / level / privateReferenceAvailable / publicDescription の4つだけ
+proposedFact の key: slotKey / factKey / scope / observedValue / unit /
+                   proposedVerificationStatus / reconciliationApplicable /
+                   reconciliationStatus / evidence / sourceReference
+top-level の key   : schemaVersion / candidateType / projectId / candidateStatus /
+                   notApplied / currentConfigMutated / warning / gateSummary / proposedFacts
+出力されないもの   : currentConfig / verifiedCases / privateReference / rawObservation /
+                   registry / preset / profile / workspace / review /
+                   dimensions / wind / generatedAt / timestamp
+```
+
+**構造がpublic-safeであること ≠ 人が一次資料だと確認したこと**（§12）。
+公開URLの正常系も通ることを確認しているが、証明されているのは前者だけである。
+
+## §24 — Wave 5: Candidate JSON を既存importerへ通した（§24）
+
+```text
+ProjectInput.deserialize          → trust にならない
+WorkspaceCore.deserializeWorkspace → trust にならない
+ProjectProfile.deserializeProfile  → trust にならない
+```
+
+拒否されるか、受理されても既存のdowngrade契約により
+`verified` にも `registered_preset` にもならないことを確認した。
+Candidate 専用の受け入れ口は**足していない**（拒否を試すためだけに
+対応を追加しない）。現案件の状態も変わらない。
+
+## §25 — Wave 5 mutation 結果
+
+```text
+W5-01 email パターン無効化          KILLED (P2J-S01)   ※初回は無効patch。下記参照
+W5-02 filename パターン無効化       KILLED (P2J-S01)   ※同上
+W5-03 html-tag パターン無効化       KILLED (P2J-S01)   ※同上
+W5-04 control-char パターン無効化   KILLED (P2J-S01)   ※同上
+W5-05 `<` を一律拒否                KILLED (P2J-S02)   過剰拒否を検出
+W5-06 ドット付き語を一律拒否        KILLED (12件)      index.html を巻き込む
+W5-07 改行を制御文字として拒否      KILLED (P2J-S02)   明示的決定を固定
+W5-08 notApplied=false              KILLED (P2J-C43)
+W5-09 currentConfigMutated=true     KILLED (P2J-C43)
+W5-10 candidateStatus=VERIFIED      KILLED (P2J-C43)
+W5-11 candidate から warning を削除 KILLED (P2J-C56)
+W5-12 exporter の WeakSet gate 削除 KILLED (P2J-S11)
+W5-13 candidate に raw observation  KILLED (P2J-S14)
+W5-14 未知Observation fieldを許可   KILLED (P2J-S07)
+
+distinct mutants : 14 / KILLED 14 / SURVIVED 0 / PATCH-MISS 0
+```
+
+### W5-01〜W5-04 の初回は無効な patch だった（生存ではない）
+
+初回実行では SURVIVED と出たが、patch を読み直すと
+無効化した entry を**挿入**しただけで元の正規表現は別名のまま残っており、
+実際には何も無効化していなかった。**no-op mutant であって生存ではない。**
+
+パターン本体を `/(?!)/` へ置換する形に直し、
+**置換後に攻撃文字列が実際に通るようになったか**を先に確認してから再実行した。
+W5-03 / W5-04 では確認スクリプト側の name→key マッピングに誤りがあり
+`neutered=False` と表示されたが、個別に直接測って
+どちらも真に無効化される（攻撃が ACCEPTED になる）ことを確認済みである。
+
+## §26 — Wave 5: repository privacy scan / network / storage
+
+```text
+private provider 参照（shipped source, tests除く）:
+  検出されたのはすべて **denylist の正規表現そのもの**と
+  README のポリシー記述であり、実際の private 参照は 0 件
+
+opaque long token（shipped source）:
+  検出はすべて識別子名（PRIVATE_PROVIDER_HOST_PATTERN 等）。実トークンは 0 件
+
+network API（fetch / XHR / sendBeacon / WebSocket）:
+  追加 0 件（検出されたのは「使わない」と書いたコメントのみ）
+
+storage API（localStorage / sessionStorage / indexedDB / cookie）:
+  追加 0 件（同上）
+
+ブラウザ実測（Wave 4 harness 再実行）:
+  非 file:// リクエスト 0 / localStorage 0 / sessionStorage 0 / cookie 0
+```
+
+## §27 — Wave 5: 保護対象と既存Phaseの regression
+
+```text
+npm test   : 616 pass / 0 fail（Wave 4の600 → +16）
+browser    :  34 pass / 0 fail
+injection  :   8 pass / 0 fail
+fail-closed:  10 pass / 0 fail
+
+FL6 1250×2050 : 1756.09756097561      （直接再計算して一致）
+FL6 1500×2050 : 1463.4146341463415    （直接再計算して一致）
+Er / qBar     : known-answer テストで緑
+手入力 1400   : manual-config suite で緑
+
+Phase 2F〜2I : 既存suiteをすべて無改変のまま緑
+```
+
+## §28 — Wave 5 終了時点の現案件の状態（不変）
+
+```text
+Primary Evidence availability : UNAVAILABLE（開発セッションの調査結果）
+Actual project observations   : 0
+evaluateClosure('miyoshi', []): BLOCKED / 0 of 12 / 0 of 4 / 0 of 8 / candidate null
+Facts closed                  : 0 / 4
+Promotion Candidate           : NONE
+verifiedCases                 : []
+dimensions                    : sample_default / unverified / 1250 × 2050
+pressures                     : partially_verified のまま
+V0                            : 34      roughness : III
+```
+
+Wave 5 が変えたのは **validator の強度**だけであり、案件のEvidenceではない。

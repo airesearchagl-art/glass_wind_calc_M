@@ -442,3 +442,92 @@ browser scriptが `el.closest(...)` の null を握らずに例外で落ち、
 - browser script は包含が無い場合に例外ではなく `'not-contained'` を返すようにした。
 
 修正後、U4-13 は unit（P2J-U02）と browser（B2/B3/B4/B5）の**両方**で落ちる。
+
+## D-025 — Wave 5 packet は §29 途中で途切れていた
+
+受領した Wave 5 packet は §29「Request Matrix security」の
+「Runtime-looking strings in a synthetic/mock renderer result:」で本文が終わっている。
+また §4 の HTML marker 行は受領時点で**空**だった（例が描画で消えている）。
+
+欠けた部分を推測して埋めない。§29 については Wave 4 で既に確立済みの
+DOM injection probe を**そのまま再実行**し、その結果を記録した
+（runtime由来文字列を projectId / slotKey / scope / gate reason / closureStatus へ
+仕込む形。合成値なので renderer の安全性を見るprobeであり core validation ではない）。
+HTML marker は自分で明示的に合成したタグ（`<b>` / `<script>`）を使った。
+
+§1〜§28 は完全に受領しており、そのまま実施した。
+
+## D-026 — public-safe prose の4クラスを実測して塞いだ（§3〜§9）
+
+### 実測（修正前）
+
+```text
+email-like        ACCEPTED   PRIVATEEMAILMARKER991@example.com
+document filename ACCEPTED   PRIVATEFILEMARKER992.pdf / .dwg / .xlsx
+HTML/script tag   ACCEPTED   <b>…</b> / <script>…</script>
+control char      ACCEPTED   \u0001 / \u0000 / \u007F
+既知の遮断済み     REJECTED   drive.google URL / C:\ パス   ← 判定器は生きている
+正当な散文         ACCEPTED   5<Z<40 / index.html / 通常の説明
+```
+
+さらに合成READY contextで確認したところ、**4クラスすべてが
+Promotion Candidate JSON まで到達した**。
+
+### 分類（§5）
+
+これは Closure renderer の欠陥では**ない**。`publicDescription` は
+Closure が受け取る前に `ProjectEvidence` が検証する。したがって
+**generic public-safe Evidence boundary gap** であり、
+canonical な `PUBLIC_UNSAFE_TEXT_PATTERNS` を直した。
+`evidence-closure.js` / candidate serializer / Matrix UI に
+個別のsanitizationを足していない（関門を増やすと、どれが効いているのか
+分からなくなり、どれも単独では信用できなくなる）。
+
+### 過剰拒否しないための具体的な線引き（§6 / §7）
+
+```text
+`<` を一律に拒否しない   : 5<Z<40 は正当な技術散文である
+                          開きタグ相当（`<`+英字 … `>`）だけを拒否する
+ドット付き語を一律に拒否しない
+                        : 既存Evidence散文は index.html に正当に言及している
+                          （実測で2件該当）。拒否すると現行configが読めなくなる
+拡張子集合               : caseId 側の既存ポリシー
+                          （FILENAME_LIKE_CASE_ID_PATTERN）と同一のものを使う
+改行・タブ               : **意図的に許容**する（§9の明示的決定）
+```
+
+改行の扱いは推測せず実測して決めた: 現行の publicDescription 11件は
+いずれも改行・タブを使っておらず、依存するテストも無い。
+privacy上の危険でもないため、ここで新たに拒否するのは理由のない挙動変更になる。
+
+### これは validator hardening であって Evidence mutation ではない（§10）
+
+修正後も現行configは読み込め、11件の publicDescription はすべて通り、
+V0=34 / roughness III / evidence level / checkedAt / verifiedCases は
+いずれも変わっていない（P2J-S03）。どの publicDescription も書き換えていない。
+
+## D-027 — 構造がpublic-safeであること ≠ 人が一次資料だと確認したこと（§12）
+
+公開一次資料の**正しい経路**も通ることを確認した（拒否側だけを見ると
+「常に拒否する実装」でもテストが通ってしまう）。
+検証済みURLは canonical形 `{ kind: 'public_primary', url }` として candidate に残る。
+
+ただしテスト本文に明記したとおり、これが証明しているのは
+**URLが構造的にpublic-safeであること**だけである。
+その資料が本当に一次資料かどうかはコードで決められない。
+
+## D-028 — 最初の mutation 4件は無効な patch だった（数え直した）
+
+W5-01〜W5-04（新しい prose パターンを1つずつ無効化）は初回 SURVIVED と出た。
+しかし patch を読み直すと、無効化した entry を**挿入**しただけで
+元の正規表現は別名のまま残っており、実際には何も無効化していなかった。
+つまり no-op mutant であり、生存ではない。
+
+パターン本体を `/(?!)/` に置換する形へ直し、**置換後に攻撃文字列が
+実際に通るようになったか**を先に確認してから再実行した。
+4件とも P2J-S01 で KILLED。
+
+W5-03 / W5-04 では自作の確認スクリプト側の name→key マッピングに誤りがあり
+`neutered=False` と表示されたが、個別に直接確認して
+どちらも真に無効化されている（攻撃が ACCEPTED になる）ことを測った。
+表示だけを見て「検出できた」と結論しない。

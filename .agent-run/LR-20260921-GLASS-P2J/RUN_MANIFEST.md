@@ -45,7 +45,8 @@ expected : >= 500 / 0 fail  → 一致
 | 1 | Evidence architecture inventory / trust boundary 修理 | `c8dea2a7087c37bec0637574079ed7e5ea77654e` | 518 / 0 |
 | 2 | Observation v1 / scope contract | `42c8f7096b20450997bfe2739728cc45b433b3b3` | 557 / 0 |
 | 3 | Closure Evaluation / Promotion Candidate | `707b0aac8eb173641e04d59080676ec381cb0686` | 581 / 0 |
-| 4 | Evidence Request Matrix（read-only UI） | `RESOLVE_DYNAMICALLY` | 600 / 0 + browser 34 / 0 |
+| 4 | Evidence Request Matrix（read-only UI） | `4dfafae93628d0bf3674a05467bafd860ac3bef4` | 600 / 0 + browser 34 / 0 |
+| 5 | security / privacy / trust / prototype | `RESOLVE_DYNAMICALLY` | 616 / 0 + browser 34 / 0 |
 
 ## Wave別の変更ファイル
 
@@ -66,6 +67,10 @@ Wave 3: project-config/evidence-closure.js（evaluateClosure / candidate / expor
 Wave 4: index.html                        （evidence-closure.js配線 / Matrix / renderer分割）
         tests/evidence-closure-ui.test.js （新規）
         tests/ui-mode-separation.test.js  （F10の参照先を renderPhase2FEvidencePanels へ更新）
+
+Wave 5: project-config/evidence.js              （PUBLIC_UNSAFE_TEXT_PATTERNS に4クラス追加）
+        tests/evidence-closure-security.test.js（新規）
+        index.html                             （**変更なし**）
 
 ブラウザ検証（Chromium / file://）はrepositoryに常設していない。
 Wave 4 の実測値は EVIDENCE.md §17〜§19 に記録し、
