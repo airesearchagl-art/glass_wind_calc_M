@@ -131,6 +131,74 @@
     return value;
   }
 
+  // ---- 検出ヘルパ（regexでは正しく書けない2クラス） -------------------------
+  //
+  // 本Phaseでこの2規則は4度修正され、そのたび「目の前の抜けは塞いだが
+  // 1文字ずれた同じ抜けは見落とす」を繰り返した。原因は規則の形にある。
+  // 単一regexでは「線形時間」「`<` による素通りなし」「長さによる素通り
+  // なし」を同時に満たせない（本体を `[^>]{0,N}` で縛れば N+1 文字で素通り、
+  // 縛らなければ quadratic）。よって regex をやめ、後戻りのない前方走査に
+  // 置き換える。以後この2関数は「文字クラスを足す」形では触らない。
+
+  // HTML5 の tag open / tag name state に忠実な線形スキャナ。
+  // タグとみなす条件は「`<`、任意で `/`、ASCII英字、そしてどこかに `>`」
+  // のみ。tag name は tab/LF/FF/space/`/`/`>` 以外では終わらないため、
+  // 名前部分に文字クラス制約を置かない（`<img:` `<a_` `<img\u200b` は
+  // Chromium実測で live handler を持つ実要素になる）。本体長の上限も置かない。
+  // この形に当てはまらないものはブラウザが要素として解釈しない（実測）:
+  // `</ img>` `</1img>` は bogus comment、`＜img＞` はテキスト、
+  // `<img src=x`（`>` なし）は閉じられない。
+  function containsHtmlLikeTag(text) {
+    var i = 0;
+    while (true) {
+      i = text.indexOf('<', i);
+      if (i === -1) {
+        return false;
+      }
+      var j = i + 1;
+      if (text.charAt(j) === '/') {
+        j += 1;
+      }
+      var c = text.charAt(j);
+      if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+        // 名前が始まった。閉じられて初めて実タグ。ここに `>` が無ければ
+        // これより後ろの `<` にも `>` は無いので、残り全体がタグ無しと確定。
+        return text.indexOf('>', j) !== -1;
+      }
+      i += 1;
+    }
+  }
+
+  // 全角ASCII（U+FF01..U+FF5E）と全角スペースを半角へ畳む。
+  // IMEは `．` `ｐｄｆ` を容易に生む一方、regexの文字クラスは半角しか見て
+  // いなかった（`構造計算書．ｐｄｆ` が素通りしていた）。
+  function foldFullwidthAscii(text) {
+    var out = '';
+    for (var i = 0; i < text.length; i++) {
+      var code = text.charCodeAt(i);
+      if (code >= 0xff01 && code <= 0xff5e) {
+        out += String.fromCharCode(code - 0xfee0);
+      } else if (code === 0x3000) {
+        out += ' ';
+      } else {
+        out += text.charAt(i);
+      }
+    }
+    return out;
+  }
+
+  // 拡張子は「欧米ソフトの形式だけ」では足りない。日本の実務で案件原典と
+  // なるのは JW_CAD(.jww/.jwc)・DocuWorks(.xdw)・SXF(.sfc/.p21) 等であり、
+  // `構造計算書.pdf` を拒否して `構造計算書.jww` を通すのは境界として不整合。
+  // 一方 .html/.js/.md 等は本ツール自身の公開ファイル名として既存の
+  // publicDescription に現れるため、意図的に含めない。
+  // stem の {1,120} は上限付きなので走査は線形（QD-J04）。
+  var PRIVATE_DOCUMENT_FILENAME = /[^\s<>"'(),;:：、。「」『』]{1,120}\.(pdf|dwg|dxf|jww|jwc|xdw|sfc|p21|ifc|dwf|pln|rvt|skp|xls[xm]?|doc[xm]?|ppt[xm]?|od[tsp]|jpe?g|png|gif|bmp|tiff?|heic|heif|webp|zip|rar|7z|lzh|tar|gz|msg|eml|txt|csv|bak)(?![A-Za-z0-9])/i;
+
+  function containsPrivateDocumentFilename(text) {
+    return PRIVATE_DOCUMENT_FILENAME.test(foldFullwidthAscii(text));
+  }
+
   // public-safe boundary（RF-02）: publicDescription（および将来
   // publicEvidenceDescription等）へ渡してよいテキストかどうかを検証する
   // 共通ガード。既知のURL/パス/プロバイダ/opaqueトークンのパターンに
@@ -175,7 +243,7 @@
     //
     // 幹は「区切り文字以外の連なり」とする。長さは上限を置く
     // （否定クラス + リテラルの組は witness 次第で二次コストになりうる。QD-J04）。
-    { name: 'private-document-filename', pattern: /[^\s<>"'(),;:：、。「」『』]{1,120}\.(pdf|dwg|dxf|xls[xm]?|doc[xm]?|ppt[xm]?|jpe?g|png|zip|rvt|skp)(?![A-Za-z0-9])/i },
+    { name: 'private-document-filename', detect: containsPrivateDocumentFilename },
 
     // タグの形をした内容。これは**privacy/内容の境界**であって、
     // XSS対策そのものではない（DOM側は textContent / createElement で別に守る）。
@@ -234,7 +302,7 @@
     // 本体を `[^>]` にする（`<` を許す）。`*` ではなく上限付きにするのは、
     // 無制限だと二次コストになり P2J-S21 が落ちるためである
     // （検証者が naive fix で実測。上限付きなら線形のままであることも実測済み）。
-    { name: 'html-like-tag', pattern: /<\/?[A-Za-z][A-Za-z0-9-]*(?:[\s\/][^>]{0,300})?>/ },
+    { name: 'html-like-tag', detect: containsHtmlLikeTag },
 
     { name: 'markup-construct', pattern: /<!--|<!\[CDATA\[|<!DOCTYPE|<\?[A-Za-z]/i },
 
@@ -252,7 +320,8 @@
     }
     for (var i = 0; i < PUBLIC_UNSAFE_TEXT_PATTERNS.length; i++) {
       var entry = PUBLIC_UNSAFE_TEXT_PATTERNS[i];
-      if (entry.pattern.test(text)) {
+      var matched = entry.detect ? entry.detect(text) : entry.pattern.test(text);
+      if (matched) {
         throw new Error(
           (label || 'publicDescription') + ' must not contain private URLs/paths/identifiers (matched known-unsafe pattern: ' + entry.name + ')'
         );

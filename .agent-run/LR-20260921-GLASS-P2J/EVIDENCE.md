@@ -1074,6 +1074,12 @@ must-accept       :   18形すべて受理
 validateAllEvidence(): []
 ```
 
+> **【§41による訂正】上の数字と結論は誤りだった。**
+> `142件` → 実数 **133件**、`3458形` → 実数 **6650形**（133 × 25 × 2）。
+> 「`[\s/]` で始まらない形を必ず含む」は未実装（非空 25 形中 **0 形**）。
+> **そして `0 素通り` も誤り**——この corpus が持たない 2 軸（tag name 継続文字 /
+> 本体長）に全面的な素通りが残っていた。詳細は §41 と D-038。
+
 ### mutation（6件・挙動変化を先に確認）
 
 ```text
@@ -1102,3 +1108,73 @@ project state   : BLOCKED / 0 of 12 / 0 of 4 / 0 of 8 / candidate null
 線形性          : tag 28KB→7ms / 56KB→14ms / 112KB→31ms
                   filename 2KB→4ms / 4KB→7ms / 8KB→16ms
 ```
+
+## §41 — 独立検証5 の修理実測（D-038）
+
+### 再現（修理前・head 2659e3c）
+
+検証者の 6 指摘を自分で再現し、全件確認した。
+
+```text
+Finding 1  本体 299 拒否 / 301以上 ACCEPTED（境界は 300/301 で完全一致）
+Finding 2  <img: <a_ <img. <img! <img= <img\u200b </ img> </1img>  すべて ACCEPTED
+Finding 3  .jww .xdw .sfc .p21 .ifc .dwf .csv .txt .rar .7z .heic .tif .msg  ACCEPTED
+           （一方で 構造計算書.pdf は拒否される——境界として不整合）
+Finding 4  構造計算書．ｐｄｆ / 構造計算書.ｐｄｆ / 構造計算書．pdf  ACCEPTED
+Finding 5  QD-J04 が stale（下記の再実測を参照）
+Finding 6  HTML_TAG_NAMES 実数 133（artifact は 142 と記載）
+           真の網羅数 6650（artifact は 3458 と記載；どの実測値でもない）
+           header の「`[\s/]` で始まらない形を必ず入れる」は 非空 25 形中 0 形
+```
+
+### 決定的な実験: corpus は 2 つの全面的な素通りを見ていなかった
+
+```text
+修理前  npm test: 624 pass / 0 fail
+修理後  npm test: 624 pass / 0 fail   ← assertion が 1 つも動かない
+```
+
+全面的な素通りを 2 つ塞いて件数が変わらないのなら、検知していないのは
+実装ではなく corpus である。これを受けて corpus を再構築した結果が 627/0。
+
+### パーサ境界の自己実測（検証者の数値の転記ではなく）
+
+Chromium で 27 形を `div` 文脈と `table` 文脈の両方でパースし、
+生成要素数と guard の判定を照合した。
+
+```text
+guard == parser : 27/27
+```
+
+途中 2 度、harness 自体の欠陥を捕まえている（どちらも実装の問題ではない）:
+
+```text
+1) `<td nowrap>` が div 文脈で 0 要素だった——tree construction が table 外の
+   `<td>` を落とすため。「0 要素だからタグでない」は成立しない。
+2) table 文脈を足した際、包みの `</tr></tbody>` の `>` が未閉タグを閉じ、
+   `<img src=x onerror=alert(1)`（`>` 無し）と `5<Z<40` を要素にしていた。
+   → QD-J07 に依存条件として記載した。
+```
+
+### 規則別の線形性再実測（Finding 5）
+
+```text
+入力 ("ab.")*N            N=1000   2000    4000    8000   16000
+  private-document-filename  1.9ms   3.5ms   7.0ms  14.2ms  28.1ms   線形
+  email-like                 5.0ms  19.9ms  79.9ms 307.6ms 1289.8ms  二次
+  url-scheme                 1.7ms   7.4ms  26.4ms 126.9ms  441.5ms  二次
+  html-like-tag（新スキャナ）  0.0ms   0.0ms   0.0ms   0.0ms   0.0ms
+```
+
+旧 regex は 280KB で 7ms だったので、スキャナは正しいだけでなく速い。
+
+### 回帰（修理後・全量）
+
+```text
+npm test          : 627 pass / 0 fail
+browser（再実行） : 34 + 8 + 10 + 10 = 62 pass / 0 fail
+parser boundary   : 27/27 一致
+mutation          : 6/6 KILLED（欠陥復元 5 + 行き過ぎ 1）
+protected facts   : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
+```
+

@@ -170,6 +170,11 @@ corpus を commit し、`<` を含む形と `[\s/]` で始まらない形を必�
 実測（修理後）: タグ 3458形 / 日本語ファイル名 240形 すべて拒否、
 must-accept 18形すべて受理。
 
+> **【D-038による訂正】この段落は誤り。**
+> `[\s/]` で始まらない形は**入っていなかった**（非空 25 形中 0）。
+> `3458` は実測値ではなく真値は 6650。そして「すべて拒否」も偽で、
+> tag name 継続文字と本体長の 2 軸に全面的な素通りが残っていた。詳細は §41。
+
 ### tag クラスを持つべきか（Q4）→ Human Gate 申し送り
 
 検証者は privacy クラスの維持と tag クラスの retire/置換を勧めた。
@@ -490,6 +495,8 @@ validateAllEvidence()      : []
 Implementation verification head : **未確定**（§44・§47）
 ```
 
+↑ この行の `3458形 すべて拒否` は誤りだった（D-038）。現在の値は下記。
+
 ## Wave 6c final state
 
 ```text
@@ -667,3 +674,40 @@ repair_strategies     : 0 / 3
 6. npm test でsmoke check
 7. 上記 Next action から再開する
 ```
+
+## Wave 6e final state（独立検証5 の修理 / D-038）
+
+```text
+npm                        : 627 pass / 0 fail
+browser                    : 62 checks / 0 fail（再実行）
+parser boundary            : Chromium 実測と guard の判定が 27/27 一致
+mutation                   : 6/6 KILLED（欠陥復元 5 + 行き過ぎ 1）
+protected values           : 5件すべて一致
+validateAllEvidence()      : []
+commit済み corpus（tag）    : 26680 形（S18 6916 + S25 19684 + S26 80）
+commit済み corpus（filename）: 15幹 × 44拡張子 + 全角 6形
+線形性                     : tag は規則単体で 16000 繰り返し 0.0ms
+                             filename は線形（QD-J04 を訂正）
+Implementation verification head : **未確定**（新headでの 6 回目の独立検証が必要 / §44・§47）
+```
+
+### この Wave で確定したこと
+
+```text
+- tag 規則は regex をやめ tokenizer 忠実な線形スキャナへ（QD-J06 (d) 採用）
+- QD-J06 の (a) は前提が偽だったため消滅。(b)(c) は Human Gate に残る
+- corpus の軸を 3 つにし、受理側の境界（P2J-S27）も初めて固定した
+- artifact の検証不能な数字（142 / 3458 / 素通り0）をすべて訂正した
+- QD-J07 を新設（未閉タグ受理が依存する不変式を明記）
+```
+
+### 変わっていないこと
+
+```text
+Evidence protected state : verifiedCases [] / promotion NONE /
+                           1250×2050 sample_default unverified / V0 34 / roughness III
+本修理は public-safe テキスト境界のみ。案件値には一切触れていない。
+Wave 7（README / AC convergence / Draft PR / Preview / Completion Report）は
+引き続き blocked——§44 により実装セッションは自己認定できない。
+```
+

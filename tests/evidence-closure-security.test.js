@@ -542,7 +542,21 @@ test('P2J-S17: 比較の散文は「空白を置く」書き方で通る（誤�
  * corpus が実装の盲点を相続していた。
  *
  * そこで (a) corpus を commit して反証可能にし、
- * (b) 本体形に「`[\s/]` で始まらない形」「`<` を含む形」を必ず入れる。
+ * (b) 本体形に「`<` を含む形」を必ず入れる。
+ *
+ * 独立検証5 Finding 6 の指摘: その (b) のうち「`[\s/]` で始まらない形」は
+ * **書いただけで実装されていなかった**（24形中 0 形）。
+ * そして 5 度目の欠陥（tag name 継続文字）はまさにその軸にあった。
+ * 同時に「本体長」の軸が corpus に存在せず、6 度目の欠陥（`{0,300}`）も
+ * 検出できなかった。よって軸を 3 つにし、いずれも
+ * **実装ではなく HTML5 仕様の語彙から**導出する:
+ *   軸1 本体形（TAG_BODY_FORMS）
+ *   軸2 名前継続文字（TAG_NAME_CONTINUATIONS）← Finding 2 の軸
+ *   軸3 本体長（LONG_BODY_LENGTHS）← Finding 1 の軸
+ *
+ * さらに「拒否しすぎない」側（P2J-S27）も固定する。
+ * 片側だけ固定すると「`<` を含むなら全拒否」への行き過ぎを
+ * 検出できず、不等式の日本語散文が書けなくなる。
  */
 const HTML_TAG_NAMES = (
   'a abbr address area article aside audio b base bdi bdo blockquote body br ' +
@@ -573,8 +587,43 @@ const TAG_BODY_FORMS = [
   ' "q"', ' =v', ' 1=2', ' -x=1', ' .x=1', " x=a'b", ' x=a"b',
   ' disabled', ' 日本語',
   '/', '/onload=1',                 // `/` 区切り
-  ' \n href=x', ' \t id=y', '  '    // 空白類
+  ' \n href=x', ' \t id=y', '  ',   // 空白類
+  ' \r href=x'                      // CR（HTMLの入力前処理で LF になる）
 ];
+
+/**
+ * HTML5 の tag name state を**終わらせる**文字はこの 5 つだけ
+ * （tab / LF / FF / space / `/`）。`>` はタグ自体を閉じる。
+ * つまり**それ以外のすべての文字は名前の一部**であり、
+ * `<img:` は「壊れた img」ではなく `img:` という名の要素になる。
+ * 実装の文字クラスを見ず、この**定義の裏側**から作る。
+ */
+const TAG_NAME_TERMINATORS = ['\t', '\n', '\f', ' ', '/'];
+
+const TAG_NAME_CONTINUATIONS = [
+  ':', '_', '.', '!', '=', '+', '$', '%', '&', '*', ',', ';', '?', '@',
+  '^', '`', '|', '~', '(', ')', '[', ']', '{', '}', "'", '"', '\\', '#',
+  '0', '9', '-',
+  '\u200b',   // ZWSP（人間には見えない）
+  '\u00a0',   // NBSP（space ではない）
+  '\u3000',   // 全角スペース
+  '\u0130',   // 非ASCII英字
+  'あ', 'Ａ'    // CJK / 全角Latin
+];
+
+/** 名前継続文字は `[\s/]` で始まらない——header の約束の実装。 */
+const NAME_CONTINUATION_FORMS = [];
+TAG_NAME_CONTINUATIONS.forEach((ch) => {
+  NAME_CONTINUATION_FORMS.push(ch);
+  NAME_CONTINUATION_FORMS.push(ch + ' onclick=alert(1)');
+});
+
+/**
+ * 本体長の軸。実装内のどんな定数よりも十分長い値を含める。
+ * 埋め文字に長い英数字連続を使わない（opaque-long-token が
+ * 先にマッチしてしまい、何を試したのかがぶれる）。
+ */
+const LONG_BODY_LENGTHS = [32, 128, 299, 300, 301, 512, 2048, 8192];
 
 test('P2J-S18: タグ形は本体の書式・言語・`<`の有無によらず拒否される', () => {
   // 4回の独立検証で見つかった回帰をまとめて固定する:
@@ -593,7 +642,10 @@ test('P2J-S18: タグ形は本体の書式・言語・`<`の有無によらず�
       });
     });
   });
-  assert.equal(checked >= 3000, true, '網羅数: ' + checked);
+  // 実数で固定する。以前は `>= 3000` と書き、artifact には
+  // 別の概算値（3458）を書いていたが、どちらも実数ではなかった
+  // （独立検証5 Finding 6）。検証できない数字は書かない。
+  assert.equal(checked, HTML_TAG_NAMES.length * TAG_BODY_FORMS.length * 2);
 });
 
 test('P2J-S23: 本体に `<` を入れてもタグ判定は回避できない', () => {
@@ -622,8 +674,19 @@ test('P2J-S24: 私的文書のファイル名判定は幹がASCIIであること
   const STEMS = ['構造計算書', '図面', '意匠図一式', '伏図', '詳細図', '計算書',
     '案件資料', '外装材検討', '施工図', '仕様書', '見積書', '議事録',
     '検討書', '平面図', '立面図'];
+  // 独立検証5 Finding 3: 旧 EXTS は**実装の一覧を写しただけ**だったので、
+  // 実装が欧米ソフトの形式しか知らないことを検出できなかった。
+  // ここでは実装を見ず、**日本の外装・ガラス案件が実際に生む形式**から列挙する:
+  //   JW_CAD(.jww/.jwc) / DocuWorks(.xdw) / SXF(.sfc/.p21) / IFC / DWF /
+  //   ArchiCAD(.pln) / Revit / SketchUp / Office / LibreOffice /
+  //   現地写真(iPhone は .heic) / メール控え(.msg/.eml) /
+  //   納品一式の圧縮(.zip/.rar/.7z/.lzh)
+  // 実装がこのうち 1 つでも落とせなければこのテストが失敗する。
   const EXTS = ['pdf', 'dwg', 'dxf', 'xls', 'xlsx', 'xlsm', 'doc', 'docx',
-    'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'zip', 'rvt', 'skp'];
+    'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'zip', 'rvt', 'skp',
+    'jww', 'jwc', 'xdw', 'sfc', 'p21', 'ifc', 'dwf', 'pln',
+    'odt', 'ods', 'odp', 'gif', 'bmp', 'tif', 'tiff', 'heic', 'heif', 'webp',
+    'rar', '7z', 'lzh', 'tar', 'gz', 'msg', 'eml', 'txt', 'csv', 'bak'];
   let checked = 0;
   STEMS.forEach((stem) => {
     EXTS.forEach((ext) => {
@@ -640,11 +703,103 @@ test('P2J-S24: 私的文書のファイル名判定は幹がASCIIであること
     assert.throws(() => Evidence.assertPublicSafeEvidenceText(s, 'prose'),
       /private-document-filename/, s);
   });
-  // 拡張子が対象外のリポジトリ内ファイルは通る（過剰拒否していない）
-  ['index.html の初期値として導入された値', 'calc.js を参照', 'README.md に記載']
+  // 全角形（独立検証5 Finding 4）。日本語 IME は `．` や `ｐｄｆ` を
+  // 容易に生むが、旧規則は半角しか見ていなかった。
+  ['構造計算書．ｐｄｆ', '構造計算書.ｐｄｆ', '構造計算書．pdf',
+   'ｐｌａｎ．ｐｄｆ', '図面．ｊｗｗ', '見積書．ｘｌｓｘ'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /private-document-filename/, text);
+  });
+
+  // 拡張子が対象外のリポジトリ内ファイルは通る（過剰拒否していない）。
+  // これらは本ツール自身の公開ファイル名であり、既存の
+  // publicDescription に実際に現れるので意図的に対象外とする。
+  ['index.html の初期値として導入された値', 'calc.js を参照', 'README.md に記載',
+   'data.json 形式', '形式は .zip とする']
     .forEach((s) => {
       assert.equal(Evidence.assertPublicSafeEvidenceText(s, 'prose'), true, s);
     });
+});
+
+test('P2J-S25: tag name の継続文字は `[A-Za-z0-9-]` に限られない', () => {
+  // 独立検証5 Finding 2。HTML5 の tag name state は
+  // tab/LF/FF/space/`/`/`>` 以外では終わらないので、`<img:` は
+  // 「壊れた img」ではなく `img:` という名の**実在する要素**になり、
+  // onclick は live handler として発火する（Chromium実測）。
+  // この欠陥は元の規則から存在し、5度の修復と4度の独立検証を通り抜けた。
+  let checked = 0;
+  HTML_TAG_NAMES.forEach((tag) => {
+    NAME_CONTINUATION_FORMS.forEach((form) => {
+      [`<${tag}${form}>`, `</${tag}${form}>`].forEach((text) => {
+        checked++;
+        assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+          /matched known-unsafe pattern: html-like-tag/, text);
+      });
+    });
+  });
+  assert.equal(checked, HTML_TAG_NAMES.length * NAME_CONTINUATION_FORMS.length * 2);
+
+  // corpus の前提そのものを固定する: 終端文字を継続文字に
+  // 混ぜていたら、このテストは何も証明していない。
+  assert.equal(TAG_NAME_TERMINATORS.length, 5);
+  TAG_NAME_CONTINUATIONS.forEach((ch) => {
+    assert.equal(TAG_NAME_TERMINATORS.indexOf(ch), -1,
+      '終端文字を継続文字に混ぜている: ' + JSON.stringify(ch));
+  });
+  assert.equal(NAME_CONTINUATION_FORMS.every((f) => TAG_NAME_TERMINATORS.indexOf(f.charAt(0)) === -1), true,
+    'header の約束（HTML5終端文字で始まらない形）を再び破っている');
+  // なお NBSP と U+3000 は JS の `\\s` には含まれるが HTML5 の終端文字ではない。
+  // この非対称こそが誘因だったので、両方を corpus に残す。
+  assert.equal(NAME_CONTINUATION_FORMS.filter((f) => !/^[\s\/]/.test(f)).length, 70);
+  assert.equal(NAME_CONTINUATION_FORMS.length, 74);
+});
+
+test('P2J-S26: 本体が長くてもタグ判定は回避できない', () => {
+  // 独立検証5 Finding 1。Review 4 の修復で本体に `{0,300}` の上限を
+  // 置いたため、301文字以上の本体が**丸ごと素通り**していた。
+  // 長さの軸が corpus に無かったので 624 件の suite は無反応だった。
+  const NAMES = ['img', 'svg', 'iframe', 'script', 'a'];
+  let checked = 0;
+  NAMES.forEach((tag) => {
+    LONG_BODY_LENGTHS.forEach((n) => {
+      // 埋め方を2通り（空白のみ / 属性の反復）用意する。
+      [' '.repeat(n), ' data-a=1'.repeat(Math.ceil(n / 9)).slice(0, n)].forEach((pad) => {
+        const text = `<${tag}${pad} onerror=alert(1)>`;
+        checked++;
+        assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+          /matched known-unsafe pattern: html-like-tag/, `${tag} len=${n}`);
+      });
+    });
+  });
+  assert.equal(checked, NAMES.length * LONG_BODY_LENGTHS.length * 2);
+  // 境界が corpus に入っていること自体を固定する。
+  [299, 300, 301].forEach((n) => assert.equal(LONG_BODY_LENGTHS.includes(n), true, String(n)));
+  assert.equal(Math.max(...LONG_BODY_LENGTHS) >= 8192, true);
+});
+
+test('P2J-S27: パーサが要素を作らない形は拒否しない（行き過ぎの検出）', () => {
+  // 5度の修復はすべて「もっと拒否する」方向だった。片側だけ固定すると
+  // 「`<` を含むなら全拒否」へ行き過ぎても suite が気づかない。
+  // Chromium実測で**生成要素 0 個**だった形を受理側として固定する。
+  [
+    '<img src=x onerror=alert(1)',   // `>` が無い＝閉じられない
+    '< img src=x>',                  // `<` の直後が space
+    '</ img>',                       // bogus comment
+    '</1img>',                       // bogus comment
+    '＜img onerror=alert(1)＞',      // 全角・テキストになる
+    '<', '<<<', '>>>'
+  ].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+
+  // 本規則の目的は散文の制約ではない。不等式を含む技術文は書ける。
+  [
+    '3 < 5 である', '5<Z<40 の範囲', 'A<B<C<D の順',
+    '見付幅W<見付高さH となる場合>注意',
+    'x >= 3 かつ y <= 9', 'A --> B の順で確認した'
+  ].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
 });
 
 test('P2J-S22: 1文字混ぜてもタグ判定は回避できない', () => {
