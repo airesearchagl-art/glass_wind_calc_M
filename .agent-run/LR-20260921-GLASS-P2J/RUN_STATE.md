@@ -971,3 +971,39 @@ Human Gate 送り: QD-J06 / QD-J10 / QD-J11 / QD-J12 / QD-J13
 Wave 7 は blocked。
 ```
 
+## Wave 6n final state（独立検証14 の修理 / D-047）
+
+```text
+npm                        : 643 pass / 0 fail
+browser                    : 62 checks / 0 fail
+parser boundary            : 42形 / bypass 0
+mutation                   : 7/7 KILLED + 1 等価
+guard-diff corpus          : 601,088 入力（DOTS を定数から導出）
+protected values           : 5件すべて一致
+validateAllEvidence()      : []
+Implementation verification head : **未確定**
+```
+
+### この Wave で確定したこと
+
+```text
+- 看板変更（FORMAT_CHARS のクラス導出）を守る test が無かった。S39 を導出検査へ
+- 「等価」判定も証人集合が小さすぎた（/g は 16 以上で throw）
+- ¥ fold がラベル付き円表記を 12.7% 落としていた。数字例外を入れた
+- Cf だけでは不可視文字は閉じない。Default_Ignorable を追加し、
+  冗長な Variation_Selector を削った
+- corpus の DOTS を定数から導出（手書きで 11/12 だった）
+- markdown fence の入れ子を修正（QD-J12/J13 が code block になっていた）
+- **QD-J14 を新設**: 検証13 と 14 が独立に同じ結論に達した——
+  known-private-provider / www / opaque-long-token を security control から外すべき
+```
+
+### 変わっていないこと
+
+```text
+Evidence protected state : verifiedCases [] / promotion NONE /
+                           1250×2050 sample_default unverified / V0 34 / roughness III
+Human Gate 送り: QD-J06 / QD-J10 / QD-J11 / QD-J12 / QD-J13 / **QD-J14**
+Wave 7 は blocked。
+```
+

@@ -4,13 +4,25 @@
 // reader can recompute it. Five rounds of independent review found figures that
 // reproduced under no corpus at all, because the corpus lived in a scratch
 // directory and only the count was written down.
+import { createRequire as __cr } from 'module';
+const evidenceModule = __cr(import.meta.url)(
+  new URL('../../project-config/evidence.js', import.meta.url).pathname);
+
 export const STEMS = ['構造計算書', '図面', '見積書', 'plan'];
 export const DECORATIONS = ['', '（最新）', '(1)', ' ', '「最新」', '＂', '，', '＿'];
 // Every character in the implementation's dot set, plus the deliberate
 // exclusions. Review 13 (F13-03) found this array sampled 6 of 12 members, so
 // `diff-heads.mjs` reported 0 regressions for a commit that removed four of
 // them — the corpus tracked the previous review's axis, not the current diff's.
-export const DOTS = ['.', '．', '。', '｡', '․', '﹒', '︒', '‧', '⸳', '·', '۔', '܁', 'ꓸ', '˙', '・', '·'];
+// Derived from the implementation's own set plus the deliberate exclusions, so
+// the corpus cannot drift from the constant it is meant to police. The previous
+// version hand-listed 16 entries and got it wrong in both directions: U+0387 (a
+// real member) was absent and U+00B7 (an exclusion) appeared twice, so
+// diff-heads certified "0 regressions" for removing U+0387 (review 14, F14-04).
+const EXCLUDED_DOTS = ['\u30fb', '\uff65', '\u00b7'];
+export const DOTS = ['.', '\uff0e']
+  .concat([...evidenceModule.DOT_EQUIVALENTS])
+  .concat(EXCLUDED_DOTS);
 export const TRAILING = ['', 'Ａ', '１', '９', 'A', '2'];
 
 // Rule cores for the non-filename rules, so a differential covers all 12 rules
@@ -19,7 +31,7 @@ export const TRAILING = ['', 'Ａ', '１', '９', 'A', '2'];
 // character, which destroys the \b anchor in the `www` rule.
 export const RULE_CORES = [
   'abc@example.com', 'https://drive.google.com/x', 'www.example.com',
-  'C:\\Users\\x', 'notion.so/page', '//server/share/x', '/home/user/x', '~/docs/x',
+  'C:\\Users\\x', 'notion.so/page', '\\\\server\\share\\x', '/home/user/x', '~/docs/x',
   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', '<img src=x onerror=alert(1)>', '<!--x-->'
 ];
 

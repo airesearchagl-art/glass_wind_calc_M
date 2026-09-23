@@ -1981,3 +1981,84 @@ guard 全体では出ない。
 Evidence protected state は未変更: `verifiedCases: []` / promotion NONE /
 1250×2050 `sample_default` `unverified` / V0=34 / roughness III。
 
+## D-047 — 看板変更を守る test が無かった（14回目検証）
+
+独立検証14 の判定は **FAIL**。guard は親より危うくはなっていない
+（1,006,264 入力で regression 0）が、記録と検査の方が壊れていた。
+
+### F14-01 — この commit が存在する理由そのものが未固定だった
+
+`FORMAT_CHARS` を手書き 24 文字へ**戻す 1 行の変異が 643/643 を通った**。
+`P2J-S39` が旧 24 文字をそのまま列挙しており、新しく覆った 407 を
+一度も試していなかった。fail-open 方向の変異である。
+
+対応: S39 を**導出されていること自体の検査**へ変えた——
+BMP / astral を走査して削除対象数を数え、旧 24 に無かった代表を回す。
+
+```text
+実測: BMP 80 / astral（E0000..E01EF）399 / 全体 4,206
+手書き列挙は 24 だった
+```
+
+### F14-02 — 「等価」判定も証人集合が小さすぎた
+
+`/g` を外す変異を D-046 で「等価」と書いたが、証人を 2〜3 文字しか
+試していなかった。閉包は 1 周に 1 文字しか削らないので、
+**不可視文字 16 以上で `guard > 16` に当たって throw する**。
+Word 貼り付けや絵文字列で実際に起きる。等価ではなく fail-closed 方向の変異。
+
+前回の mutation スコアは **7/9 + 生存 2** であり、8/9 + 等価 1 ではなかった。
+
+### F14-03 — ¥ fold がラベル付きの円表記を 12.7% 落としていた
+
+コメントと test の両方が「英字+コロンを要求するので通貨は影響しない」と
+書いていたが、`Price:\u00a5500` がまさにその形だった。
+
+```text
+Price:\u00a5500 / Total:\u00a51,500,000 / JPY:\u00a51,500   すべて拒否されていた
+ASCII ラベル群で 20.0%、全体で 12.67%（10,800 文）
+```
+
+対応: 数字が続く `\u00a5` は畳まない（`(?!\d)`）。
+path 側（`C:\u00a5Users`、`\uffe5\uffe5fileserver`）は引き続き拒否される。
+
+### F14-08 — `\p{Cf}` だけでは不可視文字は閉じない
+
+ハングル / クメールの filler（U+3164 等）は Cf では無いが Chromium 実測で幅 0.000px。
+`drive\u3164.google.com/…` が素通りしていた。
+`\p{Default_Ignorable_Code_Point}` を加えた（偽陽性 0 を実測済み）。
+あわせて `\p{Variation_Selector}` は削った——260 件全部が Default_Ignorable の
+部分集合であることを全走査で確認した。死んだ条件を残すと
+「削っても通る」変異が生まれる。
+
+### F14-04 — 反証用の instrument が同じ欠陥を再現していた
+
+`corpus.mjs` の `DOTS` を「全メンバ + 除外側」と書いたが、
+**U+0387 が無く U+00B7 が重複**して 11/12 だった。
+そのため `diff-heads.mjs` が U+0387 の削除を 565,758 入力で「regression 0」と報告する。
+
+対応: `DOTS` を**実装の定数から導出**する（定数と drift し得ない）。
+あわせて `RULE_CORES` の UNC payload が forward slash だったのも直した——
+¥ 軸の分岐が一度も発火せず、その payload はどの head でもどの規則にも
+マッチしない死にデータだった。corpus 601,088。
+
+### mutation
+
+```text
+R14-01 FORMAT_CHARS を手書き 24 へ          KILLED (S39)
+R14-03 Default_Ignorable を除く             KILLED (S39)
+R14-04 FORMAT_CHARS から /g を外す           KILLED (S41)
+R14-05 ¥ fold の数字例外を外す              KILLED (S41)
+R14-06 ¥ fold から /g を外す                 KILLED (S41)
+R14-07 www から /i を外す                    KILLED (S41)
+R14-08 url-scheme を [a-z]+ へ                KILLED (S41)
+R14-02 \p{Variation_Selector} を除く          SURVIVED —— **等価**（全走査で確認）
+```
+
+7/7 + 等価 1。等価判定は今回は**全コードポイント走査**で行った。
+
+### 守っているもの
+
+Evidence protected state は未変更: `verifiedCases: []` / promotion NONE /
+1250×2050 `sample_default` `unverified` / V0=34 / roughness III。
+

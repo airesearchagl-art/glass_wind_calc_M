@@ -868,7 +868,52 @@ test('P2J-S39: normalizer 集合は**種類**を網羅する（置換・削除�
   // 全員が**置換写像**だったので、文字を**挿入**する回避には届かなかった。
   // メンバシップのテストは「集合が正しい種類か」を検査できない。
 
-  // 削除: 宣言した不可視文字を**全数**回す。
+  // 削除対象は**導出されたクラス**であることを検査する。
+  //
+  // 旧版は手書き 24 文字を列挙していたので、実装をその 24 文字へ
+  // **戻す変異が 643/0 で生き残っていた**（独立検証14 F14-01）。
+  // つまり前 commit の看板変更を守る test が 1 つも無かった。
+  // 列挙を検査すると列挙だけが固定される——本Campaign が何度も見た形。
+  //
+  // 導出されていること自体を測る: BMP を走査して削除対象数を数える。
+  let strippedBMP = 0;
+  for (let c = 0; c < 0x10000; c++) {
+    const ch = String.fromCharCode(c);
+    if (ch !== 'a' && ch !== 'b' && Evidence.stripFormatChars('a' + ch + 'b') === 'ab') strippedBMP++;
+  }
+  // 実測: BMP 80 / astral 4126 / 計 4206。手書き列挙は 24（うち BMP 24）だった。
+  // しきい値は列挙版の 3 倍超に置く——戻せば必ず落ちる。
+  assert.equal(strippedBMP > 70, true,
+    '削除対象が少なすぎる（手書き列挙に戻っていないか）: BMP ' + strippedBMP);
+  // astral 側も見る。TAG ブロックと variation selector supplement はこちらにある。
+  let strippedAstral = 0;
+  for (let c = 0xe0000; c <= 0xe01ef; c++) {
+    if (Evidence.stripFormatChars('a' + String.fromCodePoint(c) + 'b') === 'ab') strippedAstral++;
+  }
+  assert.equal(strippedAstral > 300, true,
+    'astral の削除対象が少なすぎる: ' + strippedAstral);
+
+  // 各性質から「旧 24 には無かった代表」を回す。これらは列挙版では全部素通りした。
+  const BEYOND_THE_OLD_LIST = [
+    '\ufe0f',        // VARIATION SELECTOR-16（絵文字対応エディタが日常的に出す）
+    '\ufe00',        // VARIATION SELECTOR-1
+    '\u{e0041}',     // TAG LATIN CAPITAL A
+    '\u{e0001}',     // LANGUAGE TAG
+    '\ufff9',        // INTERLINEAR ANNOTATION ANCHOR
+    '\u0600',        // ARABIC NUMBER SIGN
+    '\u3164',        // HANGUL FILLER（Cf では無い。幅 0px）
+    '\u115f',        // HANGUL CHOSEONG FILLER
+    '\u1160',        // HANGUL JUNGSEONG FILLER
+    '\u17b4'         // KHMER VOWEL INHERENT AQ
+  ];
+  BEYOND_THE_OLD_LIST.forEach((ch) => {
+    assert.equal(Evidence.stripFormatChars('a' + ch + 'b'), 'ab',
+      '導出クラスから漏れている: ' + JSON.stringify(ch));
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText('www' + ch + '.example.com', 'prose'),
+      /www/, 'www' + JSON.stringify(ch));
+  });
+
+  // 列挙版でも通っていた形（旧 24）も引き続き回す。
   const FORMAT_CHARS = ['\u00ad', '\u034f', '\u061c', '\u180e', '\u200b', '\u200c', '\u200d',
     '\u200e', '\u200f', '\u202a', '\u202b', '\u202c', '\u202d', '\u202e',
     '\u2060', '\u2061', '\u2062', '\u2063', '\u2064', '\u2066', '\u2067', '\u2068', '\u2069', '\ufeff'];
@@ -960,6 +1005,32 @@ test('P2J-S41: 検証13 が見つけた未固定の座標を押さえる', () =>
   // 通貨表記は巻き込まない（規則が英字+コロンか重複区切りを要求する）。
   ['価格は\u00a51,500,000とする', '費用は\uffe5300万', '\u00a5 の記号を使う'].forEach((text) => {
     assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+
+  // (7b) 多重度は**閉包の上限を超えて**押さえる。
+  //      `/g` を外す変異は 1 回に 1 文字しか削らないので、N 文字に N 周かかり、
+  //      16 以上で閉包が収束せず throw する——つまり等価ではない。
+  //      前回「等価」と判定したのは証人を 2〜3 文字しか試さなかったからである
+  //      （独立検証14 F14-02）。Word 貼り付けや絵文字列で実際に起きる。
+  ['\u200b', '\u00ad', '\ufe0f'].forEach((ch) => {
+    const many = '一次資料で直接確認' + ch.repeat(24);
+    assert.equal(Evidence.assertPublicSafeEvidenceText(many, 'prose'), true,
+      '多数の不可視文字で throw してはならない: ' + JSON.stringify(ch));
+  });
+  assert.equal(Evidence.assertPublicSafeEvidenceText('価格は' + '\u00a5'.repeat(24) + '1', 'prose'), true);
+
+  // (7c) ラベル付きの円表記は通す（前回このクラスを 12.7% 落としていた）。
+  ['Price:\u00a5500', 'Total:\u00a51,500,000', 'JPY:\u00a51,500', 'Type B:\u00a53,000',
+   'budget:\u00a52,000,000 で確定'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+
+  // (7d) scheme 名は英字だけではないし、www は大文字でも書かれる。
+  ['s3://bucket/案件/plan', 'ms-appx://x/y', 'a1://h/x'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), /url-scheme/, text);
+  });
+  ['WWW.EXAMPLE.COM', 'Www.Example.Com'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), /www/, text);
   });
 
   // (8) U+2028 / U+2029 は非印字で、Promotion Candidate JSON まで到達する。

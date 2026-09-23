@@ -1601,7 +1601,9 @@ U+00B7 の除外は意図的（QD-J13）
 ### corpus を diff の軸へ
 
 ```text
-212,058 → 565,758 入力。DOTS を 6 → 16（全メンバ + 除外側）、
+【検証14 F14-04/F14-05 による訂正】親の corpus は 212,421（212,058 は再現しない）。
+DOTS を 6 → 16 と書いたが実際は 12 メンバ中 11——U+0387 が無く U+00B7 が重複していた。
+現在は定数から**導出**する（定数と drift し得ない）。corpus 601,088、
 INVISIBLE を 5 → 10、¥ 軸を追加。
 vs 7685e64 : regression 0（拡張後の corpus で）
 ```
@@ -1612,7 +1614,58 @@ vs 7685e64 : regression 0（拡張後の corpus で）
 npm test        : 643 pass / 0 fail
 browser         : 62 pass / 0 fail
 parser boundary : 42形 / bypass 0
-mutation        : 8/9 KILLED + 1 等価（実測で確認）
+mutation        : 【検証14 F14-01/F14-02 による訂正】7/9 + 生存 2。
+                  R13-01（手書き 24 へ戻す）は生存していた——看板変更を守る test が無かった。
+                  R13-02（/g を外す）も等価ではない——不可視文字 16 以上で閉包が throw する。
+                  自分の等価判定は証人を 2〜3 文字しか試さなかったためである
+protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
+```
+
+## §50 — 独立検証14 の修理実測（D-047）
+
+### F14-01: 看板変更を守る test が無かった
+
+```text
+修正前: FORMAT_CHARS を手書き 24 へ戻す変異 → 643/643 で生存
+修正後: 同じ変異 → KILLED（P2J-S39 が導出されていることを測る）
+実測: BMP 80 / astral（E0000..E01EF）399 / 全体 4,206 対 手書き 24
+```
+
+### F14-03: ¥ fold の過剰拒否
+
+```text
+                         09d35e7  HEAD
+Price:\u00a5500              拒否     受理
+Total:\u00a51,500,000        拒否     受理
+JPY:\u00a51,500              拒否     受理
+C:\u00a5Users\u00a5tanaka\u00a5案件  拒否     拒否   ← path 側は維持
+\uffe5\uffe5fileserver\uffe5案件   拒否     拒否
+```
+
+### F14-08: Cf だけでは不可視文字は閉じない
+
+```text
+drive<U+3164>.google.com/file/d/1AbCdEf   受理 → 拒否
+構造計算書.p<U+3164>df                 受理 → 拒否
+www<U+115F>.example.com / <U+17B4>          受理 → 拒否
+\p{Variation_Selector} は削除（260 件全部が Default_Ignorable の部分集合、全走査確認）
+```
+
+### F14-04: instrument を定数から導出へ
+
+```text
+DOTS を手書き 16 → 実装の DOT_EQUIVALENTS + 除外側を導出（欠落 0）
+RULE_CORES の UNC payload を forward slash → backslash（¥ 軸が発火するように）
+corpus 601,088 入力、vs 09d35e7 regression 0
+```
+
+### 回帰（修理後・全量）
+
+```text
+npm test        : 643 pass / 0 fail
+browser         : 62 pass / 0 fail
+parser boundary : 42形 / bypass 0
+mutation        : 7/7 KILLED + 1 等価（全コードポイント走査で確認）
 protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
 ```
 
