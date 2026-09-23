@@ -937,3 +937,37 @@ Evidence protected state : verifiedCases [] / promotion NONE /
 Human Gate 送り: QD-J06 / QD-J10 / QD-J11 / QD-J12。Wave 7 は blocked。
 ```
 
+## Wave 6m final state（独立検証13 の修理 / D-046）
+
+```text
+npm                        : 643 pass / 0 fail
+browser                    : 62 checks / 0 fail
+parser boundary            : 42形 / bypass 0
+mutation                   : 8/9 KILLED + 1 等価
+guard-diff corpus          : 565,758 入力。vs 7685e64 regression 0
+protected values           : 5件すべて一致
+validateAllEvidence()      : []
+Implementation verification head : **未確定**（14 回目の独立検証が必要 / §44・§47）
+```
+
+### この Wave で確定したこと
+
+```text
+- DECISIONS.md を自分で 45 決定分削除していた。復旧済み。
+  原因は Python の 'w' open + エンコード例外。以後 encode → temp → rename
+- 手書き列挙を Unicode クラスへ（不可視文字 24 → 430）
+- dot 集合を 12 へ戻した（縮めたのは回帰だった）
+- ¥ path 区切りと U+2028/2029 を閉じた
+- corpus を**diff が変えた軸**へ拡張（前回の検証の軸だけでは不十分）
+- dot 集合に導出原理は無いと認め、QD-J13 として Human Gate へ
+```
+
+### 変わっていないこと
+
+```text
+Evidence protected state : verifiedCases [] / promotion NONE /
+                           1250×2050 sample_default unverified / V0 34 / roughness III
+Human Gate 送り: QD-J06 / QD-J10 / QD-J11 / QD-J12 / QD-J13
+Wave 7 は blocked。
+```
+

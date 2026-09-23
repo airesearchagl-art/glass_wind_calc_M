@@ -235,7 +235,17 @@
   //   除く: ・ ･ · · ‧ ⸳ —— いずれも中黒・高さ付きドットで、
   //         文中の並列区切りとして普通に使われる（`PDF・doc形式`）。
   // U+02D9（上付き点）もドット類だが full stop ではないので除く。
-  var DOT_EQUIVALENTS = '\u3002\uff61\ufe12\u2024\ufe52\u06d4\u0701\ua4f8';
+  // 前回この集合を 12 → 8 へ**縮めてしまった**（独立検証13 F13-03）。
+  // 縮めるのは回帰であると D-044 に自分で書いていたのに、
+  // 「基準を一貫させる」という理由で 16 形の拒否を失った。
+  // 検証13 は 7,084 の実散文で測り、戻しても偽陽性は**0**だと示した。戻した。
+  //
+  // この集合に**導出原理は無い**。3 度基準を言い直し、そのたびに
+  // 例外が見つかった（U+A4F8 は full stop ではなく Lm の**文字**、
+  // U+0701 を入れて U+0702 を除く等）。四度目は試みない。
+  // **導出されたクラスではなく、列挙された脅威リストである**と明記する。
+  // P2J-S37 が全員と除外側を固定し、増減は Human Gate の判断（QD-J13）。
+  var DOT_EQUIVALENTS = '\u3002\uff61\ufe12\u2024\ufe52\u2027\u2e33\u0387\u06d4\u0701\ua4f8\u02d9';
   function foldDotEquivalents(text) {
     var out = '';
     for (var i = 0; i < text.length; i++) {
@@ -279,9 +289,22 @@
   // これは「集合の全員を押さえたか」では見つからない——
   // 集合は完全だったが、**種類**が欠けていた。
   // U+00AD や U+FEFF は Word / PDF / メーラからの貼り付けで**事故的に**入る。
-  var FORMAT_CHARS = /[\u00ad\u034f\u061c\u180e\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g;
+  // 不可視文字は**Unicode クラスから導出**する。手書きの 24 文字列挙だったときは
+  // 実際に存在する 430 のうち 23 しか閉じていなかった（独立検証13 F13-01）。
+  // U+FE0F（絵文字対応エディタが日常的に出す）や TAG ブロックが抜けていた。
+  // 「種類を追加した」だけでは不十分で、**集合を導出する**必要があった。
+  var FORMAT_CHARS = /[\p{Cf}\p{Variation_Selector}\u034f]/gu;
   function stripFormatChars(text) {
     return text.replace(FORMAT_CHARS, '');
+  }
+
+  // 日本語 Windows の path 区切りは画面上も入力も `\u00a5` である
+  // （JIS X 0201 で 0x5C が YEN SIGN）。`C:\u00a5Users\u00a5案件` は実際にこう書かれる。
+  // windows-absolute-path / unc-path は本Campaign で一度も見ていなかった規則で、
+  // この形は全部素通りしていた（独立検証13 F13-07）。
+  // 通貨表記（`\u00a51,500,000`）は規則が英字+コロンか重複区切りを要求するので影響しない。
+  function foldYenToBackslash(text) {
+    return text.replace(/[\u00a5\uffe5]/g, '\\');
   }
 
   // Unicode 正規化（NFKC）。数学用英字等の astral lookalike
@@ -302,7 +325,8 @@
   // 集合は 3 つの**種類**を持つ: 置換写像 / 削除 / 標準正規化。
   // 「全員を押さえたか」だけでは種類の欠落は見えない（検証12 F12-06）。
   var TEXT_NORMALIZERS = [foldFullwidthFilenameChars, foldFullwidthAscii, foldDotEquivalents,
-                          stripFormatChars, foldCompatibility];
+                          stripFormatChars, foldCompatibility,
+                          foldYenToBackslash];
 
   // 拡張子集合は**ここが唯一の定義**である。
   // 消費側の一つは project-config/miyoshi.js の FILENAME_LIKE_CASE_ID_PATTERN
@@ -343,7 +367,8 @@
     // 左文脈のアンカー（`\b` / `(^|\s)`）は外してある（独立検証12 F12-01）。
     // 日本語の散文は URL や path の前に空白を置かないので、
     // `図面は/home/user/案件/最新版 に置いた` はアンカー付きでは**一度も発火しない**。
-    // 221 入力（13 payload × 17 配置）中 68 が通っていた。
+    // commit したグリッド（P2J-S38 / corpus.mjs LEFT_CONTEXTS）では
+    // 17 前置き × 7 payload = 119 中 74 が通っていた（測定可能な値）。
     // 最も痛いのは、この規則が `資料＿ｗｗｗ．…`（全角）を拒否しながら
     // それが正規化された先の `資料_www.example.com` を通していたこと。
     // 過剰拒否側のコスト（`showwww.` 等）は受け入れる——fail closed。
@@ -457,7 +482,7 @@
     // 現行の publicDescription 11件はいずれも使っていないが、
     // 使うこと自体は privacy 上の危険ではなく、
     // ここで新たに拒否すると理由のない挙動変更になる（Wave 5 で実測して決めた）。
-    { name: 'control-character', pattern: /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/ }
+    { name: 'control-character', pattern: /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u2028\u2029]/ }
   ];
 
   function assertPublicSafeEvidenceText(text, label) {
@@ -986,6 +1011,7 @@
     foldFullwidthFilenameChars: foldFullwidthFilenameChars,
     foldDotEquivalents: foldDotEquivalents,
     stripFormatChars: stripFormatChars,
+    foldYenToBackslash: foldYenToBackslash,
     foldCompatibility: foldCompatibility,
     DOT_EQUIVALENTS: DOT_EQUIVALENTS,
     TEXT_NORMALIZER_COUNT: TEXT_NORMALIZERS.length,

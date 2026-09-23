@@ -1526,7 +1526,8 @@ vs e336428 : 11411  同上
 npm test        : 639 pass / 0 fail
 browser         : 62 pass / 0 fail
 parser boundary : 42形 / bypass 0
-mutation        : 14/14 KILLED
+mutation        : 13/14 KILLED（【検証13 F13-06 による訂正】R11-02 は
+                  到達不能な分岐の変異で、原理上殺せない等価変異だった）
 protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
 ```
 
@@ -1570,6 +1571,48 @@ npm test        : 642 pass / 0 fail
 browser         : 62 pass / 0 fail
 parser boundary : 42形 / bypass 0
 mutation        : 9/9 KILLED
+protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
+```
+
+## §49 — 独立検証13 の修理実測（D-046）
+
+### F13-01: 不可視文字
+
+```text
+                          7c006be  HEAD
+www<U+E0041>.example.com    受理     拒否
+www<U+FE0F>.example.com     受理     拒否
+構造計算書.p<U+E0001>df     受理     拒否
+www<U+FFF9>.example.com     受理     拒否
+宣言 24 → クラス導出（430）
+```
+
+### F13-03 / F13-07 / F13-12
+
+```text
+構造計算書‧pdf / 意匠図一式⸳dwg      受理 → 拒否（dot 集合を 12 へ戻した）
+C:<U+00A5>Users<U+00A5>案件           受理 → 拒否
+<U+FFE5><U+FFE5>fileserver<U+FFE5>案件  受理 → 拒否
+検討<U+2028>結果                    受理 → 拒否
+価格は<U+00A5>1,500,000とする        受理のまま
+U+00B7 の除外は意図的（QD-J13）
+```
+
+### corpus を diff の軸へ
+
+```text
+212,058 → 565,758 入力。DOTS を 6 → 16（全メンバ + 除外側）、
+INVISIBLE を 5 → 10、¥ 軸を追加。
+vs 7685e64 : regression 0（拡張後の corpus で）
+```
+
+### 回帰（修理後・全量）
+
+```text
+npm test        : 643 pass / 0 fail
+browser         : 62 pass / 0 fail
+parser boundary : 42形 / bypass 0
+mutation        : 8/9 KILLED + 1 等価（実測で確認）
 protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
 ```
 

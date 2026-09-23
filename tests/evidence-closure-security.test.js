@@ -915,6 +915,65 @@ test('P2J-S40: ファイル名用畳みの 4 範囲を全数写像する', () =>
   });
 });
 
+test('P2J-S41: 検証13 が見つけた未固定の座標を押さえる', () => {
+  // 独立検証13 F13-08。いずれも行動を変える変異が 642/0 で生存していた。
+
+  // (1) 多重度。S39 は不可視文字を**1 文字だけ**挿入していたので、
+  //     `FORMAT_CHARS` から /g を外す変異が生き残っていた。
+  ['構造計算書.p\u200bd\u200bf', 'w\u200bw\u200bw.example.com',
+   'tanaka\u200b@ex\u200bample.co.jp'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /must not contain private URLs/, '複数挿入: ' + JSON.stringify(text));
+  });
+
+  // (2) scheme は http/https だけではない。
+  ['smb://fileserver/案件/図面', 'ftp://ftp.example.jp/x', 'sftp://h/x',
+   'file:///home/user/x', 'smb://h/x'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /url-scheme|unix-home/, text);
+  });
+
+  // (3) private provider は一つずつ意味がある。
+  ['docs.google.com/document/d/1AbC の資料', 'drive.google.com/file/d/1AbC',
+   'notion.so/案件メモ', 'dropbox.com/s/abc'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /known-private-provider|url-scheme|www/, text);
+  });
+
+  // (4) Windows のドライブ文字は小文字でも書かれる。
+  ['原本は c:\\案件\\図面 にある', 'd:\\share\\x', 'C:\\Users\\x'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /windows-absolute-path/, text);
+  });
+
+  // (5)(6) opaque token のしきい値と文字クラス。
+  //       Drive の file ID は `-` と `_` を含む。
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('a'.repeat(28), 'prose'),
+    /opaque-long-token/, 'ちょうど 28 文字');
+
+  // (7) 日本語 Windows の path 区切りは `\u00a5`。この形は全部素通りしていた。
+  ['C:\u00a5Users\u00a5tanaka\u00a5案件', '原本は C:\u00a5案件\u00a5検討 に置いてある',
+   '\uffe5\uffe5fileserver\uffe5案件', 'd:\u00a5share\u00a5x'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /windows-absolute-path|unc-path/, text);
+  });
+  // 通貨表記は巻き込まない（規則が英字+コロンか重複区切りを要求する）。
+  ['価格は\u00a51,500,000とする', '費用は\uffe5300万', '\u00a5 の記号を使う'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+
+  // (8) U+2028 / U+2029 は非印字で、Promotion Candidate JSON まで到達する。
+  ['検討\u2028結果', '検討\u2029結果'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /control-character/, JSON.stringify(text));
+  });
+  assert.equal(Evidence.assertPublicSafeEvidenceText('a'.repeat(27), 'prose'), true, '27 文字は通る');
+  ['1BxiMVs0XRA5nFMd-KvBdBZjgmUUqptlbs', 'AKfycbx-9_kQz3LmNoPqRsTuVwXyZaBcDe'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /opaque-long-token/, text);
+  });
+});
+
 test('P2J-S34: normalizer は**名前で**固定する（個数ではなく）', () => {
   // 独立検証11 F11-01。旧版は `TEXT_NORMALIZER_COUNT === 2` だけを見ていた。
   // 前回の diff は normalizer を 1 つ**削除して 1 つ追加**したので、
@@ -960,8 +1019,12 @@ test('P2J-S37: dot 写像集合は**全員を個別に**押さえる', () => {
   //
   // 定数を読んで回すと定数を縮める変更に気づけないので、
   // P2J-TB19 と同じく**定数とは独立に**列挙する。
-  // 基準（独立検証12 F12-04）: full stop は入れる / 中黒・高さ付きドットは除く。
-  const EXPECTED_DOTS = ['。', '｡', '︒', '․', '﹒', '۔', '܁', 'ꓸ'];
+  // この集合に**導出原理は無い**（独立検証13 F13-04）。
+  // 3 度基準を言い直し、そのたびに例外が見つかった。
+  // 列挙された脅威リストとして扱い、増減は Human Gate（QD-J13）。
+  // 12 → 8 へ縮めたのは回帰だったので戻してある（F13-03）。
+  const EXPECTED_DOTS = ['。', '｡', '︒', '․', '﹒', '‧',
+                         '⸳', '·', '۔', '܁', 'ꓸ', '˙'];
   EXPECTED_DOTS.forEach((ch) => {
     assert.equal(Evidence.DOT_EQUIVALENTS.indexOf(ch) !== -1, true,
       'dot 写像集合から U+' + ch.charCodeAt(0).toString(16).toUpperCase() + ' が消えている');
@@ -977,7 +1040,11 @@ test('P2J-S37: dot 写像集合は**全員を個別に**押さえる', () => {
   // 除外しているものも固定する（行き過ぎの検出）。
   // 除外側も全部固定する。U+00B7 と U+0387 は字形がほぼ同じなので、
   // 片方だけ入れるのは基準が無いことの証拠だった（検証12 F12-04）。
-  ['・', '･', '·', '·', '‧', '⸳', '˙'].forEach((ch) => {
+  // U+00B7 は除外のまま: ヨーロッパ諸語の散文で普通に使われる。
+  // 字形が同じ U+0387 を入れているのは一貫していないが、
+  // これを「基準」で説明しようとして 3 度失敗しているので、
+  // 列挙として固定し Human Gate へ送る（QD-J13）。
+  ['・', '･', '·'].forEach((ch) => {
     assert.equal(Evidence.DOT_EQUIVALENTS.indexOf(ch), -1,
       '中黒・高さ付きドットを写像に入れてはならない: U+' + ch.charCodeAt(0).toString(16));
     assert.equal(Evidence.assertPublicSafeEvidenceText('PDF' + ch + 'doc形式で提出', 'prose'), true);

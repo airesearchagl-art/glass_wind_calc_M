@@ -6,7 +6,11 @@
 // directory and only the count was written down.
 export const STEMS = ['構造計算書', '図面', '見積書', 'plan'];
 export const DECORATIONS = ['', '（最新）', '(1)', ' ', '「最新」', '＂', '，', '＿'];
-export const DOTS = ['.', '．', '。', '｡', '․', '﹒'];
+// Every character in the implementation's dot set, plus the deliberate
+// exclusions. Review 13 (F13-03) found this array sampled 6 of 12 members, so
+// `diff-heads.mjs` reported 0 regressions for a commit that removed four of
+// them — the corpus tracked the previous review's axis, not the current diff's.
+export const DOTS = ['.', '．', '。', '｡', '․', '﹒', '︒', '‧', '⸳', '·', '۔', '܁', 'ꓸ', '˙', '・', '·'];
 export const TRAILING = ['', 'Ａ', '１', '９', 'A', '2'];
 
 // Rule cores for the non-filename rules, so a differential covers all 12 rules
@@ -64,9 +68,14 @@ export function buildCorpus(extensionSource) {
   RULE_CORES.forEach((core) => {
     LEFT_CONTEXTS.forEach((pre) => { out.push(pre + core, pre + fw(core)); });
   });
+  // Japanese-locale Windows path separator (F13-07).
+  RULE_CORES.forEach((core) => {
+    if (core.indexOf('\\') !== -1) out.push(core.replace(/\\/g, '\u00a5'), core.replace(/\\/g, '\uffe5'));
+  });
   // Invisible format characters and compatibility lookalikes: normalization
   // kinds, not members (F12-06).
-  const INVISIBLE = ['\u200b', '\u00ad', '\ufeff', '\u2060', '\u200c'];
+  const INVISIBLE = ['\u200b', '\u00ad', '\ufeff', '\u2060', '\u200c',
+    '\ufe0f', '\u{e0041}', '\u{e0001}', '\ufff9', '\u0600'];
   RULE_CORES.forEach((core) => {
     INVISIBLE.forEach((ch) => {
       if (core.length > 4) out.push(core.slice(0, 3) + ch + core.slice(3));
