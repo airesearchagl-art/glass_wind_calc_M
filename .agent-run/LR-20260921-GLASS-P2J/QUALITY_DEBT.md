@@ -618,3 +618,93 @@ QD-J14 の問いに対し Human Gate から正式回答あり。
 現状: 実装未承認。§17 stop condition 発効中。
 ```
 
+## QD-J15 — 11.3% は再現しない。そもそも測る母集団が違う（Human Gate の前提に直結）
+
+検証15 の指摘を実装セッションで**独立に再測定し、支持する**。
+
+```text
+方法: git ls-files → .js/.mjs/.html は行頭 `//` `*` の行を comment として抽出、
+      .md は非空行すべて。1 行 1 回 guard を呼ぶ。
+
+全 tracked 散文 : 820/21,614 = **3.8%**（主張は 11.3%）
+  artifact .md  : 691/16,726 = 4.1%
+  repo .md      :  39/1,005  = 3.9%
+  source comment:  90/3,883  = 2.3%
+分母 5,588 に対応する切り口は見つからない。
+内訳の主張（html-like-tag 496 / opaque-long-token 84）は順位が逆で、
+496+84=580 であって 631 にならない。
+```
+
+さらに重要なのは**測っている母集団が違う**こと。
+
+```text
+- guard が実際に支配するのは publicDescription / publicEvidenceDescription。
+  出荷済みのそれらは **0% reject**——当然で、
+  全部が通らなければ module が load できない。
+- つまり repository に commit された text ではこの guard の偽陽性率を
+  原理的に推定できない（**生存者バイアス**）。
+  実コストは reject されて commit に至らなかった下書きにあり、git には無い。
+- 現行 corpus の hit はほぼすべて「guard 自身を説明する行」だった。
+  検出例をそのまま書いているのだから reject されるのは guard が**働いている**のであって
+  偽陽性ではない。
+```
+
+### Human Gate への影響（重要）
+
+```text
+§2  は 11.3% を根拠に「偽陽性圧力が高い」と述べている
+§12 は「11.3% を得たのと同じ測定を再実行する」と計画している
+→ 同じ計器を違う母集団に当て直すことになり、決定の材料にならない
+```
+
+提案:
+
+```text
+§2  「偽陽性圧力は実在するが、guard が支配する母集団では
+     一度も測られていない」へ言い換える
+§12 repository 散文ではなく前向きの測定へ差し替える。例:
+     ・執筆中の guard reject を記録する
+     ・独立に書いた evidence 散文の corpus に当てる
+       （検証15 の 53 文の日本語技術文で 0 reject）
+```
+
+これは本セッションが Gate へ渡した数字の訂正であり、
+Gate 文書本文は書き換えていない（巻末に訂正注を追記）。
+
+## QD-J16 — CASE_ID_PATTERN が広すぎる（§8 実装の前提）
+
+```text
+CASE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/
+→ opaque-long-token と同じ字種を 48 文字まで許す
+```
+
+現在は guard が throw するので防げているが、検証15 B-1 の測定では
+`A1BcDeFgHiJkLmNoPqRsTuVwXyZ012345` や `sharepoint_case_01` は
+**opaque-long-token / known-private-provider だけ**が止めている。
+
+```text
+→ 3 規則を advisory へ降格するなら、同じ変更の中で
+  CASE_ID_PATTERN を締める必要がある。後回しにしてはいけない。
+  さもないと verifiedCases に入れる caseId が静かに広がる。
+```
+
+## QD-J17 — 非 blocking な診断情報に読み手が無い（§9 実装の前提）
+
+```text
+blockerKinds は計算され、集計され、deep-freeze されて
+closure 結果に入っているが、どこにも描画されていない。
+```
+
+§9 の advisory warnings はこれと同じ道を通る。
+描画面を同じ変更で出さない限り、
+**3 つの throw を 3 つの沈黙に変えるだけ**になる。
+
+## QD-J18 — 引用されている数字が再計算できない
+
+```text
+6,869 / 12.7% / 7,084 / 631〄5,588 / 1,006,264
+→ いずれも .js/.mjs に生成元が無い（grep で 0 件）
+corpus.mjs 自身が「引用する数字は再計算可能にする」と定めているのに違反している。
+12.7% は特に load-bearing だった——A-1 を引き起こした変更の唯一の根拠。
+```
+

@@ -1996,7 +1996,7 @@ Evidence protected state は未変更: `verifiedCases: []` / promotion NONE /
 BMP / astral を走査して削除対象数を数え、旧 24 に無かった代表を回す。
 
 ```text
-実測: BMP 80 / astral（E0000..E01EF）399 / 全体 4,206
+実測: BMP 80 / astral（E0000..E01EF）496 / 全体 4,206
 手書き列挙は 24 だった
 ```
 
@@ -2088,4 +2088,34 @@ lintPublicEvidenceText の新設）は承認後にのみ行う。
 
 実装コードはこの round で一行も変えていない。
 head 76aba49 の振る舞いは D-047 時点から不変。
+
+## D-049 — 通貨と path の切り分けは前置きではなく後続でやる
+
+```text
+状態 : 確定（§17 の Required Fix 範囲）
+```
+
+round 10 は `Price:\u00a5500` の過剰 reject を normalizer に `(?!\d)` を
+足して逃がした。それが F15-A1——数字で始まる segment を持つ path が
+全部素通りするようになった。誤りは fold ではなく規則側にあった。
+
+```text
+誘惑された選択肢と、されなかった理由:
+
+(1) fold を文脈依存にする（前が `[A-Za-z]:` なら畳む）
+    → `Price:` がまさにその形。かつ closure の
+      「union に足せば単調」という性質そのものを壊す
+(2) 広い fold を union に追加する（e336428 の教訓の適用）
+    → union なので `Price:\\500` 形が必ず生まれ、F14-03 が再発する
+(3) 規則を締める（採用）
+    → drive letter の判定を後続で行う。fold は無条件に戻せる
+```
+
+前置き制限（`(^|[^A-Za-z0-9])`）も一度試して入れたが、
+guard-diff が `aC:\\Users` / `検菎2C:\\Users` を含む 136 件の regression を出した。
+drive letter は隣接文字の陰に隠れられるので前置き制限は採らない。
+過剰 reject（`ab:/x/y` が落ちる）は fail-closed 側なので受け入れる。
+
+この round で学んだこと: **過剰 reject を normalizer で逃がすと、
+規則の緩さが normalizer の穴として保存される**。規則を直せ。
 

@@ -29,11 +29,39 @@ export const TRAILING = ['', 'Ａ', '１', '９', 'A', '2'];
 // rather than only the one under repair. Review 11 (F11-01) found a regression
 // that a filename-only corpus could not see: the wide fold maps ＿ to a word
 // character, which destroys the \b anchor in the `www` rule.
+// Path segments are DERIVED over the character classes that distinguish a path
+// from prose, not hand-picked. Every hand-written core in this file used to start
+// each segment with a letter, so the \u00a5 axis below could never produce a digit
+// after a separator — which is exactly the shape that regressed in round 10 and
+// that this differential certified as `REGRESSIONS: 0` (F15-E3).
+// Adding one digit example would repeat the mistake one axis later; the product is
+// what keeps the class from going blind again.
+export const PATH_SEGMENTS = [
+  'Users', 'share', 'docs',        // letter-initial
+  '2024', '01', '1458',            // digit-initial
+  '2024年度', '3階', '1458号',      // digit-initial, CJK tail
+  '案件', '図面', '共有',            // CJK
+  '192.168.10.5', '10.0.0.1',      // dotted, digit-initial (IPv4 file servers)
+  '2026-09-23', 'a1', '1a'         // mixed
+];
+
+const DRIVE_CORES = [];
+const UNC_CORES = [];
+const POSIX_CORES = [];
+PATH_SEGMENTS.forEach((seg) => {
+  PATH_SEGMENTS.forEach((tail) => {
+    DRIVE_CORES.push('C:\\' + seg + '\\' + tail);
+    UNC_CORES.push('\\\\' + seg + '\\' + tail);
+  });
+  DRIVE_CORES.push('C:\\' + seg);          // single-segment drive
+  POSIX_CORES.push('/home/' + seg + '/x', '/Users/' + seg + '/x', '~/' + seg + '/x');
+});
+
 export const RULE_CORES = [
   'abc@example.com', 'https://drive.google.com/x', 'www.example.com',
-  'C:\\Users\\x', 'notion.so/page', '\\\\server\\share\\x', '/home/user/x', '~/docs/x',
+  'notion.so/page',
   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', '<img src=x onerror=alert(1)>', '<!--x-->'
-];
+].concat(DRIVE_CORES, UNC_CORES, POSIX_CORES);
 
 export const PROSE = [
   'index.html の初期値', 'calc.js を参照', 'README.md に記載', 'data.json 形式',

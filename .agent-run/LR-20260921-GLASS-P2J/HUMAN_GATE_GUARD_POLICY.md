@@ -310,3 +310,32 @@ Do not Ready. Do not merge. Do not Production.
 A newly found defect in one of the nine structural hard rules may still be
 handled as a normal Required Fix.
 ```
+
+---
+
+## 実装セッションからの訂正注（本文は変更していない）
+
+独立検証15 と実装セッションの再測定により、§2 と §12 が依拠する
+**11.3%** という数字が再現しないことが分かった。QD-J15 に詳細。
+
+```text
+実測（二者が独立に同じ値）: 全 tracked 散文 820/21,614 = 3.8%
+内訳の主張は順位が逆で、496+84 = 580 ≠ 631 と自己矛盾している
+且つ guard が支配する母集団（publicDescription）では 0%——
+guard は構築時に強制されるので、commit 済み text は全部「通ったもの」だけ。
+repository 散文ではこの guard の偽陽性率を原理的に推定できない。
+```
+
+これは推奨決定（§15 APPROVE）を否定するものではない。
+open-set の論拠（§1）は数字とは独立に成立している。
+影響するのは §2 の表現と §12 の手順であり、
+決定前にこの 2 節を直すことを推奨する。
+
+また §8 実装の前提として 2 件が新たに分かった:
+
+```text
+QD-J16  CASE_ID_PATTERN が広すぎる。3 規則を降格するなら同じ変更で締める
+QD-J17  blockerKinds に読み手が無い。§9 warnings は描画面を同時に出さないと
+        3 つの throw を 3 つの沈黙に変えるだけになる
+```
+

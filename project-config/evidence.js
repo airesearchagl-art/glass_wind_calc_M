@@ -301,7 +301,7 @@
   // \p{Variation_Selector} は書かない——260 件全部が
   // Default_Ignorable_Code_Point の部分集合であることを全走査で確認した。
   // 死んだ条件を残すと「それを削っても test が通る」変異が生まれる。
-  var FORMAT_CHARS = /[\p{Cf}\p{Default_Ignorable_Code_Point}\u034f]/gu;
+  var FORMAT_CHARS = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
   function stripFormatChars(text) {
     return text.replace(FORMAT_CHARS, '');
   }
@@ -310,15 +310,23 @@
   // （JIS X 0201 で 0x5C が YEN SIGN）。`C:\u00a5Users\u00a5案件` は実際にこう書かれる。
   // windows-absolute-path / unc-path は本Campaign で一度も見ていなかった規則で、
   // この形は全部素通りしていた（独立検証13 F13-07）。
-  // 通貨表記（`\u00a51,500,000`）は規則が英字+コロンか重複区切りを要求するので影響しない。
   function foldYenToBackslash(text) {
-    // 数字が続く `\u00a5` は通貨であり path 区切りではない。
-    // この例外が無いと `Price:\u00a5500` が windows-absolute-path に化ける——
-    // 実測で現実的な円表記文の **12.7%**。
-    // 前回は「英字+コロンを要求するので影響しない」と書いたが、
-    // `Price:` がまさにその形だった（独立検証14 F14-03）。
-    // テストも裸の `\u00a5N` だけを見ていたので反例を作れなかった。
-    return text.replace(/[\u00a5\uffe5](?!\d)/g, '\\');
+    // 無条件に畳む。fold は集合であり、置換は monotone でない（e336428）。
+    //
+    // 独立検証14 F14-03 で `Price:\u00a5500` の過剰 reject を見つけたとき、
+    // ここに `(?!\d)` を足して逃がした。それが独立検証15 F15-A1 ——
+    // 数字で始まる segment を持つ path が全部素通りするようになった。
+    //   `C:\u00a52024年度\u00a5案件` / `\u00a5\u00a5192.168.10.5\u00a5共有`
+    // IPv4 で指した file server は区切りの直後が必ず数字なので、
+    // `\u00a5\u00a5<any IPv4>\u00a5<share>` が無条件に通っていた（実測 63.1% が regress）。
+    //
+    // 誤りは fold ではなく規則側にあった。`Price:` の `e:` を
+    // drive letter と読む windows-absolute-path が緩すぎただけで、
+    // drive letter を「英数字に前置されない 1 文字」に締めれば
+    // 無条件 fold のまま `Price:\u00a5500` は通り `C:\u00a52024` は落ちる。
+    // 通貨の例外を normalizer 側に置くと、fold が文脈依存になり
+    // 「union に足せば単調」という closure の性質そのものを壊す。
+    return text.replace(/[\u00a5\uffe5]/g, '\\');
   }
 
   // Unicode 正規化（NFKC）。数学用英字等の astral lookalike
@@ -389,9 +397,29 @@
     { name: 'url-scheme', pattern: /[a-z][a-z0-9+.-]*:\/\//i },
     { name: 'www', pattern: /www\./i },
     { name: 'known-private-provider', pattern: /drive\.google|docs\.google|notion\.(so|com)|sharepoint|dropbox/i },
-    { name: 'windows-absolute-path', pattern: /[A-Za-z]:\\/ },
-    { name: 'unc-path', pattern: /\\\\[^\\\s]+\\[^\\\s]*/ },
-    { name: 'unix-home-or-absolute-path', pattern: /(~\/|\/Users\/|\/home\/|\/mnt\/)/ },
+    // drive letter は英数字に前置されない 1 文字（F15-A1: `Price:` の `e:` を
+    // drive と誤読していた）。区切りは `\\` と `/` 両方——`C:/2024/x` は
+    // git-bash・JSON config・tooling 出力での通常の綴り（F15-A2）。
+    { name: 'windows-absolute-path',
+      // 区切りの直後が桁区切りカンマ付きの数値なら通貨。`Type B:\u00a53,000` は
+      // 空白+1文字+コロンで drive letter と同形になる（F15-S41）。
+      // `D:\u00a51458号` / `C:\u00a52024年度` はカンマ区切りではないので path のまま。
+      // drive とみなす条件は二択:
+      //   (a) 区切りが 2 つ目もある（`C:\u00a53階\u00a5案件`）——通貨額に 2 つ目の区切りは付かない
+      //   (b) 区切りの直後が通貨リテラルでない（`C:\u00a5temp` / `Z:\u00a52024` / `Z:\u00a501`）
+      // 通貨リテラル =「先頭ゼロなしの 1..3 桁 + 任意の桁区切り群」で、直後に
+      // 語字・数字・ドット・仮名・漢字が続かないもの。`192.168.10.5` も
+      // `2024年度` も当たらない。仮名漢字を除くのは `C:\u00a53階` のため——
+      // 区切りが 1 つしかない path を通貨と読んでいた（guard-diff が 32 件検出）。
+      // drive letter に前置き制限は付けない。`(^|[^A-Za-z0-9])` を付けた版は
+      // `aC:\\Users` / `検討2C:\\Users` を通した（差分 136 件、F15-E3 の corpus が検出）。
+      // 通貨との切り分けは前置きではなく後続でやる——そちらは構造的に決まる。
+      pattern: /[A-Za-z]:[\\\/](?:[^\s\\\/]{0,255}[\\\/]|(?!(?:0|[1-9]\d{0,2})(?:,\d{3})*(?![\d\w.\u3040-\u30ff\u3400-\u9fff\uff66-\uff9f])))/ },
+    // `//host/share` は Windows API と PowerShell が受ける UNC の綴り（F15-A3）。
+    // `:` 前置は除外——`https://` は url-scheme の担当。
+    { name: 'unc-path', pattern: /\\\\[^\\\s]+\\[^\\\s]*|(^|[^:A-Za-z0-9])\/\/[^\/\s]+\/[^\/\s]/ },
+    // macOS / Windows では大小が同じ path を指す（F15-A4）。
+    { name: 'unix-home-or-absolute-path', pattern: /(~\/|\/Users\/|\/home\/|\/mnt\/)/i },
     { name: 'opaque-long-token', pattern: /\b[A-Za-z0-9_-]{28,}\b/ },
 
     // ── Phase 2J Wave 5 で実測により追加 ───────────────────────
@@ -405,7 +433,12 @@
     // 分からなくなり、どれも単独では信用できなくなる）。
 
     // 担当者のメールアドレス等。個人を特定しうる連絡先は公開しない。
-    { name: 'email-like', pattern: /[A-Za-z0-9._%+-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*\.[A-Za-z]{2,}/ },
+    // local part は非ASCII可（RFC 6531）、domain は IDN 可。
+    // 引用 local part（RFC 5322）と address literal（RFC 5321）は別枝（F15-A5）。
+    { name: 'email-like',
+      // 量指定子はすべて上限付き。RFC 5321 の local part 上限は 64、label は 63。
+      // 否定クラスを無制限の `+` で広げた版は 40k 入力に 1.8 秒かかった（F15-S21 再発）。
+      pattern: /[^\s@<>()\[\]"]{1,64}@[A-Za-z0-9\u00a1-\uffff][A-Za-z0-9\u00a1-\uffff-]{0,62}(?:\.[A-Za-z0-9\u00a1-\uffff][A-Za-z0-9\u00a1-\uffff-]{0,62}){0,8}\.[A-Za-z\u00a1-\uffff]{2,24}|"[^"]{0,64}"@[A-Za-z0-9\u00a1-\uffff.-]{1,255}\.[A-Za-z\u00a1-\uffff]{2,24}|@\[[0-9A-Fa-f:.]{2,45}\]/ },
 
     // 私的文書・図面のファイル名。拡張子集合は caseId 側の既存ポリシー
     // （FILENAME_LIKE_CASE_ID_PATTERN）と**同じ**ものを使う。
@@ -489,7 +522,9 @@
     // （検証者が naive fix で実測。上限付きなら線形のままであることも実測済み）。
     { name: 'html-like-tag', detect: containsHtmlLikeTag },
 
-    { name: 'markup-construct', pattern: /<!--|<!\[CDATA\[|<!DOCTYPE|<\?[A-Za-z]/i },
+    // DOCTYPE の兄弟（ENTITY/ATTLIST/ELEMENT/NOTATION）と `<?=`、CDATA 終端も
+    // 同じ族。列挙漏れであって open-set ではない（F15-A6）。
+    { name: 'markup-construct', pattern: /<!--|<!\[CDATA\[|<![A-Za-z]|<\?[A-Za-z=]|\]\]>/i },
 
     // 非印字の制御文字。黙って落とさず fail closed にする。
     // 改行 (\n \r) と タブ (\t) は**意図的に許容**する:
@@ -1017,8 +1052,12 @@
   return {
     EVIDENCE_LEVELS: Object.freeze(EVIDENCE_LEVELS),
     VERIFICATION_STATUSES: Object.freeze(VERIFICATION_STATUSES),
-    CHECKED_AT_PATTERN: CHECKED_AT_PATTERN,
-    PUBLIC_UNSAFE_TEXT_PATTERNS: Object.freeze(PUBLIC_UNSAFE_TEXT_PATTERNS),
+    // F4 で「呼び出し側から緩められないよう freeze して返す」と書いたが、
+    // Object.freeze は配列だけを凍らせ、中の規則オブジェクトは可変のままだった。
+    // `...find(e => e.name === 'www').pattern = /$^/` の 1 行で規則が死ぬ（F15-E1）。
+    // deepFreeze はこの同じファイルが export している（F15-E2 も同根）。
+    CHECKED_AT_PATTERN: deepFreeze(CHECKED_AT_PATTERN),
+    PUBLIC_UNSAFE_TEXT_PATTERNS: deepFreeze(PUBLIC_UNSAFE_TEXT_PATTERNS),
     PRIVATE_DOCUMENT_EXTENSION_SOURCE: PRIVATE_DOCUMENT_EXTENSION_SOURCE,
     // 範囲の端点をテストから直接押さえるために export する（P2J-S32）。
     foldFullwidthAscii: foldFullwidthAscii,

@@ -1628,7 +1628,7 @@ protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughn
 ```text
 修正前: FORMAT_CHARS を手書き 24 へ戻す変異 → 643/643 で生存
 修正後: 同じ変異 → KILLED（P2J-S39 が導出されていることを測る）
-実測: BMP 80 / astral（E0000..E01EF）399 / 全体 4,206 対 手書き 24
+実測: BMP 80 / astral（E0000..E01EF）496 / 全体 4,206 対 手書き 24
 ```
 
 ### F14-03: ¥ fold の過剰拒否
@@ -1638,7 +1638,7 @@ protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughn
 Price:\u00a5500              拒否     受理
 Total:\u00a51,500,000        拒否     受理
 JPY:\u00a51,500              拒否     受理
-C:\u00a5Users\u00a5tanaka\u00a5案件  拒否     拒否   ← path 側は維持
+C:\u00a5Users\u00a5tanaka\u00a5案件  拒否     拒否   ← この 2 例は区切りの後が非数字だっただけ（F15-E8）
 \uffe5\uffe5fileserver\uffe5案件   拒否     拒否
 ```
 
@@ -1666,6 +1666,88 @@ npm test        : 643 pass / 0 fail
 browser         : 62 pass / 0 fail
 parser boundary : 42形 / bypass 0
 mutation        : 7/7 KILLED + 1 等価（全コードポイント走査で確認）
+protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
+```
+
+## §51 — 独立検証15 の修理（D-049）
+
+§17 の stop condition は 3 つの heuristic 規則にかかる。
+ここで直したのは **Gate が hard throw として残すとした 9 規則**の欠陥であり、
+§17 が明示的に Required Fix として認めている範囲。
+
+### F15-A1（HIGH / 自分が round 10 で入れた regression）
+
+```text
+                              2f51b94   HEAD
+図面は C:\u00a52024年度\u00a5案件 に保管   受理    拒否
+原本は \u00a5\u00a5192.168.10.5\u00a5共有 にある  受理    拒否
+D:\u00a51458号\u00a5検討書                    受理    拒否
+\uffe5\uffe5010fileserver\uffe5kouji           受理    拒否
+```
+
+IPv4 で指した file server は区切りの直後が必ず数字なので、
+`\u00a5\u00a5<any IPv4>\u00a5<share>` が無条件に通っていた。
+
+根本原因は fold ではなく**規則側**だった。
+`Price:` の `e:` を drive letter と読む windows-absolute-path が緩く、
+その過剰 reject を normalizer に `(?!\d)` を足して逃がしたのが round 10。
+fold を無条件に戻し、通貨との切り分けを**前置きではなく後続**でやる形へ直した。
+
+```text
+drive とみなすのは二択:
+  (a) 区切りが 2 つ目もある        通貨額に 2 つ目の区切りは付かない
+  (b) 区切りの直後が通貨リテラルでない
+通貨リテラル = 先頭ゼロなし 1..3 桁 + 任意の桁区切り群で、
+             直後に語字・数字・ドット・仮名漢字が続かないもの
+```
+
+### F15-A2..A6 / E-1 / E-2（既存の欠陥）
+
+```text
+A2 C:/2024/x など forward slash の drive path     受理 → 拒否
+A3 //srv/share（PowerShell が受ける UNC）        受理 → 拒否
+A4 /users/ /USERS/ /Home/ /MNT/（大小違い）       受理 → 拒否
+A5 田中@example.co.jp / "a b"@x.com /
+   u@[192.168.1.1] / u@例え.jp                      受理 → 拒否
+A6 <!ENTITY <!ATTLIST <!ELEMENT <!NOTATION <?= ]]>  受理 → 拒否
+E1 PUBLIC_UNSAFE_TEXT_PATTERNS が浅い freeze だった
+   → `...find(e=>e.name==='www').pattern = /$^/` の 1 行で規則が死ぬ
+E2 CHECKED_AT_PATTERN も同じクラス。deepFreeze を適用
+E6 \u034f は Default_Ignorable に含まれるので削除（真に等価）
+```
+
+### 差分検証（guard-diff）
+
+```text
+corpus              : 629,238 入力（path segment を字種クラスから導出）
+2f51b94 拒否       : 395,764
+HEAD 拒否           : 396,604
+REGRESSIONS         : **0**
+tightened           : **840**（windows-absolute-path 360 / unc-path 480）
+```
+
+corpus 自体も直した。path core がすべて英字始まりの segment だったため
+\u00a5 軸は数字始まりを一度も生成できず、A-1 を `REGRESSIONS: 0` と認定していた（F15-E3）。
+例を 1 つ足すのでは同じ間違いを一軸先で繰り返すので、segment を直積にした。
+
+### 変異（R15-01..R15-14）
+
+```text
+14 作成 / **14 KILLED** / 生存 0 / PATCH-MISS 0
+うち R15-12（第2区切り分岐）と R15-13（仮名漢字除外）は
+unit test では押さえられておらず、guard-diff corpus だけが見つけた。
+両方とも P2J-S49(d) で固定済み。
+```
+
+### 回帰
+
+```text
+npm test        : 651 pass / 0 fail（P2J-S42..S49 を新設）
+browser         : 62 pass / 0 fail
+parser boundary : bypass 0
+ReDoS           : 遅い形はすべて 2f51b94 でも遅い（QD-J04）。
+                  量指定子に上限を付けたので 1 ケースは 2565ms → 892ms
+repo 散文 reject : 3.8% → 3.9%（締めた分だけ）
 protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
 ```
 

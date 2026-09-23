@@ -1039,3 +1039,53 @@ Ready / merge / Production : すべて未許可
 Implementation verification head : **未確定**
 ```
 
+## Wave 6p — 独立検証15 の Required Fix（D-049）
+
+```text
+npm test        : 651 pass / 0 fail（P2J-S42..S49 新設）
+browser         : 62 pass / 0 fail
+parser boundary : bypass 0
+mutation        : R15-01..R15-14 —— 14/14 KILLED / 生存 0
+guard-diff      : corpus 629,238 / REGRESSIONS **0** / tightened **840**
+repo 散文 reject : 3.9%（3.8% から締めた分）
+protected facts : 5 件すべて一致
+Implementation verification head : **未確定**
+```
+
+### 直したもの（すべて Gate が hard throw として残す 9 規則側）
+
+```text
+F15-A1  \u00a5 区切りの直後が数字の path が素通り（round 10 で自分が入れた）
+F15-A2  forward slash の drive path
+F15-A3  forward slash の UNC
+F15-A4  path 接頭辞の大小区別
+F15-A5  非ASCII / 引用 / address literal / IDN のアドレス
+F15-A6  <!ENTITY 等 SGML 宣言の兄弟
+F15-E1  規則表が浅い freeze。1 行で規則を殺せた
+F15-E2  CHECKED_AT_PATTERN も同じ
+F15-E3  guard-diff corpus が A-1 の軸に盲目だった
+F15-E6  \u034f の重複
+F15-E7  astral の実数 399 → 496 へ訂正
+F15-E8  §50 の「path 側は維持」注記を訂正
+```
+
+### Human Gate へ戻すもの
+
+```text
+QD-J15  11.3% は再現しない（実測 3.8%）。且つ測る母集団が違う。
+        §2 の表現と §12 の手順を決定前に直すことを推奨
+QD-J16  CASE_ID_PATTERN（§8 の前提）
+QD-J17  blockerKinds に読み手が無い（§9 の前提）
+QD-J18  引用数字が再計算できない
+```
+
+### 変わっていないこと
+
+```text
+§17 stop condition 維持: www / known-private-provider / opaque-long-token は触っていない
+§8 実装は未着手（承認待ち）
+Primary Evidence UNAVAILABLE / observations 0 / BLOCKED_BY_MISSING_EVIDENCE
+promotion NONE / verifiedCases [] / 1250×2050 sample_default / V0 34 / roughness III
+Ready / merge / Production : すべて未許可
+```
+

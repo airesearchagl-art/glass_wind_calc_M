@@ -1448,3 +1448,235 @@ test('P2J-S19: A1修正後も現行configとObservation経路は通る', () => {
     }), 'miyoshi');
   assert.match(o.evidence.publicDescription, /W < H/);
 });
+
+// ---------------------------------------------------------------------------
+// 独立検証15 が見つけた 9 つの構造規則の欠陥（F15-A1..A6 / E1 / E2）。
+// 手書きの例示リストではなく直積で作る——検証11 の教訓（TB19 が唯一
+// 漏れなかったのは、定数と独立に列挙していたから）。
+// ---------------------------------------------------------------------------
+
+test('P2J-S42: \u00a5 区切りの直後が数字でも path は path（F15-A1）', () => {
+  const YEN = ['\u00a5', '\uffe5'];
+  // 数字で始まる segment。IPv4 の file server は区切り直後が必ず数字になる。
+  const DIGIT_SEGMENTS = ['2024年度', '1458号', '192.168.10.5', '010fileserver',
+                          '3階', '01', '2026-09-23'];
+  const TAIL = ['案件', '検討書', '共有', 'kouji', 'x'];
+
+  let checked = 0;
+  YEN.forEach((y) => {
+    DIGIT_SEGMENTS.forEach((seg) => {
+      TAIL.forEach((tail) => {
+        // drive 形と UNC 形の両方
+        const drive = 'C:' + y + seg + y + tail;
+        const unc = y + y + seg + y + tail;
+        [drive, unc, '図面は ' + drive + ' に保管', '原本は ' + unc + ' にある'].forEach((text) => {
+          checked++;
+          assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+            /windows-absolute-path|unc-path/, text);
+        });
+      });
+    });
+  });
+  assert.equal(checked, YEN.length * DIGIT_SEGMENTS.length * TAIL.length * 4);
+  assert.equal(checked > 250, true, '直積が縮んでいる: ' + checked);
+
+  // 単一 segment の drive path も落ちること（区切りが 1 つしかない形）
+  ['C:' + '\u00a5' + 'temp', 'D:' + '\u00a5' + 'share', 'Z:' + '\uffe5' + '2024'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), /windows-absolute-path/, text);
+  });
+});
+
+test('P2J-S43: ラベル付き通貨は通る——F14-03 を再発させない（F15-S41）', () => {
+  // `Type B:\u00a53,000` は 空白+1文字+コロン で drive letter と同形になる。
+  // 桁区切りカンマの有無で切っているので、両側を押さえる。
+  const LABELS = ['Price', 'Total', 'JPY', 'budget', 'Type B', '型式 A', 'B'];
+  const AMOUNTS = ['500', '1,500', '3,000', '1,500,000', '2,000,000'];
+  let accepted = 0;
+  LABELS.forEach((label) => {
+    AMOUNTS.forEach((amt) => {
+      ['\u00a5', '\uffe5'].forEach((y) => {
+        const text = label + ':' + y + amt;
+        assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+        accepted++;
+      });
+    });
+  });
+  assert.equal(accepted, LABELS.length * AMOUNTS.length * 2);
+
+  // 逆側: カンマ区切りでない数値が続く drive は path のまま
+  ['C:\u00a51458号', 'D:\u00a52024年度', 'Z:\uffe501'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), /windows-absolute-path/, text);
+  });
+});
+
+test('P2J-S44: 区切りは / でも path（F15-A2 / F15-A3）', () => {
+  // git-bash・JSON config・tooling 出力では forward slash が通常の綴り。
+  const DRIVES = ['C', 'D', 'Z', 'c', 'z'];
+  const SEGS = ['2024', '案件', 'kouji', 'temp', 'Users'];
+  DRIVES.forEach((d) => {
+    SEGS.forEach((seg) => {
+      const text = d + ':/' + seg + '/x';
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+        /windows-absolute-path/, text);
+    });
+  });
+  // forward-slash UNC（Windows API / PowerShell が受ける形）
+  ['//srv/share', '//192.168.1.1/共有', '//fileserver/案件/図面'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), /unc-path/, text);
+  });
+  // `https://` は url-scheme の担当であって unc-path ではない（二重計上しない）
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('https://x.example.com', 'prose'),
+    /url-scheme/, 'scheme は scheme として落ちる');
+});
+
+test('P2J-S45: path 接頭辞は大小を問わない（F15-A4）', () => {
+  // macOS / Windows では同じ path を指す。全ケース変種を列挙して作る。
+  const PREFIXES = ['/Users/', '/home/', '/mnt/'];
+  let checked = 0;
+  PREFIXES.forEach((prefix) => {
+    const body = prefix.slice(1, -1);
+    // 各文字の大小を総当たりすると 2^n。長さが短いので全列挙できる。
+    const n = body.length;
+    for (let mask = 0; mask < (1 << n); mask++) {
+      let v = '';
+      for (let i = 0; i < n; i++) {
+        v += (mask & (1 << i)) ? body[i].toUpperCase() : body[i].toLowerCase();
+      }
+      const text = '/' + v + '/tanaka';
+      checked++;
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+        /unix-home-or-absolute-path/, text);
+    }
+  });
+  assert.equal(checked, 32 + 16 + 8, '全ケース変種を見ていない: ' + checked);
+});
+
+test('P2J-S46: 構造的なアドレス形式（F15-A5）', () => {
+  // RFC 6531 の非ASCII local part / RFC 5322 の引用 local part /
+  // RFC 5321 の address literal / IDN domain。いずれも「開いた集合」ではなく
+  // 規格が定めた有限の構文枝。
+  const FORMS = [
+    '田中@example.co.jp', '山田太郎@example.com',
+    '"a b"@example.com', '"tanaka san"@example.co.jp',
+    'u@[192.168.1.1]', 'u@[2001:db8::1]',
+    'u@例え.jp', 'u@日本.co.jp',
+    'u@example.com', 'u.v+tag@sub.example.co.jp', 'u\uff20example.com'
+  ];
+  FORMS.forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), /email-like/, text);
+  });
+  // 単位表記を巻き込まない
+  ['重量@10.5kg', '@ は区切り文字', '単価@3000'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+});
+
+test('P2J-S47: SGML/XML 宣言は族ごと落とす（F15-A6）', () => {
+  // DOCTYPE だけを列挙して兄弟を落としていた。族として押さえる。
+  const DECLS = ['DOCTYPE', 'ENTITY', 'ATTLIST', 'ELEMENT', 'NOTATION'];
+  DECLS.forEach((d) => {
+    ['<!' + d + ' x>', '<!' + d.toLowerCase() + ' x>'].forEach((text) => {
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+        /markup-construct/, text);
+    });
+  });
+  ['<!--x-->', '<![CDATA[x]]>', ']]>', '<?xml version="1.0"?>', '<?= $x ?>'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /markup-construct|html-like-tag/, text);
+  });
+  // 不等号を含む技術文は巻き込まない
+  ['W < H かつ P > Q', '5<Z<40 の範囲', 'a<b かつ b<c'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+});
+
+test('P2J-S48: 公開した契約は呼び出し側から緩められない（F15-E1 / F15-E2）', () => {
+  // Object.freeze は配列だけを凍らせ、中の規則オブジェクトは可変のままだった。
+  // 規則名を名指しせず、全エントリを列挙して押さえる。
+  const table = Evidence.PUBLIC_UNSAFE_TEXT_PATTERNS;
+  assert.equal(Object.isFrozen(table), true, '配列が凍っていない');
+  assert.equal(table.length >= 12, true, '規則が減っている: ' + table.length);
+
+  table.forEach((entry) => {
+    assert.equal(Object.isFrozen(entry), true, '規則が凍っていない: ' + entry.name);
+    // strict mode では代入が TypeError になること
+    assert.throws(() => { 'use strict'; entry.pattern = /$^/; }, TypeError, entry.name + '.pattern');
+    assert.throws(() => { 'use strict'; entry.detect = () => false; }, TypeError, entry.name + '.detect');
+    assert.throws(() => { 'use strict'; entry.name = 'x'; }, TypeError, entry.name + '.name');
+    if (entry.pattern) {
+      assert.equal(Object.isFrozen(entry.pattern), true, 'pattern が凍っていない: ' + entry.name);
+    }
+  });
+
+  // 攻撃を試みたあとも挙動が変わらないこと（凍結が実効であることの証明）
+  try { table.find((e) => e.name === 'www').pattern = /$^/; } catch (e) { /* sloppy は黙殺 */ }
+  try { table.find((e) => e.name === 'html-like-tag').detect = () => false; } catch (e) { /* 同上 */ }
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('www.example.com', 'prose'), /www/);
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('<img src=x onerror=alert(1)>', 'prose'),
+    /html-like-tag/);
+
+  // CHECKED_AT_PATTERN も同じクラス
+  assert.equal(Object.isFrozen(Evidence.CHECKED_AT_PATTERN), true, 'CHECKED_AT_PATTERN が凍っていない');
+  assert.throws(() => { 'use strict'; Evidence.CHECKED_AT_PATTERN.test = () => true; }, TypeError);
+  assert.equal(Evidence.isValidCheckedAt('nope'), false, '日付契約が無効化された');
+  assert.equal(Evidence.isValidCheckedAt('2026-09-23'), true);
+});
+
+test('P2J-S49: 変異が生き残っていた 3 座標（F15-E4 / F15-E5 / R15-01）', () => {
+  // (a) R15-08 / F15-E4: fold は \u00a5 と \uffe5 の両方を畳む。
+  // closure 越しの witness（`\uff10b:\uffe5`）ではなく normalizer の契約を直接押さえる。
+  // NFKC が \uffe5 -> \u00a5 を与えるので「冗長では」と読みたくなるが、
+  // 差分探索で 400k 中 183 件の挙動差が出る（mutant が head の reject を通す向きを含む）。
+  assert.equal(Evidence.foldYenToBackslash('\u00a5'), '\\', 'ASCII yen');
+  assert.equal(Evidence.foldYenToBackslash('\uffe5'), '\\', 'fullwidth yen');
+  assert.equal(Evidence.foldYenToBackslash('a\uffe5b\u00a5c'), 'a\\b\\c', '混在');
+  ['\uff10b:\uffe5', '\uff21b:\uffe5\u00a5', '\uff21a:\uffe5\uff100\u0031'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /windows-absolute-path|unc-path/, '差分探索の witness: ' + JSON.stringify(text));
+  });
+
+  // (b) R15-09 / F15-E5: closure の収束深さ。
+  // コードの隣のコメントは「高々 3」と書いていたが、実測の最大は 5（28 形）。
+  // guard = 16 の根拠がどこにも無かったので、深い入力が throw しないことを押さえる。
+  const DEEP = ['\u200b\u3002\uff3f\uffe5\uff21\uff10', '\u3002\uffe5\uff21\uff10\u200b\uff3f',
+                '\uff0e\uff61\u00b7\uffe5\uff21\uff10\u200b', '\u2024\u3002\uff3f\uffe5\uff10\uff21\ufe0f'];
+  DEEP.forEach((text) => {
+    assert.doesNotThrow(() => {
+      try { Evidence.assertPublicSafeEvidenceText(text, 'prose'); } catch (e) {
+        if (/did not converge/.test(e.message)) throw e;   // 収束失敗だけを失敗とみなす
+      }
+    }, '収束しなかった: ' + JSON.stringify(text));
+  });
+  // 独立に生成した多文字入力でも収束すること（guard の余裕を測る）
+  const CHARS = ['\u00a5', '\uffe5', '\uff3f', '\u3002', '\uff0e', '\u200b', '\ufe0f', '\uff21', '\uff10', '\u2024'];
+  for (let i = 0; i < 2000; i++) {
+    let text = '';
+    for (let j = 0; j < 1 + (i % 10); j++) text += CHARS[(i * 7 + j * 3) % CHARS.length];
+    try { Evidence.assertPublicSafeEvidenceText(text, 'prose'); } catch (e) {
+      assert.equal(/did not converge/.test(e.message), false, '収束失敗: ' + JSON.stringify(text));
+    }
+  }
+
+  // (c) R15-01: drive letter に前置き制限を付けると隣接文字の陰に隠れる。
+  // `(^|[^A-Za-z0-9])` を付けた版は guard-diff corpus で 136 件の regression を出した。
+  // 過剰 reject（`ab:/x/y` が落ちる）は fail-closed 側なので受け入れる。
+  ['aC:\\\\Users', '検討2C:\\\\Users', 'ZC:\\\\Users', 'a:/x/y', ' b:/x/y', 'C:/x/y',
+   'ab:/x/y'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /windows-absolute-path/, '隣接文字の陰に隠れた drive: ' + text);
+  });
+  // 通貨との切り分けは前置きではなく後続でやるので、ラベルが何文字でも通る
+  ['Price:\u00a5500', 'B:\u00a5500', 'Type B:\u00a53,000', '型式 A:\u00a5500'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+
+  // (d) 通貨判定の 2 つの分岐。どちらも guard-diff corpus だけが見つけていて
+  // unit test では押さえられていなかった（R15-12 / R15-13 が生き残っていた）。
+  //   分岐(a) 2 つ目の区切りがあれば通貨ではない —— `C:\\3,000\\x`
+  //   分岐(b) 仮名漢字が続けば通貨ではない     —— `C:\\3階`
+  ['C:\\\\3,000\\\\x', 'C:\u00a53,000\u00a5x', 'C:\\\\3階', 'C:\u00a53階',
+   'C:\\\\3階\\\\案件', 'C:\u00a53階\u00a5案件'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /windows-absolute-path/, '通貨と誤読: ' + JSON.stringify(text));
+  });
+});
