@@ -747,6 +747,101 @@ test('P2J-S24: 私的文書のファイル名判定は幹がASCIIであること
     });
 });
 
+test('P2J-S33: 拒否されるファイル名に装飾を 1 文字入れても受理に転じない', () => {
+  // 独立検証9 F9-01。これが本Phase で 3 度目の同じ形の欠陥だった。
+  //
+  // S24 には「装飾付き幹」のブロックも「全角拡張子」のブロックもあったが、
+  // 前者は半角 dot・半角拡張子、後者は装飾無し。**両方が交わる形**——
+  // つまり `構造計算書（最新）．ｐｄｆ`——をどちらも含んでいなかった。
+  // グリッドの穴は行と列を個別に見ている限り見えない。
+  //
+  // よって直積を**生成**する。装飾文字は「畳むと幹の区切りに化ける」
+  // 8 文字を全部入れる（検証6 以来何度も出てきたクラス）。
+  function expandExt(alt) {
+    let out = ['']; let i = 0;
+    while (i < alt.length) {
+      let tok;
+      if (alt.charAt(i) === '[') { const j = alt.indexOf(']', i); tok = alt.slice(i + 1, j).split(''); i = j + 1; }
+      else { tok = [alt.charAt(i)]; i += 1; }
+      const opt = alt.charAt(i) === '?'; if (opt) i += 1;
+      const nx = []; out.forEach((p) => { if (opt) nx.push(p); tok.forEach((c) => nx.push(p + c)); });
+      out = nx;
+    }
+    return Array.from(new Set(out));
+  }
+  const toFull = (t) => t.replace(/[!-~]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0));
+  const exts = Evidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE.split('|')
+    .reduce((a, alt) => a.concat(expandExt(alt)), []);
+
+  // 畳むと幹の区切り文字クラスに入る全角文字。
+  const DECORATIONS = ['（最新）', '（改訂）', '（案）', '＂', '＇', '，', '；', '＜旧＞'];
+  const rejects = (t) => {
+    try { Evidence.assertPublicSafeEvidenceText(t, 'prose'); return false; }
+    catch (e) { return /private-document-filename/.test(e.message); }
+  };
+
+  const leaked = [];
+  let checked = 0;
+  ['構造計算書', '図面', '見積書'].forEach((stem) => {
+    exts.forEach((ext) => {
+      ['.', '．'].forEach((dot) => {
+        [ext, toFull(ext)].forEach((extForm) => {
+          const base = stem + dot + extForm;
+          // positive control: 装飾無しの base が拒否されていなければ何も証明しない。
+          if (!rejects(base)) { leaked.push('BASE:' + base); return; }
+          DECORATIONS.forEach((dec) => {
+            checked++;
+            if (!rejects(stem + dec + dot + extForm)) leaked.push(stem + dec + dot + extForm);
+          });
+        });
+      });
+    });
+  });
+  assert.deepEqual(leaked.slice(0, 8), [], '装飾を入れると通った (全' + leaked.length + '件)');
+  assert.equal(checked, 3 * exts.length * 2 * 2 * DECORATIONS.length);
+  assert.equal(checked > 4000, true, '直積数: ' + checked);
+});
+
+test('P2J-S34: 正規化は**集合**であり、差し替えは単調ではない', () => {
+  // 独立検証9 F9-01 の根。前回は「raw ∨ fold は単調なので安全」と書いたが、
+  // 単調なのは raw に対してだけで、fold を**広いものへ差し替えていた**。
+  // 広い fold は `（）` を区切り文字に変えてしまうので、狭い fold では
+  // 拒否できていた形が通るようになった。
+  // よって normalizer は集合として持ち、**減らさない**。
+  assert.equal(Evidence.TEXT_NORMALIZER_COUNT, 2,
+    'normalizer を減らしたなら、どの形が拒否できなくなったかを確かめること');
+
+  // 各 normalizer が担当する形を 1 つずつ固定する（どちらかを消すと落ちる）。
+  const narrowOnly = '構造計算書（最新）．ｐｄｆ';   // wide fold だと `（）` が幹を切る
+  const wideOnly = 'ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ';             // narrow fold だと `ｗ` が残る
+  [narrowOnly, wideOnly].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /must not contain private URLs/, text);
+  });
+
+  // 畳み関数自体の役割分担を固定する。
+  assert.equal(Evidence.foldFullwidthFilenameChars('（）'), '（）', '狭い畳みは括弧を触らない');
+  assert.equal(Evidence.foldFullwidthAscii('（）'), '()', '広い畳みは括弧を畳む');
+  assert.equal(Evidence.foldFullwidthFilenameChars('．ｐｄｆ'), '.pdf');
+  assert.equal(Evidence.foldFullwidthAscii('．ｐｄｆ'), '.pdf');
+});
+
+test('P2J-S35: 語境界を見るのは raw 側だけ（過剰拒否のコストを固定）', () => {
+  // 独立検証9 F9-03。`(?![A-Za-z])` を外すと `.doc` が `document` の中でマッチし、
+  // **この repository に実在する識別子**（`Workspace.csvEscape`）が落ちる。
+  // 一度外してしまったので、こちら側もテストで押さえる。
+  ['window.document を直接触らない', 'e.target.value を読む', 'event.target を参照する',
+   'node.documentElement を見る', 'config.documentation を参照', 'obj.docs を参照',
+   'Workspace.csvEscape を使う', 'x.gzip で圧縮', 'y.tarball を展開'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+  // しかし数字や全角が続く形は単語の続きでは無いので拒否する。
+  ['構造計算書.pdf2', '図面.dwg1', '構造計算書．ｐｄｆＡ', '図面．ｄｗｇ１'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /private-document-filename/, text);
+  });
+});
+
 test('P2J-S29: 全角畳みは拒否を**増やすだけ**であり減らさない', () => {
   // 独立検証7 F7-03 で導入し、検証8 F8-01 で**このテスト自体が
   // 不変式ではなく標本を押さえていた**ことが分かった。
@@ -966,6 +1061,7 @@ test('P2J-S27: パーサが要素を作らない形は拒否しない（行き�
     '</1img>',                       // bogus comment
     '＜img onerror=alert(1)＞',      // 全角・テキストになる
     '<//a>', '</ >', '<!>',          // bogus comment系（検証6 F2: 行き過ぎ検出用）
+    '<@foo>', 'P<@Q>R', '<1abc>',    // `<` + 非英字（検証9 F9-06: 頭文字クラスの広げすぎ検出）
     '<', '<<<', '>>>'
   ].forEach((text) => {
     assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);

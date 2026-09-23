@@ -1333,6 +1333,10 @@ tag guard を `return false;` にした copy を作り、**その copy の** har
 
 ### コスト（畳みを全規則へ広げた影響）
 
+【§45による追記（検証9 F9-07）】入力形を記録していなかったので検算できなかった。
+形を明記すると再現する（§45 参照）。全角散文の行は `１．５倍で検討` の反復であり、
+`．` を多数含むため dot の少ない全角文より高く出る。
+
 ```text
 入力                          N=2000  4000   8000   16000
   ASCII 散文（畳み不要）        0.2    0.3    0.5    0.8 ms
@@ -1352,6 +1356,71 @@ npm test        : 634 pass / 0 fail
 browser         : 62 pass / 0 fail（harness は相対パス化済み）
 parser boundary : 42形 / bypass 0
 mutation        : 13/13 KILLED（検証8 の 11 生存変異 + 畳み端点 2）
+protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
+```
+
+## §45 — 独立検証9 の修理実測（D-042）
+
+### F9-01: 広い畳みへの差し替えが F1 クラスを再び開けていた
+
+```text
+witness                   df88109  4573d01  HEAD
+構造計算書（最新）．ｐｄｆ        拒否     受理     拒否
+図面（改訂）．ｄｗｇ            拒否     受理     拒否
+見積書（２０２６）．ｘｌｓｘ      拒否     受理     拒否
+図面＜最新＞．ｄｗｇ            拒否     受理     拒否
+構造計算書（最新）.pdf           拒否     拒否     拒否
+```
+
+### F9-03: lookahead 全削除のコスト（前回記録していなかった）
+
+```text
+witness                        4573d01  HEAD
+window.document を直接触らない     拒否     受理
+e.target.value を読む           拒否     受理
+Workspace.csvEscape を使う      拒否     受理   ← workspace.js の実在の export
+config.documentation を参照     拒否     受理
+構造計算書.pdf2               拒否     拒否   ← 閉じたクラスは維持
+図面．ｄｗｇ１                  拒否     拒否
+構造計算書．ｐｄｆＡ               拒否     拒否   ← normalizedPattern が担当
+```
+
+### F9-02: D-041 の訂正値をグリッド定義付きで再導出
+
+```text
+グリッド: 3幹（図面 / 構造計算書 / plan）× 46具体拡張子
+        × dot 2形（. ．）× 拡張子の半角/全角 = 552 base
+        + 552 × 末尾全角英数字 8形 = 4968 証人
+対象 tree: df88109
+  df88109 の拒否  : 1656 / 4968
+  R7-01 stricter = 828   looser = 0
+  R7-02 stricter = 1608  looser = 12
+```
+
+D-041 の `1104 / 2412` はどのグリッドでも再現しない。上の値へ訂正した。
+（検証9 が独立に出した 828 / 1608 と一致する。）
+
+### コスト（入力形を明記する——F9-07）
+
+```text
+入力形                              N=2000  4000   8000   16000
+  "検討した値である。"*(N/9)          0.64   0.54   1.22   1.80 ms
+  "１．５倍で検討"*(N/7)             4.79   9.27  18.74  39.48 ms
+  "ab."*(N/3)                     6.79  15.27  55.91 201.77 ms
+  "ａｂ．"*(N/3)                     6.04  17.47  58.58 208.90 ms
+```
+
+検証9 は別の全角形を測って 10〜14倍低い値を得た。両方正しい——
+`．` を多数含む文は畳み後に dot が増え、filename / email 系の規則をより深く踏む。
+**欠陥は値ではなく、入力形を記録しなかったこと**である。
+
+### 回帰（修理後・全量）
+
+```text
+npm test        : 637 pass / 0 fail
+browser         : 62 pass / 0 fail
+parser boundary : 42形 / bypass 0
+mutation        : 9/9 KILLED
 protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
 ```
 

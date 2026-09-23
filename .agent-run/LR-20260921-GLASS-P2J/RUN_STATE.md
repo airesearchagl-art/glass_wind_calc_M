@@ -805,3 +805,36 @@ Evidence protected state : verifiedCases [] / promotion NONE /
 QD-J10（caseId の経路）は引き続き Human Gate 送り。Wave 7 は blocked。
 ```
 
+## Wave 6i final state（独立検証9 の修理 / D-042）
+
+```text
+npm                        : 637 pass / 0 fail
+browser                    : 62 checks / 0 fail
+parser boundary            : 42形 / bypass 0
+mutation                   : 9/9 KILLED
+protected values           : 5件すべて一致
+validateAllEvidence()      : []
+Implementation verification head : **未確定**（10 回目の独立検証が必要 / §44・§47）
+```
+
+### この Wave で確定したこと
+
+```text
+- 「raw ∨ fold は単調」は raw に対してだけ。fold を差し替えれば回帰する
+  → normalizer を**集合**にし、narrow と wide の両方を持つ（P2J-S34 が固定）
+- lookahead 全削除は行き過ぎだった。`(?![A-Za-z])` へ戻し、
+  正規化形には語境界無しの変種を当てる（P2J-S35 が両方向を固定）
+- S24 の「装飾」と「全角」は交わっていなかった → P2J-S33 が直積を生成
+- hasFullwidthForm を削除（範囲を 2 重に持たない）
+- TB19 の corpus が検査対象の定数から生えていた → 独立な期待列を追加
+- D-041 の 1104/2412 を 828/1608 へ訂正（グリッド定義付き）
+```
+
+### 変わっていないこと
+
+```text
+Evidence protected state : verifiedCases [] / promotion NONE /
+                           1250×2050 sample_default unverified / V0 34 / roughness III
+QD-J10（caseId の経路）は引き続き Human Gate 送り。Wave 7 は blocked。
+```
+

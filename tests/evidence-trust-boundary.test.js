@@ -395,6 +395,18 @@ test('P2J-TB19: caseId の filename-like 判定は evidence.js の拡張子集�
   const exts = source.split('|').reduce((acc, alt) => acc.concat(expandExtension(alt)), []);
   assert.equal(exts.length > 40, true, '展開結果が少なすぎる: ' + exts.length);
 
+  // 独立検証9 F9-05: この corpus は検査対象の定数から生えているので、
+  // 定数を**縮める**変更には原理的に気づけない（corpus も一緒に縮む）。
+  // 実際 `doc[xm]?→doc` / `tiff?→tif` / `ppt[xm]?→ppt` の変異が生き残っていた。
+  // よって**定数とは独立に**含まれているべき具体形を直接列挙する。
+  ['pdf', 'dwg', 'dxf', 'jww', 'jwc', 'xdw', 'sfc', 'p21', 'ifc', 'dwf', 'pln', 'rvt', 'skp',
+   'xls', 'xlsx', 'xlsm', 'doc', 'docx', 'docm', 'ppt', 'pptx', 'pptm',
+   'odt', 'ods', 'odp', 'jpg', 'jpeg', 'png', 'gif', 'bmp', 'tif', 'tiff',
+   'heic', 'heif', 'webp', 'zip', 'rar', '7z', 'lzh', 'tar', 'gz',
+   'msg', 'eml', 'txt', 'csv', 'bak'].forEach((ext) => {
+    assert.equal(exts.indexOf(ext) !== -1, true, '拡張子集合から ' + ext + ' が消えている');
+  });
+
   // positive control: 拡張子を持たない caseId は通る。
   // これが通らなければ下の assert.throws は何も証明していない。
   const control = synVerifiedCase();
