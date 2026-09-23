@@ -855,7 +855,14 @@ test('P2J-S38: 規則は**左に何があっても**発火する', () => {
       checked++;
       const text = pre + core;
       try { Evidence.assertPublicSafeEvidenceText(text, 'prose'); leaked.push(text); }
-      catch (e) { if (!rule.test(e.message)) leaked.push(text + ' (wrong rule: ' + e.message.slice(-32) + ')'); }
+      catch (e) {
+        // `x/` + `/home/...` = `x//home/...` は構造的に UNC でもある。
+        // どちらの規則で落ちても fail-closed であることに変わりはない（F16-05 の副作用）。
+        const alsoUnc = /\/$/.test(pre) && /^\//.test(core) && /unc-path/.test(e.message);
+        if (!rule.test(e.message) && !alsoUnc) {
+          leaked.push(text + ' (wrong rule: ' + e.message.slice(-32) + ')');
+        }
+      }
     });
   });
   assert.deepEqual(leaked.slice(0, 8), [], '左に何か置くと通った (全' + leaked.length + '件 / ' + checked + '中)');
@@ -1019,9 +1026,17 @@ test('P2J-S41: 検証13 が見つけた未固定の座標を押さえる', () =>
   });
   assert.equal(Evidence.assertPublicSafeEvidenceText('価格は' + '\u00a5'.repeat(24) + '1', 'prose'), true);
 
-  // (7c) ラベル付きの円表記は通す（前回このクラスを 12.7% 落としていた）。
+  // (7c) 「ラベル:\u00a5金額」は **落ちる**。fail-closed 側を取った結果であって
+  // 事故ではない（QD-J19）。`B:\u00a52024` と `C:\u00a52024` は文字列として同一で、
+  // 通貨か path かは機械的に決定できない。
   ['Price:\u00a5500', 'Total:\u00a51,500,000', 'JPY:\u00a51,500', 'Type B:\u00a53,000',
    'budget:\u00a52,000,000 で確定'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /windows-absolute-path/, '開示済みの過剰 reject: ' + text);
+  });
+  // コロンを伴わない円表記は影響を受けない——こちらが多数派。
+  ['\u00a5500', '単価は\u00a53,000/m2', '金額 \u00a51,500,000', '予算 \u00a52,000,000 で確定',
+   '単価\u00a55000', '概算\u00a5250万'].forEach((text) => {
     assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
   });
 
@@ -1486,26 +1501,44 @@ test('P2J-S42: \u00a5 区切りの直後が数字でも path は path（F15-A1�
   });
 });
 
-test('P2J-S43: ラベル付き通貨は通る——F14-03 を再発させない（F15-S41）', () => {
-  // `Type B:\u00a53,000` は 空白+1文字+コロン で drive letter と同形になる。
-  // 桁区切りカンマの有無で切っているので、両側を押さえる。
-  const LABELS = ['Price', 'Total', 'JPY', 'budget', 'Type B', '型式 A', 'B'];
-  const AMOUNTS = ['500', '1,500', '3,000', '1,500,000', '2,000,000'];
-  let accepted = 0;
-  LABELS.forEach((label) => {
-    AMOUNTS.forEach((amt) => {
-      ['\u00a5', '\uffe5'].forEach((y) => {
-        const text = label + ':' + y + amt;
-        assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
-        accepted++;
+test('P2J-S43: \u00a5 の通貨/path 曖昧は fail-closed で切る（F16-01）', () => {
+  // 3 round この境界をいじった記録:
+  //   F14-03  Price:\u00a5500 が落ちる      → fold に (?!\\d)
+  //   F15-A1  C:\u00a52024年度 が素通り     → 規則側に通貨例外
+  //   F16-01  C:\\500 が素通り（ASCII） → 例外を削除してここへ
+  // `B:\u00a52024`（2024円）と `C:\u00a52024`（drive C の 2024 folder）は
+  // 文字列として完全に同一であり、機械的には決定不能。
+  // security guard なので過剰 reject を取る。
+
+  // path 側: 区切りの直後が何であれ落ちる。ASCII も \u00a5 も同じ扱い。
+  const B = String.fromCharCode(92);
+  const SEPS = [B, '\u00a5', '\uffe5', '/'];
+  const TAILS = ['500', '7', '0', '1,000', '2024', '01', '1458号', '2024年度', '3階',
+                 'temp', '案件', '192.168.10.5', '10-2'];
+  let checked = 0;
+  SEPS.forEach((sep) => {
+    TAILS.forEach((tail) => {
+      ['C', 'D', 'Z', 'a', 'B'].forEach((drive) => {
+        const text = drive + ':' + sep + tail;
+        checked++;
+        assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+          /windows-absolute-path/, 'drive path を通した: ' + JSON.stringify(text));
       });
     });
   });
-  assert.equal(accepted, LABELS.length * AMOUNTS.length * 2);
+  assert.equal(checked, SEPS.length * TAILS.length * 5);
+  assert.equal(checked > 250, true, '直積が縮んでいる: ' + checked);
 
-  // 逆側: カンマ区切りでない数値が続く drive は path のまま
-  ['C:\u00a51458号', 'D:\u00a52024年度', 'Z:\uffe501'].forEach((text) => {
-    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), /windows-absolute-path/, text);
+  // 開示されたコスト（QD-J19）: コロン付きラベルの円表記も落ちる。
+  ['Price:\u00a5500', 'Type B:\u00a53,000', '単価 B:\u00a55000', '概算 JPY:\u00a5250万'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /windows-absolute-path/, '開示済みの過剰 reject: ' + text);
+  });
+
+  // コロンを伴わない円表記は通る。実際の文章はほぼこちら。
+  ['\u00a5500', '\u00a51,500,000', '単価は\u00a53,000/m2', '工費 \u00a5250万円',
+   '合計\u00a548000円', 'ガラス単価 \u00a512000'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
   });
 });
 
@@ -1665,18 +1698,38 @@ test('P2J-S49: 変異が生き残っていた 3 座標（F15-E4 / F15-E5 / R15-0
     assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
       /windows-absolute-path/, '隣接文字の陰に隠れた drive: ' + text);
   });
-  // 通貨との切り分けは前置きではなく後続でやるので、ラベルが何文字でも通る
-  ['Price:\u00a5500', 'B:\u00a5500', 'Type B:\u00a53,000', '型式 A:\u00a5500'].forEach((text) => {
-    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
-  });
-
-  // (d) 通貨判定の 2 つの分岐。どちらも guard-diff corpus だけが見つけていて
-  // unit test では押さえられていなかった（R15-12 / R15-13 が生き残っていた）。
-  //   分岐(a) 2 つ目の区切りがあれば通貨ではない —— `C:\\3,000\\x`
-  //   分岐(b) 仮名漢字が続けば通貨ではない     —— `C:\\3階`
+  // (d) 通貨例外は削除された（F16-01）。drive path は区切りの直後が
+  // 何であれ落ちる。詳細な直積は P2J-S43。
   ['C:\\\\3,000\\\\x', 'C:\u00a53,000\u00a5x', 'C:\\\\3階', 'C:\u00a53階',
-   'C:\\\\3階\\\\案件', 'C:\u00a53階\u00a5案件'].forEach((text) => {
+   'C:\\\\500', 'C:\\\\7', 'D:\\\\10-2', 'Price:\u00a5500'].forEach((text) => {
     assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
-      /windows-absolute-path/, '通貨と誤読: ' + JSON.stringify(text));
+      /windows-absolute-path/, JSON.stringify(text));
   });
 });
+
+test('P2J-S50: email の境界——label 数と address literal（F16-02 / F16-06）', () => {
+  // F16-02: label 上限を {0,8} にしたせいで 11 label のアドレスが素通りだった。
+  // 上限は ReDoS 対策で必要だが、実在する domain を超える位置に置く。
+  // 固定の例ではなく label 数を増やしながら列挙し、どこから漏れるかを直接見る。
+  for (let labels = 2; labels <= 40; labels++) {
+    const parts = [];
+    for (let i = 0; i < labels - 1; i++) parts.push(String.fromCharCode(97 + (i % 26)));
+    const addr = 'u@' + parts.join('.') + '.com';
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(addr, 'prose'),
+      /email-like/, labels + ' label のアドレスを通した: ' + addr);
+  }
+
+  // F16-06: RFC 5321 は IPv6 の address literal に `IPv6:` タグを要求する。
+  ['u@[IPv6:2001:db8::1]', 'u@[ipv6:2001:db8::1]', 'u@[IPV6:::1]',
+   'u@[2001:db8::1]', 'u@[192.168.1.1]'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /email-like/, text);
+  });
+
+  // 巻き込まないもの
+  ['寸法は [1250, 2050] mm', '範囲 [0, 1] で正規化',
+   '許容応力度は [N/mm2] で表す'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+});
+

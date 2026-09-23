@@ -1747,7 +1747,86 @@ browser         : 62 pass / 0 fail
 parser boundary : bypass 0
 ReDoS           : 遅い形はすべて 2f51b94 でも遅い（QD-J04）。
                   量指定子に上限を付けたので 1 ケースは 2565ms → 892ms
-repo 散文 reject : 3.8% → 3.9%（締めた分だけ）
+repo 散文 reject : 全体 3.8% で両 head 共通（F16-10: 3.9% は repo .md bucket の値であり、全体と混同していた）
+protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
+```
+
+## §52 — 独立検証16 の修理（D-050）
+
+### F16-01（HIGH）——前 round の修理が入れた reject→accept
+
+```text
+                          2f51b94   ab3a835   HEAD
+C:\\500                     拒否      受理      拒否
+C:\\7                       拒否      受理      拒否
+D:\\10-2                    拒否      受理      拒否
+C:\\1-4号棟                 拒否      受理      拒否
+保存先は C:\\500 です          拒否      受理      拒否
+```
+
+`\u00a5` を一切含まない素の ASCII 形。通貨例外を**規則側**に置いたため、
+`\\` と `/` にもかかってしまっていた。
+
+### この境界を 3 round いじった記録
+
+```text
+F14-03  Price:\u00a5500 が落ちる       → fold に (?!\d) を足した
+F15-A1  C:\u00a52024年度 が素通り      → 規則側へ通貨例外を移した
+F16-01  C:\\500 が素通り（ASCII）  → 例外を**削除**した
+```
+
+どこに置いても漏れるのは、`B:\u00a52024`（2024円）と `C:\u00a52024`（drive の folder）が
+**文字列として完全に同一**だからで、機械的には決定不能。
+security guard なので fail-closed を取り、過剰 reject を QD-J19 として開示する。
+
+### その他の修理
+
+```text
+F16-02 a@b.c.d.e.f.g.h.i.j.k.com（11 label）  受理 → 拒否
+       label 単位の入れ子量指定子をやめ、domain 全体を
+       平たな文字クラス 253（RFC 1035）で取る。上限と速度が両立する
+F16-05 \\\\srv/share / //srv\\share / \u00a5\u00a5192.168.10.5/共有  受理 → 拒否
+       （旧形は各位置で同じ区切り文字を要求していた）
+F16-06 u@[IPv6:2001:db8::1]                    受理 → 拒否
+F16-08 死んだ条件 3 つは通貨例外と一緒に消えた
+```
+
+### 差分検証
+
+```text
+corpus 643,284（bare 1-3 桁 segment を追加——このクラスが無かったので
+                F15 の通貨例外を REGRESSIONS: 0 と認定していた、F16-03）
+
+vs 2f51b94 : REGRESSIONS **0** / tightened **1,400**
+vs ab3a835 : REGRESSIONS **0** / tightened **136**  ← 136 が F16-01 のクラス
+```
+
+### 変異（今回から repo に入った）
+
+```text
+tools/guard-diff/mutants.mjs  演算子 18 件を定義
+tools/guard-diff/mutate.mjs   適用して npm test を回し、必ず復元する
+
+結果: **18 KILLED / 0 SURVIVED / 0 PATCH-MISS**
+
+検証16 F16-07 が「R15-01..R15-14 は再現できない」と指摘したとおり、
+前 round まで演算子は使い捨て script にしか存在せず、artifact には ID しか
+書いていなかった。**演算子の無い score は測定ではない**。
+anchor が 1 回一致しなければ PATCH-MISS として失敗扱いにする——
+黙って skip すると「KILLED」と見分けがつかないから。
+
+実際、この厳格化が今回 3 件の偽の anchor をあぶり出した
+（heredoc が `\u00a5` エスケープを実文字に折り畳んでいた）。
+
+### 回帰
+
+```text
+npm test        : 652 pass / 0 fail
+browser         : 62 pass / 0 fail / parser bypass 0
+ReDoS           : 入力長に対する closure の二次コストは両 head 共通（QD-J04）。
+                  `@` を含まない素の 126k 文字も 18.4 秒なので
+                  email pattern の問題では無い。domain 平坦化で 1 ケースは 2.7 倍高速化
+repo 散文 reject : 全体 3.8%（両 head 共通。F16-10 の訂正済み）
 protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
 ```
 

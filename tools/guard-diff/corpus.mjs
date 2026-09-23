@@ -38,7 +38,11 @@ export const TRAILING = ['', 'Ａ', '１', '９', 'A', '2'];
 // what keeps the class from going blind again.
 export const PATH_SEGMENTS = [
   'Users', 'share', 'docs',        // letter-initial
-  '2024', '01', '1458',            // digit-initial
+  '2024', '01', '1458',            // digit-initial, 4-digit / leading-zero
+  '500', '7', '1,000', '10-2',     // bare 1-3 digit and comma-grouped: the class
+                                   // the F15 currency carve-out silently exempted.
+                                   // Its absence is why this differential certified
+                                   // that carve-out as REGRESSIONS: 0 (F16-03).
   '2024年度', '3階', '1458号',      // digit-initial, CJK tail
   '案件', '図面', '共有',            // CJK
   '192.168.10.5', '10.0.0.1',      // dotted, digit-initial (IPv4 file servers)

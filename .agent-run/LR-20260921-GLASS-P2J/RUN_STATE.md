@@ -1047,7 +1047,7 @@ browser         : 62 pass / 0 fail
 parser boundary : bypass 0
 mutation        : R15-01..R15-14 —— 14/14 KILLED / 生存 0
 guard-diff      : corpus 629,238 / REGRESSIONS **0** / tightened **840**
-repo 散文 reject : 3.9%（3.8% から締めた分）
+repo 散文 reject : 全体 3.8%で変化なし（F16-10 で訂正）
 protected facts : 5 件すべて一致
 Implementation verification head : **未確定**
 ```
@@ -1083,6 +1083,54 @@ QD-J18  引用数字が再計算できない
 
 ```text
 §17 stop condition 維持: www / known-private-provider / opaque-long-token は触っていない
+§8 実装は未着手（承認待ち）
+Primary Evidence UNAVAILABLE / observations 0 / BLOCKED_BY_MISSING_EVIDENCE
+promotion NONE / verifiedCases [] / 1250×2050 sample_default / V0 34 / roughness III
+Ready / merge / Production : すべて未許可
+```
+
+## Wave 6q — 独立検証16 の Required Fix（D-050）
+
+```text
+npm test   : 652 pass / 0 fail（P2J-S50 新設、S41/S43/S49 を fail-closed へ書き換え）
+browser    : 62 pass / 0 fail / parser bypass 0
+mutation   : **18 KILLED / 0 SURVIVED / 0 PATCH-MISS**
+             演算子は tools/guard-diff/mutants.mjs に commit 済み（F16-07）
+guard-diff : corpus 643,284
+             vs 2f51b94  REGRESSIONS 0 / tightened 1,400
+             vs ab3a835  REGRESSIONS 0 / tightened 136（= F16-01 のクラス）
+protected  : 5 件すべて一致
+Implementation verification head : **未確定**
+```
+
+### 直したもの
+
+```text
+F16-01  C:\\500 等の ASCII drive path が素通り（ab3a835 で自分が入れた）
+F16-02  11 label のアドレスが素通り
+F16-05  区切りが混ざった UNC
+F16-06  IPv6 address literal のタグ形
+F16-07  変異演算子を repo へ（score を再現可能に）
+F16-08  死んだ条件 3 つ
+F16-10  偽陽性率の記述が bucket と全体を混同
+C23/S38 上記の修正過程で自分が壊した 2 件（test が検出）
+```
+
+### Human Gate へ戻すもの
+
+```text
+QD-J15  11.3% は再現しない（§2 / §12）
+QD-J16  CASE_ID_PATTERN（§8 の前提）
+QD-J17  blockerKinds に読み手が無い（§9 の前提）
+QD-J18  引用数字が再計算できない
+QD-J19  コロン付き円表記の過剰 reject（開示済み）
+QD-J20  拘束条件は guard の規則ではなく**検証方法**の方にある
+```
+
+### 変わっていないこと
+
+```text
+§17 stop condition 維持（www / known-private-provider / opaque-long-token は未触）
 §8 実装は未着手（承認待ち）
 Primary Evidence UNAVAILABLE / observations 0 / BLOCKED_BY_MISSING_EVIDENCE
 promotion NONE / verifiedCases [] / 1250×2050 sample_default / V0 34 / roughness III
