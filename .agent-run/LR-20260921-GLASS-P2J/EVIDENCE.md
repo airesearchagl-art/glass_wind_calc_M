@@ -765,3 +765,77 @@ V0                            : 34      roughness : III
 ```
 
 Wave 5 が変えたのは **validator の強度**だけであり、案件のEvidenceではない。
+
+## §29 — Wave 6 Stage A（実装セッション / exact head 1784fe3）
+
+```text
+npm test        : 616 pass / 0 fail / 0 skipped / 0 todo
+protected values: FL6 1250×2050 / 1500×2050 / Er / qBar / manual 1400 → 5件すべて一致
+project state   : BLOCKED / 0 of 12 / 0 of 4 / 0 of 8 / candidate null / observations 0
+prose boundary  : 攻撃6クラス REJECTED、正当散文3件 ACCEPTED、現行11件すべて通過
+candidate       : notApplied true / currentConfigMutated false / READY_CANDIDATE /
+                  warning あり / JSON決定的 / 禁止キー 0
+input-apply API : 4ファイルの実行コードに 0 件
+privacy         : production source 0 hits（テスト・artifact のみ）
+network/storage : 実行コードに 0 件
+browser         : 34 + 8 + 10 + 10 = 62 checks / 0 fail
+repository      : **無変更**（§2・§14 のとおり measurement のみ）
+```
+
+Stage A は repository を変更しなかったため、
+Verifier Target Candidate = `1784fe3a72c2d038d74a8cc48ed1f3119cabd1fc` を宣言した。
+
+## §30 — Wave 6 Stage B（独立検証 / read-only）
+
+独立verifierは**自分の clone**（`/tmp/verify-p2j/repo`）を作り、
+**自分の browser harness** を組んで実行した。実装セッションの
+scratchpad 出力は再利用していない。repository は read-only のまま。
+
+```text
+verdict : PASS WITH FINDINGS
+findings: Advisory 3 / Info 1 / Hard Gate 0 / Required Fix 0
+npm     : 616 pass / 0 fail（独立実測）
+browser : VERIFIED（独自harness）
+probes  : V1〜V12 すべて KILLED、EQ-1 は EQUIVALENT
+          0 SURVIVED / 0 PATCH-MISS
+```
+
+verifier は各 wave commit を checkout してテスト数も独立に検証した
+（500 / 518 / 557 / 581 / 600 / 616 の6点すべて一致）。
+
+### verifier が自分の harness error を開示している
+
+verifier 自身、初回の V1/V2/V7/V8/V9/V11 patch が効いていなかったこと
+（特に V8/V9 は Wave 5 の artifact が記録しているのと**同じ no-op mutant**）を
+開示し、修正してから分類し直している。harness error を kill に数えていない。
+
+## §31 — Wave 6 修理（指摘3件、すべて自分で再現してから対応）
+
+| 指摘 | 種別 | 再現 | 対応 |
+|---|---|---|---|
+| A1 タグ判定がドメイン散文を巻き込む | Advisory | `W<H かつ P>Q である。` が REJECTED | パターンを「属性の形」に限定 |
+| A2 Run Artifact に生の制御バイト | Advisory | offset 5456/5458/5460、git が Bin 扱い | 表記へ置換、UTF-8 text に復帰 |
+| A3 QD-J01「3つは同一」が古い | Advisory | ガード集合を比較して差を確認 | 記述を訂正（コード変更なし） |
+| I1 Evidence-first は3層 | Info | — | 記録のみ（設計意図どおり） |
+
+### A1 の mutation（両方向から固定した）
+
+```text
+W6-01 旧の広いパターンへ戻す      ineq=REJECTED  → KILLED (P2J-S17)
+W6-02 タグ判定を完全に無効化      すべてACCEPTED → KILLED (P2J-S01)
+W6-03 属性を必須にする（裸タグ素通り） 裸タグACCEPTED → KILLED (P2J-S01)
+```
+
+いずれも patch が**実際に挙動を変えたこと**を先に確認してから分類した。
+広すぎれば S17 が、狭すぎれば S01 / S18 が落ちる。
+
+## §32 — Wave 6 修理後の再実測
+
+```text
+npm test        : 619 pass / 0 fail（616 → +3）
+browser         : 34 + 8 + 10 + 10 = 62 checks / 0 fail
+protected values: 5件すべて一致
+project state   : BLOCKED / 0 of 12 / 0 of 4 / 0 of 8 / candidate null
+                  verifiedCases [] / V0 34 / roughness III
+RUN_STATE.md    : UTF-8 text（git が行単位で差分を取れる状態へ復帰）
+```

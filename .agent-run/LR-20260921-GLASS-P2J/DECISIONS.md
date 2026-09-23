@@ -531,3 +531,83 @@ W5-03 / W5-04 では自作の確認スクリプト側の name→key マッピン
 `neutered=False` と表示されたが、個別に直接確認して
 どちらも真に無効化されている（攻撃が ACCEPTED になる）ことを測った。
 表示だけを見て「検出できた」と結論しない。
+
+## D-029 — Wave 6: 独立検証の指摘3件を再現してから修理した
+
+Stage A（本セッション）を exact head `1784fe3` で実施し、リポジトリを一切変更せずに
+616/0・保護値5件一致・browser 62件（34+8+10+10）を実測した。
+そのうえで Stage B は**別の実行コンテキスト**（自分の clone を作り、自分の
+browser harness を組む read-only verifier）へ出した。
+
+verdict は **PASS WITH FINDINGS**（Advisory 3 / Info 1、Hard Gate 0 / Required Fix 0）。
+hand-back は model 出力であってユーザ指示ではないので、
+**3件とも自分で再現してから**対応した。
+
+### A1（修理した）— タグ判定がドメイン散文を巻き込んでいた
+
+```text
+再現: assertPublicSafeEvidenceText('W<H かつ P>Q である。')
+      → REJECTED（html-like-tag に一致、部分文字列 "<H かつ P>"）
+```
+
+旧パターンは「`<` + 英字 … `>`」なら何でもタグ扱いしていた。
+W / H / P / Q / Z は本ドメインの**変数名そのもの**なので、この形の散文は
+現実に書かれうる。fail closed 側の誤りではあるが、
+将来のEvidence散文が理由の分からないまま書けなくなる。
+
+修理: タグ本体に**属性の形をした内容**だけを許す。
+
+```text
+許す  : <name> </name> <name attr> <name attr=value> <name attr="value"> <name/>
+弾かない: <H かつ P>   ← 「かつ P」が属性の形になっていない
+```
+
+Wave 5 で `5<Z<40` は考慮していたが、この隣接形は見落としていた。
+`見付幅W<見付高さH となる場合>注意` が通っていたのは
+`<見付高さH` が英字で始まらないためで、たまたま助かっていただけである。
+
+### A2（修理した）— Run Artifact に生の制御バイトが入っていた
+
+```text
+再現: RUN_STATE.md の offset 5456/5458/5460 に 0x00 / 0x01 / 0x7F
+      file → "data"、git diff → "Bin 0 -> 16498 bytes"
+```
+
+Wave 5 で制御文字の拒否規則を**説明している散文**の中に、
+エスケープせず生バイトを書いてしまっていた
+（python heredoc の通常文字列で `\u0000` が実バイトに解釈された）。
+
+Run Artifact は監査証跡であり、git が行単位で差分を取れないのは実害である。
+表記（`\u0000` 等）へ置き換えた。制御文字ガードを足した Wave の成果物自身が
+制御文字を含んでいたという、指摘されて当然の見落としである。
+
+### A3（記述を修正した）— QD-J01 の「3つは同一」が古くなっていた
+
+```text
+再現: 3実装のガード集合を比較
+      evidence.js       : null/typeof/Array + prototype + own "__proto__"
+      project-profile.js: prototype のみ
+      review-package.js : prototype のみ
+```
+
+Wave 1 時点では実際に同一だったが、**Wave 5 で `evidence.js` にだけ**
+own `"__proto__"` ガードを足したため、その時点で記述が事実と食い違った。
+自分で足しておきながら debt note を更新していなかった。
+
+packet §46 は「verifier が実際の挙動差を示さない限り QD-J01 は scope 外」とするが、
+これは**コード修正ではなく記述の誤りの訂正**なので対応した。
+脆弱性が生じていないことも実測で確認した:
+`project-profile.js` は生JSON段階で `FORBIDDEN_RAW_KEYS` により own `"__proto__"` を
+拒否しており、`review-package.js` は deserializer を公開していない。
+
+あわせて「統合するなら `evidence.js` 側（ガードが最多）を正とする」旨を追記した。
+「同一だからどれを残してもよい」という読み方を防ぐためである。
+
+### I1（記録のみ）— Evidence-first は3層で守られている
+
+verifier の観測: closure 側の gate だけを外しても slot は BLOCKED のままである。
+`reconcileFact` が独立に `INSUFFICIENT_EVIDENCE` を返し、
+`createEntry` も gate を再実行するため、3層が独立に効いている。
+
+これは設計意図（D-014 / D-015）どおりであり、修理対象ではない。
+単一のガードだけを読んで「ここを通れば終わり」と判断できないことの裏取りとして記録する。

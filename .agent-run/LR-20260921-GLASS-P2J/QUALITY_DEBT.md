@@ -8,11 +8,31 @@ project-profile.js:120     : Phase 2H F6 で追加
 review-package.js:189      : Phase 2I で追加
 ```
 
-3つはロジックが同一で、null prototype の扱いという**判断が割れうる箇所でも
-同じ決定**をしていることを実測で確認した（D-004）。したがって現時点で
-挙動の不整合は無い。
+**3つは同一ではない**（Wave 6の独立検証 A1〜A3 のうち A3 の指摘で判明）。
+Wave 1 の時点では同一だったが、Wave 5 で `evidence.js` 側にだけ
+2つのガードを足したため、現在は次のように**差がある**:
 
-debt の内容は「将来ひとつだけ変更されて判断が割れる」可能性である。
+```text
+evidence.js      : null/typeof/Array.isArray ガード
+                   prototype 判定
+                   own "__proto__" ガード        ← Wave 5で追加
+project-profile.js: prototype 判定のみ
+review-package.js : prototype 判定のみ
+```
+
+判断が割れうる箇所（null prototype を通すか）については3つとも
+同じ決定をしている（`proto !== Object.prototype && proto !== null`）。
+これは実測で確認済みである（D-004）。
+
+**現時点で脆弱性は生じていない**ことも実測で確認した:
+`project-profile.js` は生JSONの段階で `FORBIDDEN_RAW_KEYS` により
+own `"__proto__"` を拒否しており、`review-package.js` は deserializer を
+そもそも公開していない（`buildReviewPackage` のみ）。
+したがって不足しているガードに到達する経路が無い。
+
+debt の内容は2つある:
+1. 3実装が**すでに divergent** であり、片方だけ見て他方を推測できない
+2. 将来ひとつだけ変更されて判断が割れる可能性
 統合しなかった理由:
 
 - `project-profile.js` / `review-package.js` は現在 `evidence.js` に依存していない。
@@ -28,6 +48,8 @@ Hard Gate には該当しない。Hard Gate の "prototype boundary" は
 
 対処案（将来phase）: 汎用述語を層に依存しない小moduleへ切り出すか、
 `evidence.js` の実装を正として他2つがそれを解決する。
+**統合する場合は `evidence.js` 側（ガードが最も多い）を正とすること。**
+「同一だから、どれを残してもよい」という読み方は誤りである。
 どちらも Phase 2J の目的（Evidence closure）とは独立に行える。
 
 

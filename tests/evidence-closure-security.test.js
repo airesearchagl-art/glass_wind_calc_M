@@ -489,3 +489,61 @@ test('P2J-S16: 実案件の空集合closureは BLOCKED のまま動かない', (
   assert.throws(() => Closure.serializePromotionCandidate(r.promotionCandidate),
     /requires a candidate created by evaluateClosure/);
 });
+
+// ============================================================
+// Wave 6: 独立検証の指摘 A1 に対する回帰
+// ============================================================
+
+test('P2J-S17: タグ判定はドメイン変数を使った不等式散文を巻き込まない', () => {
+  // 独立検証の指摘（A1）。旧パターンは「`<`+英字 … `>`」なら何でも拒否しており、
+  // `W<H かつ P>Q である。` を html-like-tag として落としていた。
+  // W / H / P / Q / Z は本ドメインの変数名そのものなので、この形の散文は
+  // 現実に書かれうる。fail closed 側の誤りではあるが、
+  // 将来のEvidence散文が理由の分からないまま書けなくなる。
+  const mustAccept = [
+    'W<H かつ P>Q である。',
+    'P<Q かつ R>S のとき',
+    '見付幅W<見付高さH となる場合>注意',
+    '5<Z<40',
+    '5<Z<40 かつ W>1000',
+    'W < H かつ P > Q',
+    'a<b'
+  ];
+  mustAccept.forEach((s) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(s, 'prose'), true, s);
+  });
+});
+
+test('P2J-S18: 属性の形をしたタグは引き続き拒否される', () => {
+  // A1 の修正で緩めすぎていないことを固定する。
+  // 「タグ本体に属性の形をした内容だけを許す」という線引きが効いていること。
+  const mustReject = [
+    '<b>x</b>', '</b>', '<script>x</script>', '</script>',
+    '<img src=x onerror=1>', '<img src="x" onerror="alert(1)">',
+    '<svg onload=1>', '<iframe src="javascript:1">',
+    '<a href="#">y</a>', '<div class="a b">', '<input disabled>', '<BR/>'
+  ];
+  mustReject.forEach((s) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(s, 'prose'),
+      /matched known-unsafe pattern: html-like-tag/, s);
+  });
+});
+
+test('P2J-S19: A1修正後も現行configとObservation経路は通る', () => {
+  // 修正がEvidence側へ波及していないことの確認。
+  const seen = [];
+  (function walk(o) {
+    if (!o || typeof o !== 'object') return;
+    if (typeof o.publicDescription === 'string') seen.push(o.publicDescription);
+    Object.keys(o).forEach((k) => { try { walk(o[k]); } catch (e) { /* getter */ } });
+  })(MiyoshiProjectConfig);
+  assert.equal(seen.length, 11, '前提: 現行configのpublicDescriptionは11件');
+  seen.forEach((d) => assert.equal(Evidence.assertPublicSafeEvidenceText(d, 'c'), true));
+
+  // 不等式を含む説明でもObservationは成立する
+  const o = Closure.normalizeObservation(
+    obsOf('pane_width_mm', null, 987, 'mm', {
+      evidence: ev({ publicDescription: '合成fixture: W<H かつ P>Q の条件で確認' })
+    }), 'miyoshi');
+  assert.match(o.evidence.publicDescription, /W<H/);
+});

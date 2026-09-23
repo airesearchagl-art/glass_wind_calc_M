@@ -46,7 +46,8 @@ expected : >= 500 / 0 fail  → 一致
 | 2 | Observation v1 / scope contract | `42c8f7096b20450997bfe2739728cc45b433b3b3` | 557 / 0 |
 | 3 | Closure Evaluation / Promotion Candidate | `707b0aac8eb173641e04d59080676ec381cb0686` | 581 / 0 |
 | 4 | Evidence Request Matrix（read-only UI） | `4dfafae93628d0bf3674a05467bafd860ac3bef4` | 600 / 0 + browser 34 / 0 |
-| 5 | security / privacy / trust / prototype | `RESOLVE_DYNAMICALLY` | 616 / 0 + browser 34 / 0 |
+| 5 | security / privacy / trust / prototype | `1784fe3a72c2d038d74a8cc48ed1f3119cabd1fc` | 616 / 0 + browser 34 / 0 |
+| 6 | Stage A regression / 独立検証 / 修理 | `RESOLVE_DYNAMICALLY` | 619 / 0 + browser 62 / 0 |
 
 ## Wave別の変更ファイル
 
@@ -67,6 +68,12 @@ Wave 3: project-config/evidence-closure.js（evaluateClosure / candidate / expor
 Wave 4: index.html                        （evidence-closure.js配線 / Matrix / renderer分割）
         tests/evidence-closure-ui.test.js （新規）
         tests/ui-mode-separation.test.js  （F10の参照先を renderPhase2FEvidencePanels へ更新）
+
+Wave 6: project-config/evidence.js              （A1: html-like-tag を属性形に限定）
+        tests/evidence-closure-security.test.js（A1回帰 S17/S18/S19 を追加）
+        .agent-run/.../RUN_STATE.md            （A2: 生の制御バイトを表記へ置換）
+        .agent-run/.../QUALITY_DEBT.md         （A3: QD-J01 の記述を訂正）
+        index.html                             （**変更なし**）
 
 Wave 5: project-config/evidence.js              （PUBLIC_UNSAFE_TEXT_PATTERNS に4クラス追加）
         tests/evidence-closure-security.test.js（新規）
