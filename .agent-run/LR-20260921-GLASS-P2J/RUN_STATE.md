@@ -838,3 +838,37 @@ Evidence protected state : verifiedCases [] / promotion NONE /
 QD-J10（caseId の経路）は引き続き Human Gate 送り。Wave 7 は blocked。
 ```
 
+## Wave 6j final state（独立検証10 の修理 / D-043）
+
+```text
+npm                        : 638 pass / 0 fail
+browser                    : 62 checks / 0 fail
+parser boundary            : 42形 / bypass 0
+mutation                   : 9/9 KILLED（この 9 件について。網羅の主張ではない）
+回帰スイープ                 : 過去全 head に対し regression 0
+protected values           : 5件すべて一致
+validateAllEvidence()      : []
+Implementation verification head : **未確定**（11 回目の独立検証が必要 / §44・§47）
+```
+
+### この Wave で確定したこと
+
+```text
+- 幹を要求する形は要求が矛盾している。corpus を増やしても終わらない
+  → 幹を捨てた（tag 規則で既に下したのと同じ判断）
+- F10-01 / F10-02 / F10-03 が同時に閉じた
+- dot 相当符号（U+3002 等）を追加。中黒は意図的に除外
+- 正規化形は閉包を取る（合成が必要な形がある）
+- 寄与 0 になった narrow fold を削除（測定してから）
+- P2J-S33 を corpus から**不変式**へ書き直した
+- D-042 の「この repository に実在する識別子」は誤りだった。訂正済み
+```
+
+### 変わっていないこと
+
+```text
+Evidence protected state : verifiedCases [] / promotion NONE /
+                           1250×2050 sample_default unverified / V0 34 / roughness III
+Human Gate 送り: QD-J06 / QD-J10 / QD-J11。Wave 7 は blocked。
+```
+

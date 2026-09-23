@@ -196,25 +196,6 @@
     return out;
   }
 
-  // ファイル名判定に必要な文字だけを畳む（dot と英数字）。
-  // 全角句読点・括弧は**幹の一部として残る**ので、
-  // `構造計算書（最新）．ｐｄｆ` の幹が dot の直前で切れない。
-  function foldFullwidthFilenameChars(text) {
-    var out = '';
-    for (var i = 0; i < text.length; i++) {
-      var code = text.charCodeAt(i);
-      if ((code >= 0xff10 && code <= 0xff19) ||
-          (code >= 0xff21 && code <= 0xff3a) ||
-          (code >= 0xff41 && code <= 0xff5a) ||
-          code === 0xff0e) {
-        out += String.fromCharCode(code - 0xfee0);
-      } else {
-        out += text.charAt(i);
-      }
-    }
-    return out;
-  }
-
   // 正規化の**集合**。規則はいずれかの形でマッチすれば拒否する。
   //
   // この形になった理由（独立検証9 F9-01）:
@@ -229,7 +210,33 @@
   // よって fold を**差し替えない**。集合へ追加する。
   // 追加は単調（拒否が増えるだけ）だが、**削除と差し替えは単調ではない**。
   // この配列から要素を減らす変更は回帰である（P2J-S33 が固定）。
-  var TEXT_NORMALIZERS = [foldFullwidthFilenameChars, foldFullwidthAscii];
+  // dot 相当の符号を ASCII の `.` へ写す。
+  //
+  // 日本語 IME は日本語入力モードのピリオドキーで `。`(U+3002) を出す——
+  // F1 が対象にした `．`(U+FF0E) よりむしろありふれた artefact であるのに、
+  // 6 度の修理を通して一度も見ていなかった（独立検証10 F10-06）。
+  // U+3002 は NFKC 不変なので「NFKC をかける」では閉じない。写像を明示する。
+  //
+  // 中黒（U+30FB `・` / U+FF65）は**意図的に除外**する。
+  // 「仕様・図面」のように散文の並列区切りとして普通に使われ、
+  // `PDF・doc形式で提出` のような普通の技術文を落としてしまう。
+  var DOT_EQUIVALENTS = '\u3002\uff61\ufe12\u2024\ufe52\u2027\u2e33\u0387\u06d4\u0701\ua4f8\u02d9';
+  function foldDotEquivalents(text) {
+    var out = '';
+    for (var i = 0; i < text.length; i++) {
+      var ch = text.charAt(i);
+      out += (DOT_EQUIVALENTS.indexOf(ch) !== -1) ? '.' : ch;
+    }
+    return out;
+  }
+
+  // 残った 2 つはそれぞれ**他方が捕まえられない形**を持つ（P2J-S34 が固定）。
+  // 以前あった narrowFold（dot と英数字だけを畳む）は削除した。
+  // あれは「広い畳みが `（）` を区切り文字に変えて幹を切る」ことだけを
+  // 防ぐためのもので、幹を捨てた今は寄与が無い——
+  // 全規則を含む corpus で行動差 **0**（実測）。
+  // 削除は本来単調ではないので、推論ではなく測定で確かめている。
+  var TEXT_NORMALIZERS = [foldFullwidthAscii, foldDotEquivalents];
 
   // 拡張子集合は**ここが唯一の定義**である。
   // 消費側の一つは project-config/miyoshi.js の FILENAME_LIKE_CASE_ID_PATTERN
@@ -240,13 +247,24 @@
   // まったく同じ非対称が隣のモジュールで再現していた。
   // 同じことを 2 か所で判定しない（本Campaignの反復する教訓）。
   var PRIVATE_DOCUMENT_EXTENSION_SOURCE = 'pdf|dwg|dxf|jww|jwc|xdw|sfc|p21|ifc|dwf|pln|rvt|skp|xls[xm]?|doc[xm]?|ppt[xm]?|od[tsp]|jpe?g|png|gif|bmp|tiff?|heic|heif|webp|zip|rar|7z|lzh|tar|gz|msg|eml|txt|csv|bak';
+  // 幹（dot の前の非区切り文字列）を**要求しない**。`.ext` だけを見る。
+  //
+  // 幹を要求する形は本Phase で 6 度修理され、そのたびに区切り文字の選び方で
+  // 新しい素通りを生んだ。原因は要求が矛盾していることである（独立検証10）:
+  //   幹が周囲の散文を飲み込まないよう → 区切り文字は**多く**したい
+  //   区切りを含むファイル名を見逃さないよう → 区切り文字は**少なく**したい
+  // space / 括弧 / 引用符 / カンマは散文の区切りであり、同時に Windows・macOS で
+  // 合法なファイル名文字でもある。どちらを取ってももう一方が壊れる。
+  // 実際 `plan (1).pdf`（Explorer が自分で付ける名前）は 10304/10304 素通りしていた。
+  //
+  // よって幹を捨てる。これは tag 規則で既に下したのと同じ判断である——
+  // 「巧妙な例外を足さない。偽陽性を受け入れて素通りを消す」。
+  // 実測: 出荷済みの publicDescription 9 件は 1 件も影響を受けない。
+  // 副次効果として `{1,120}` の ReDoS 面と QD-J04 のコストガードも消える。
+  //
+  // 語境界 `(?![A-Za-z])` は残す: `.doc` が `document` の中でマッチしないよう。
   var PRIVATE_DOCUMENT_FILENAME = new RegExp(
-    '[^\\s<>"\'(),;:\uff1a\u3001\u3002\u300c\u300d\u300e\u300f]{1,120}\\.('
-    + PRIVATE_DOCUMENT_EXTENSION_SOURCE + ')(?![A-Za-z])', 'i');
-  // 上と同じだが語境界を見ない変種。正規化後の形専用（上のコメント参照）。
-  var PRIVATE_DOCUMENT_FILENAME_NO_BOUNDARY = new RegExp(
-    '[^\\s<>"\'(),;:\uff1a\u3001\u3002\u300c\u300d\u300e\u300f]{1,120}\\.('
-    + PRIVATE_DOCUMENT_EXTENSION_SOURCE + ')', 'i');
+    '\\.(' + PRIVATE_DOCUMENT_EXTENSION_SOURCE + ')(?![A-Za-z])', 'i');
 
 
   // public-safe boundary（RF-02）: publicDescription（および将来
@@ -293,20 +311,12 @@
     //
     // 幹は「区切り文字以外の連なり」とする。長さは上限を置く
     // （否定クラス + リテラルの組は witness 次第で二次コストになりうる。QD-J04）。
-    // `normalizedPattern`: 正規化後の形にだけ適用する変種。
-    //
-    // raw 側の `(?![A-Za-z])` は「`.doc` を `document` の中でマッチさせない」
-    // ためのもので、`window.document` / `Workspace.csvEscape` を守っている
-    // （独立検証9 F9-03: これを外すと repository 内の実在の識別子が落ちる）。
-    //
-    // しかし正規化後の形ではその前提が成立しない。
-    // `構造計算書．ｐｄｆＡ` を畳むと `構造計算書.pdfA` になるが、
-    // この `A` は単語の続きではなく**元々全角だった別の字**である。
-    // 正規化形が存在するのは入力に全角が含まれていた場合だけなので、
-    // そこで英単語の続きを守る必要はない。fail-closed 側を取る。
-    { name: 'private-document-filename',
-      pattern: PRIVATE_DOCUMENT_FILENAME,
-      normalizedPattern: PRIVATE_DOCUMENT_FILENAME_NO_BOUNDARY },
+    // 正規化形にも同じ pattern を使う。
+    // 以前は正規化形専用の「語境界無し」変種を当てていたが、
+    // 正規化形は**入力のどこかに**全角があれば存在するので、
+    // 無関係な ASCII 識別子まで境界無しで見られていた（独立検証10 F10-01）。
+    // 入力全体の性質から局所の語境界を推定できるという前提が誤りだった。
+    { name: 'private-document-filename', pattern: PRIVATE_DOCUMENT_FILENAME },
 
     // タグの形をした内容。これは**privacy/内容の境界**であって、
     // XSS対策そのものではない（DOM側は textContent / createElement で別に守る）。
@@ -385,12 +395,27 @@
     // （以前は `hasFullwidthForm` が範囲を**2 重に持っていた**ので、
     //  そちらの下端だけが未固定で変異が生き残った——独立検証9 F9-04。
     //  同じ判定を 2 か所に置かない）
+    // 正規化形の**閉包**を作る。各 normalizer を個別に 1 回だけかけるのでは不十分で、
+    // 合成が必要な形がある（独立検証10 F10-06）:
+    //   `構造計算書。ｐｄｆ` は dot 写像だけでも全角畳みだけでも届かず、
+    //   両方をかけて初めて `構造計算書.pdf` になる。
+    // 閉包なので normalizer を追加しても合成を手で列挙し直す必要がない。
     var normalized = [];
-    for (var k = 0; k < TEXT_NORMALIZERS.length; k++) {
-      var form = TEXT_NORMALIZERS[k](text);
-      if (form !== text && normalized.indexOf(form) === -1) {
-        normalized.push(form);
+    var frontier = [text];
+    var guard = 0;
+    while (frontier.length && guard < 64) {
+      guard++;
+      var next = [];
+      for (var q = 0; q < frontier.length; q++) {
+        for (var k = 0; k < TEXT_NORMALIZERS.length; k++) {
+          var form = TEXT_NORMALIZERS[k](frontier[q]);
+          if (form !== text && normalized.indexOf(form) === -1) {
+            normalized.push(form);
+            next.push(form);
+          }
+        }
       }
+      frontier = next;
     }
     for (var i = 0; i < PUBLIC_UNSAFE_TEXT_PATTERNS.length; i++) {
       var entry = PUBLIC_UNSAFE_TEXT_PATTERNS[i];
@@ -405,9 +430,8 @@
         matched = entry.detect(text);
       } else {
         matched = entry.pattern.test(text);
-        var normPattern = entry.normalizedPattern || entry.pattern;
         for (var f = 0; !matched && f < normalized.length; f++) {
-          matched = normPattern.test(normalized[f]);
+          matched = entry.pattern.test(normalized[f]);
         }
       }
       if (matched) {
@@ -880,7 +904,8 @@
     PRIVATE_DOCUMENT_EXTENSION_SOURCE: PRIVATE_DOCUMENT_EXTENSION_SOURCE,
     // 範囲の端点をテストから直接押さえるために export する（P2J-S32）。
     foldFullwidthAscii: foldFullwidthAscii,
-    foldFullwidthFilenameChars: foldFullwidthFilenameChars,
+    foldDotEquivalents: foldDotEquivalents,
+    DOT_EQUIVALENTS: DOT_EQUIVALENTS,
     TEXT_NORMALIZER_COUNT: TEXT_NORMALIZERS.length,
     isValidCheckedAt: isValidCheckedAt,
     assertOrdinaryObject: assertOrdinaryObject,

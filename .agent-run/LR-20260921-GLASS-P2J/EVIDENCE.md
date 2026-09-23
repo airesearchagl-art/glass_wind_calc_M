@@ -1424,3 +1424,69 @@ mutation        : 9/9 KILLED
 protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
 ```
 
+## §46 — 独立検証10 の修理実測（D-043）
+
+### F10-02: 区切り文字による 100% 素通り
+
+```text
+witness                 e336428  HEAD
+plan (1).pdf              受理    拒否
+構造計算書 (2).pdf          受理    拒否
+構造計算書(最新).pdf         受理    拒否
+構造計算書「最新」.pdf        受理    拒否
+構造計算書 .pdf             受理    拒否
+```
+
+### F10-01: 正規化形への境界無し適用が散文を巻き込んでいた
+
+```text
+witness                             e336428  HEAD
+window.document を触らない（DOM側）      拒否    受理
+Workspace.csvEscape を使う（注）        拒否    受理
+```
+
+### F10-06: dot 相当の符号
+
+```text
+構造計算書。ｐｄｆ （U+3002 = JP IME のピリオドキー）  受理 → 拒否
+構造計算書｡pdf  （U+FF61）                        受理 → 拒否
+構造計算書․pdf  （U+2024）                        受理 → 拒否
+中黒は写さない: `PDF・doc形式で提出`                  受理 → 受理
+```
+
+### normalizer の必要性を測った（推論しない）
+
+```text
+全規則クラスを含む corpus での行動差:
+  narrow fold を削除   →   0 差分   ← 幹を捨てたので寄与が無くなった
+  wide fold を削除     →   8 差分   （ａｂｃ＠… 等の全角 URL/email/path）
+  dot 写像を削除       →   4 差分   （構造計算書。pdf 等）
+→ narrow を削除。役割の無い normalizer を「これだけが捕まえる」という
+   偽の証人付きで残すのは、本Campaign が繰り返し罰してきた装飾的 guard そのもの。
+```
+
+なお旧 S34 の「wide 専用」証人 `ｗｗｗ．…` は専用ではなかった
+（U+FF57 は narrow でも畳まる）——何も固定していなかった（検証10 F10-04）。
+
+### 回帰スイープ（過去の全 head に対して）
+
+```text
+vs 2659e3c : regression 0
+vs cb7a75b : regression 0
+vs 54b15a7 : regression 0
+vs df88109 : regression 0
+vs 4573d01 : 1 —— `window.document`。その head は lookahead を全削除しており、
+             その振舞い自体が F9-03 で指摘された欠陥。意図した修正。
+vs e336428 : regression 0
+```
+
+### 回帰（修理後・全量）
+
+```text
+npm test        : 638 pass / 0 fail
+browser         : 62 pass / 0 fail
+parser boundary : 42形 / bypass 0
+mutation        : 9/9 KILLED
+protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
+```
+

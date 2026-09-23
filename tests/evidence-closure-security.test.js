@@ -740,23 +740,29 @@ test('P2J-S24: 私的文書のファイル名判定は幹がASCIIであること
   // 拡張子が対象外のリポジトリ内ファイルは通る（過剰拒否していない）。
   // これらは本ツール自身の公開ファイル名であり、既存の
   // publicDescription に実際に現れるので意図的に対象外とする。
+  // 幹を捨てたコスト（独立検証10 / D-043）: 文中の裸の `.zip` も落ちるようになった。
+  // 以前は幹が空なので通っていた。回避は「ZIP形式」のように dot を置かないこと。
+  // 出荷済みの publicDescription 9 件は 1 件も影響を受けない（実測）。
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('形式は .zip とする', 'prose'),
+    /private-document-filename/, '幹を捨てたコストを固定する');
+
   ['index.html の初期値として導入された値', 'calc.js を参照', 'README.md に記載',
-   'data.json 形式', '形式は .zip とする']
+   'data.json 形式']
     .forEach((s) => {
       assert.equal(Evidence.assertPublicSafeEvidenceText(s, 'prose'), true, s);
     });
 });
 
-test('P2J-S33: 拒否されるファイル名に装飾を 1 文字入れても受理に転じない', () => {
-  // 独立検証9 F9-01。これが本Phase で 3 度目の同じ形の欠陥だった。
+test('P2J-S33: `.ext` を含む文字列は**前が何であれ**拒否される', () => {
+  // 独立検証10 F10-02。旧版は「幹 + 装飾」の直積を列挙していたが、
+  // 装飾集合は**前回の欠陥の軸**（畳むと区切りになる文字）だけでできており、
+  // **もともと区切りだった ASCII 文字**（space / `(` / `)` / `"` / `,`）を含んでいなかった。
+  // 結果 `plan (1).pdf`——Explorer が重複ファイルに自分で付ける名前——が
+  // 10304/10304 素通りしていた。
   //
-  // S24 には「装飾付き幹」のブロックも「全角拡張子」のブロックもあったが、
-  // 前者は半角 dot・半角拡張子、後者は装飾無し。**両方が交わる形**——
-  // つまり `構造計算書（最新）．ｐｄｆ`——をどちらも含んでいなかった。
-  // グリッドの穴は行と列を個別に見ている限り見えない。
-  //
-  // よって直積を**生成**する。装飾文字は「畳むと幹の区切りに化ける」
-  // 8 文字を全部入れる（検証6 以来何度も出てきたクラス）。
+  // corpus を増やすのをやめ、**不変式**として書く:
+  //   dot 形 + 拡張子 を含み、直後が ASCII 英字でなければ、前が何であれ拒否。
+  // 幹を捨てたのでこれが言えるようになった（D-043）。
   function expandExt(alt) {
     let out = ['']; let i = 0;
     while (i < alt.length) {
@@ -773,57 +779,82 @@ test('P2J-S33: 拒否されるファイル名に装飾を 1 文字入れても�
   const exts = Evidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE.split('|')
     .reduce((a, alt) => a.concat(expandExt(alt)), []);
 
-  // 畳むと幹の区切り文字クラスに入る全角文字。
-  const DECORATIONS = ['（最新）', '（改訂）', '（案）', '＂', '＇', '，', '；', '＜旧＞'];
-  const rejects = (t) => {
-    try { Evidence.assertPublicSafeEvidenceText(t, 'prose'); return false; }
-    catch (e) { return /private-document-filename/.test(e.message); }
-  };
+  // 拡張子の大文字形も回す。旧版は `toFull(ext)` を小文字定数から作っており、
+  // 全角**大文字**拡張子を一度も生成していなかった（検証10 F10-05）。
+  const extForms = [];
+  exts.forEach((e) => { extForms.push(e, e.toUpperCase(), toFull(e), toFull(e.toUpperCase())); });
+
+  // 前置きは「何であれ」を代表する: 旧幹の区切り文字をすべて含める。
+  const PREFIXES = ['', '図面', 'plan', '構造計算書 (1)', '図面(最新)', '見積書（最新）',
+    '図面「最新」', 'a b', 'x,y', 'p;q', 'r:s', "t'u", 'v"w', '図面、', '図面。', '図面　', ' '];
+  const DOTS = ['.', '．', '。', '｡'];
 
   const leaked = [];
   let checked = 0;
-  ['構造計算書', '図面', '見積書'].forEach((stem) => {
-    exts.forEach((ext) => {
-      ['.', '．'].forEach((dot) => {
-        [ext, toFull(ext)].forEach((extForm) => {
-          const base = stem + dot + extForm;
-          // positive control: 装飾無しの base が拒否されていなければ何も証明しない。
-          if (!rejects(base)) { leaked.push('BASE:' + base); return; }
-          DECORATIONS.forEach((dec) => {
-            checked++;
-            if (!rejects(stem + dec + dot + extForm)) leaked.push(stem + dec + dot + extForm);
-          });
-        });
+  PREFIXES.forEach((pre) => {
+    extForms.forEach((ef) => {
+      DOTS.forEach((dot) => {
+        checked++;
+        const text = pre + dot + ef;
+        try { Evidence.assertPublicSafeEvidenceText(text, 'prose'); leaked.push(text); }
+        catch (e) { if (!/private-document-filename/.test(e.message)) leaked.push(text + ' (wrong rule)'); }
       });
     });
   });
-  assert.deepEqual(leaked.slice(0, 8), [], '装飾を入れると通った (全' + leaked.length + '件)');
-  assert.equal(checked, 3 * exts.length * 2 * 2 * DECORATIONS.length);
-  assert.equal(checked > 4000, true, '直積数: ' + checked);
+  assert.deepEqual(leaked.slice(0, 8), [], '素通り (全' + leaked.length + '件 / ' + checked + '中)');
+  assert.equal(checked, PREFIXES.length * extForms.length * DOTS.length);
+  assert.equal(checked > 10000, true, '検査数: ' + checked);
 });
 
-test('P2J-S34: 正規化は**集合**であり、差し替えは単調ではない', () => {
-  // 独立検証9 F9-01 の根。前回は「raw ∨ fold は単調なので安全」と書いたが、
-  // 単調なのは raw に対してだけで、fold を**広いものへ差し替えていた**。
-  // 広い fold は `（）` を区切り文字に変えてしまうので、狭い fold では
-  // 拒否できていた形が通るようになった。
-  // よって normalizer は集合として持ち、**減らさない**。
-  assert.equal(Evidence.TEXT_NORMALIZER_COUNT, 2,
-    'normalizer を減らしたなら、どの形が拒否できなくなったかを確かめること');
+test('P2J-S36: control-character 規則は宣言した範囲を全数覆う', () => {
+  // 独立検証10 F10-05。`\\u007F-\\u009F` の上端を 1 つずらす変異が生き残っていた。
+  // 本Phase で何度も出た通り、**範囲を持つ実装は代表文字では押さえられない**。
+  // （この規則は本Phase で触っていないが、同じ形の未固定であることに変わりは無い。）
+  const CONTROL_RANGES = [[0x00, 0x08], [0x0b, 0x0c], [0x0e, 0x1f], [0x7f, 0x9f]];
+  let checked = 0;
+  CONTROL_RANGES.forEach(([lo, hi]) => {
+    for (let c = lo; c <= hi; c++) {
+      checked++;
+      const text = '検討' + String.fromCharCode(c) + '結果';
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+        /control-character/, 'U+' + c.toString(16).toUpperCase().padStart(4, '0'));
+    }
+  });
+  assert.equal(checked, 9 + 2 + 18 + 33);
 
-  // 各 normalizer が担当する形を 1 つずつ固定する（どちらかを消すと落ちる）。
-  const narrowOnly = '構造計算書（最新）．ｐｄｆ';   // wide fold だと `（）` が幹を切る
-  const wideOnly = 'ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ';             // narrow fold だと `ｗ` が残る
-  [narrowOnly, wideOnly].forEach((text) => {
+  // 範囲外は通る（改行・タブは意図的に許容）。
+  ['検討\n結果', '検討\t結果', '検討\r結果', '検討\u00a0結果'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, JSON.stringify(text));
+  });
+});
+
+test('P2J-S34: 正規化は集合であり、各要素が固有の形を持つ', () => {
+  // 独立検証10 F10-04: 旧版の「wide 専用」証人 `ｗｗｗ．…` は専用ではなかった
+  // （U+FF57 は narrow でも畳まる）。つまり何も固定していなかった。
+  // 現在の 2 つは、他方だけでは届かない形を**実測で**持っている。
+  assert.equal(Evidence.TEXT_NORMALIZER_COUNT, 2);
+
+  // wide だけが畳める: 英数字以外の全角記号（＠ ： ＼）
+  ['ａｂｃ＠ｅｘａｍｐｌｅ．ｃｏｍ', 'Ｃ：＼Ｕｓｅｒｓ＼ｘ'].forEach((text) => {
     assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
-      /must not contain private URLs/, text);
+      /must not contain private URLs/, 'wide fold だけが捕まえられる形: ' + text);
   });
 
-  // 畳み関数自体の役割分担を固定する。
-  assert.equal(Evidence.foldFullwidthFilenameChars('（）'), '（）', '狭い畳みは括弧を触らない');
-  assert.equal(Evidence.foldFullwidthAscii('（）'), '()', '広い畳みは括弧を畳む');
-  assert.equal(Evidence.foldFullwidthFilenameChars('．ｐｄｆ'), '.pdf');
-  assert.equal(Evidence.foldFullwidthAscii('．ｐｄｆ'), '.pdf');
+  // dot 写像だけが届く: U+3002 は全角 ASCII 範囲の外なので wide では畳まない
+  ['構造計算書。pdf', '図面｡dwg'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /private-document-filename/, 'dot 写像だけが捕まえられる形: ' + text);
+  });
+
+  // 合成が必要な形（閉包を取っていること）
+  ['構造計算書。ｐｄｆ', '図面｡ｄｗｇ'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /private-document-filename/, '合成が必要な形: ' + text);
+  });
+
+  assert.equal(Evidence.foldFullwidthAscii('。'), '。', 'wide fold は U+3002 を触らない');
+  assert.equal(Evidence.foldDotEquivalents('。'), '.', 'dot 写像は U+3002 を写す');
+  assert.equal(Evidence.foldDotEquivalents('・'), '・', '中黒は写さない（散文の並列区切り）');
 });
 
 test('P2J-S35: 語境界を見るのは raw 側だけ（過剰拒否のコストを固定）', () => {
@@ -836,9 +867,18 @@ test('P2J-S35: 語境界を見るのは raw 側だけ（過剰拒否のコスト
     assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
   });
   // しかし数字や全角が続く形は単語の続きでは無いので拒否する。
-  ['構造計算書.pdf2', '図面.dwg1', '構造計算書．ｐｄｆＡ', '図面．ｄｗｇ１'].forEach((text) => {
+  ['構造計算書.pdf2', '図面.dwg1', '図面．ｄｗｇ１', '構造計算書。ｐｄｆ'].forEach((text) => {
     assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
       /private-document-filename/, text);
+  });
+
+  // 語境界は raw と正規化形で**同じ**になった（独立検証10 F10-01/F10-03）。
+  // 以前は正規化形だけ境界無しにしており、
+  //   (a) 全角が**どこかに**あるだけで無関係な ASCII 識別子まで巻き込み
+  //   (b) `構造計算書.pdfA` は通るのに `構造計算書．ｐｄｆＡ` は落ちる、という不整合
+  // を同時に生んでいた。現在はどちらも受理で一貫する。
+  ['構造計算書.pdfA', '構造計算書．ｐｄｆＡ', '図面.dwgZ'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
   });
 });
 
@@ -897,7 +937,13 @@ test('P2J-S29: 全角畳みは拒否を**増やすだけ**であり減らさな�
   assert.equal(bases.length > 500, true, 'base 数: ' + bases.length);
 
   // 不変式本体: 末尾に全角英数字を 1 文字足しても受理に転じてはならない。
-  const TRAILING = ['Ａ', 'Ｚ', 'ａ', 'ｚ', '０', '９', '１', '５'];
+  // 末尾に足すのは**ASCII 英字に写らない**文字に限る。
+  // 全角英字（Ａ ａ）は畳むと ASCII 英字になり、語境界 `(?![A-Za-z])` にかかる——
+  // つまり `構造計算書．ｐｄｆＡ` は `構造計算書.pdfA` と**同じ扱いになる**。
+  // 以前は正規化形専用の境界無し変種で前者だけ拒否していたが、
+  // それが普通の散文を巻き込んでいた（検証10 F10-01）ので取りやめた。
+  // 両者の扱いが揃ったことは P2J-S35 で固定する。
+  const TRAILING = ['０', '９', '１', '５', '。', '）', '、'];
   const leaked = [];
   bases.forEach((b) => {
     TRAILING.forEach((ch) => { if (!rejects(b + ch)) leaked.push(b + ch); });
