@@ -2062,3 +2062,30 @@ R14-02 \p{Variation_Selector} を除く          SURVIVED —— **等価**（�
 Evidence protected state は未変更: `verifiedCases: []` / promotion NONE /
 1250×2050 `sample_default` `unverified` / V0=34 / roughness III。
 
+## D-048 — Human Gate が guard の enforcement boundary を審理中（実装は未承認）
+
+```text
+状態 : Human Gate 審理中。実装未承認
+文書 : .agent-run/LR-20260921-GLASS-P2J/HUMAN_GATE_GUARD_POLICY.md
+```
+
+内容は QD-J14 が提起した問いへの Human Gate 側の回答。
+推奨は「9 規則を hard reject として残し、3 規則を advisory lint へ降格し、
+human publication review を明示的 control として置く」。
+
+**本セッションがこの round で実施したのは以下だけ**。
+§8 の実装（HARD_REJECT_RULES / ADVISORY_LINT_RULES の分割、
+lintPublicEvidenceText の新設）は承認後にのみ行う。
+
+```text
+1. HUMAN_GATE_GUARD_POLICY.md を Run Artifact へ記録
+2. §17 の stop condition を発効
+   → www / known-private-provider / opaque-long-token への mechanical repair 停止
+   → 9 つの構造規則の欠陥は引き続き Required Fix
+3. 独立検証15 を §7 の scope（A–E）へ再定義して通知済み
+   → repair round 16 は開始しない
+```
+
+実装コードはこの round で一行も変えていない。
+head 76aba49 の振る舞いは D-047 時点から不変。
+

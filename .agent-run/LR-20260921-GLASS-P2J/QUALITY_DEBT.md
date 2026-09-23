@@ -609,3 +609,12 @@ html-like-tag
 これはその問いに対する**実測付きの回答**であり、
 実装セッションが単独で決めてよい範囲を超えている。
 
+### QD-J14 追記 — Human Gate 回答済み（審理中）
+
+```text
+QD-J14 の問いに対し Human Gate から正式回答あり。
+→ HUMAN_GATE_GUARD_POLICY.md （D-048）
+推奨決定: APPROVE POLICY CHANGE（9 hard / 3 advisory / human review を明示 control へ）
+現状: 実装未承認。§17 stop condition 発効中。
+```
+
