@@ -711,3 +711,34 @@ Wave 7（README / AC convergence / Draft PR / Preview / Completion Report）は
 引き続き blocked——§44 により実装セッションは自己認定できない。
 ```
 
+## Wave 6f final state（独立検証6 の修理 / D-039）
+
+```text
+npm                        : 629 pass / 0 fail
+browser                    : 62 checks / 0 fail（再実行）
+parser boundary            : 42形測定 / bypass 0 / over-rejection 7（fail-closed）
+mutation                   : 5/5 KILLED（すべて D-038 時点では生存）
+protected values           : 5件すべて一致
+validateAllEvidence()      : []
+拡張子集合                 : evidence.js が唯一の定義。caseId 側もこれを読む
+Implementation verification head : **未確定**（7 回目の独立検証が必要 / §44・§47）
+```
+
+### この Wave で確定したこと
+
+```text
+- D-038 の全角対応は**純粋な回帰**だった。畳みを必要最小限へ限定して修正
+- corpus 26680 形の識別力が 1 だった。位置の軸（P2J-S28）を追加
+- 拡張子集合を evidence.js に単一化し、caseId 側の同じ反転を閉じた
+- 証拠が空だった主張（accept集合の等号 / 線形性 / 記法コスト）をすべて訂正
+- QD-J08 / QD-J09 を新設、QD-J04 / J05 / J07 を訂正
+```
+
+### 変わっていないこと
+
+```text
+Evidence protected state : verifiedCases [] / promotion NONE /
+                           1250×2050 sample_default unverified / V0 34 / roughness III
+Wave 7 は引き続き blocked——§44 により実装セッションは自己認定できない。
+```
+

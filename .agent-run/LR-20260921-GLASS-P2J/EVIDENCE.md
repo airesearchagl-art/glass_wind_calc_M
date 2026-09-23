@@ -1178,3 +1178,65 @@ mutation          : 6/6 KILLED（欠陥復元 5 + 行き過ぎ 1）
 protected facts   : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
 ```
 
+## §42 — 独立検証6 の修理実測（D-039）
+
+### F1 の再現と修正（自分で入れた回帰）
+
+```text
+                          HEAD~1  D-038後  D-039後
+構造計算書（最新）.pdf      拒否     受理      拒否
+図面（最新）.pdf            拒否     受理      拒否
+見積書（税込）.xlsx        拒否     受理      拒否
+意匠図（A棟）.xlsx        拒否     受理      拒否
+見積書＂.pdf / 図面，.pdf   拒否     受理      拒否
+構造計算書．ｐｄｆ          受理     拒否      拒否   ← Wave5 F4 の修復も保持
+```
+
+### パーサ境界の再測定（F4 を反映して方向別に集計）
+
+```text
+測定形                                          : 42
+bypass（受理だが Chromium は要素化）          : 0   ← これが 0 であることが要件
+over-rejection（拒否だが要素 0）              : 7   ← fail-closed、許容
+  </Aimg> / </img src=x onerror=alert(1)> / </<img>
+  <img src="x> / <img src="x>y / </img> / <! <img src=x>
+```
+
+前回の「27/27 一致」は、この 7 形を含まない形集合で測った結果だった。
+主張を「**accept 集合に Chromium が要素化する形は 1 つも無い**」へ訂正する。
+
+### corpus の識別力（F2）
+
+```text
+修正前: 「最初の `<` だけ見る」変異 → SURVIVED（627/0）
+修正後: 同じ変異               → KILLED（P2J-S28）
+```
+
+### scanner の線形性（F6を受けて `<` を含む証人で再実測）
+
+```text
+                             N=1000  2000  4000  8000 16000 32000
+  "<"*N                        0.08  0.16  0.29  0.10  0.26  0.74 ms
+  "<1"*N（名前なし・最悪ケース）  0.02  0.05  0.09  0.18  0.37  0.72 ms
+  "<a"*N（`>` 無し）            0.00  0.00  0.00  0.00  0.00  0.00 ms
+  "<a "+x*N+">"                0.00  0.00  0.00  0.00  0.00  0.00 ms
+```
+
+### 回帰（修理後・全量）
+
+```text
+npm test        : 629 pass / 0 fail
+browser         : 34 + 8 + 10 + 10 = 62 pass / 0 fail
+parser boundary : 42形 / bypass 0
+mutation        : 5/5 KILLED（すべて D-038 時点では生存していた）
+protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
+```
+
+### 方法上の反省
+
+```text
+「mutant が KILLED なら良し」として振舞い差分を読まなかったことが
+F1 を見逃した直接の原因。R5-05 の差分には「mutant の方が正しい形」が
+入っていた。KILLED は「両者が違う」しか意味しない。
+```
+

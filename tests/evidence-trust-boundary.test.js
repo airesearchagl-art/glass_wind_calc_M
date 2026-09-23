@@ -351,3 +351,69 @@ test('P2J-TB18: 必須field検査は Object.prototype 汚染下でも成立す�
     '後始末: 汚染を残さない');
   assert.equal({}.zone, undefined);
 });
+
+/* ============================================================
+   P2J-TB19 — 拡張子集合の単一化（独立検証6 F3）
+============================================================ */
+
+/**
+ * `xls[xm]?` のような alternative を具体的な拡張子に展開する。
+ * 具体列を手で書くと、まさにこの F3 と同じ「2 か所に同じ一覧」になる。
+ */
+function expandExtension(alt) {
+  let out = [''];
+  let i = 0;
+  while (i < alt.length) {
+    let token;
+    if (alt.charAt(i) === '[') {
+      const j = alt.indexOf(']', i);
+      token = alt.slice(i + 1, j).split('');
+      i = j + 1;
+    } else {
+      token = [alt.charAt(i)];
+      i += 1;
+    }
+    const optional = alt.charAt(i) === '?';
+    if (optional) i += 1;
+    const next = [];
+    out.forEach((prefix) => {
+      if (optional) next.push(prefix);
+      token.forEach((c) => next.push(prefix + c));
+    });
+    out = next;
+  }
+  return Array.from(new Set(out));
+}
+
+test('P2J-TB19: caseId の filename-like 判定は evidence.js の拡張子集合と一致する', () => {
+  // 独立検証6 F3: evidence.js 側だけを日本の実務形式へ拡張した結果、
+  // caseId 側だけが取り残され、`plan_dwg` は拒否 / `plan_jww` は受理 という
+  // 、この修理が閉じたのとまったく同じ非対称が隣のモジュールで再現していた。
+  // caseId は UI・export package・PR本文にそのまま出る公開 identifier である。
+  const source = Evidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE;
+  assert.equal(typeof source, 'string');
+  const exts = source.split('|').reduce((acc, alt) => acc.concat(expandExtension(alt)), []);
+  assert.equal(exts.length > 40, true, '展開結果が少なすぎる: ' + exts.length);
+
+  // positive control: 拡張子を持たない caseId は通る。
+  // これが通らなければ下の assert.throws は何も証明していない。
+  const control = synVerifiedCase();
+  control.caseId = 'SYNTB19';
+  assert.equal(MiyoshiProjectConfig.validateVerifiedCase(control), true);
+
+  exts.forEach((ext) => {
+    const c = synVerifiedCase();
+    c.caseId = 'SYN_' + ext;
+    assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(c),
+      /caseId/, 'filename-like caseId が通った: ' + c.caseId);
+  });
+
+  // 同じ一覧を 2 か所で持たないこと自体を固定する。
+  const miyoshiSrc = fs.readFileSync(
+    path.join(__dirname, '..', 'project-config', 'miyoshi.js'), 'utf8');
+  assert.match(miyoshiSrc, /PRIVATE_DOCUMENT_EXTENSION_SOURCE/,
+    'miyoshi.js は拡張子集合を evidence.js から読むこと');
+  assert.doesNotMatch(miyoshiSrc, /\/\[\._-\]\(pdf\|dwg/,
+    'miyoshi.js に拡張子一覧を再度ハードコードしている');
+});
+

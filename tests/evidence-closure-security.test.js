@@ -703,6 +703,25 @@ test('P2J-S24: 私的文書のファイル名判定は幹がASCIIであること
     assert.throws(() => Evidence.assertPublicSafeEvidenceText(s, 'prose'),
       /private-document-filename/, s);
   });
+  // 全角句読点・括弧を含む幹（独立検証6 F1）。
+  // 全角対応の最初の実装は U+FF01..U+FF5E を一括で畳んでおり、
+  // `（ ） ＂ ＇ ， ；` が幹の区切り文字に化けて**拒否が壊れていた**。
+  // 全角括弧は日本語ファイル名で最もよく使われる装飾であり、
+  // 旧 corpus は 15 幹のすべてが装飾無しだったため 1 件も検出できなかった。
+  const DECORATED_STEMS = ['構造計算書（最新）', '図面（改訂版）', '見積書（税込）',
+    '意匠図（A棟）', '計算書（第2版）', '仕様書（案）', '伏図（確定）',
+    '見積書＂', '図面，', '資料；', '図面＇', '計算書＜旧＞'];
+  let decorated = 0;
+  DECORATED_STEMS.forEach((stem) => {
+    ['pdf', 'xlsx', 'dwg', 'png'].forEach((ext) => {
+      decorated++;
+      const text = '社内の ' + stem + '.' + ext + ' による';
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+        /private-document-filename/, text);
+    });
+  });
+  assert.equal(decorated, DECORATED_STEMS.length * 4);
+
   // 全角形（独立検証5 Finding 4）。日本語 IME は `．` や `ｐｄｆ` を
   // 容易に生むが、旧規則は半角しか見ていなかった。
   ['構造計算書．ｐｄｆ', '構造計算書.ｐｄｆ', '構造計算書．pdf',
@@ -754,6 +773,29 @@ test('P2J-S25: tag name の継続文字は `[A-Za-z0-9-]` に限られない', (
   assert.equal(NAME_CONTINUATION_FORMS.length, 74);
 });
 
+test('P2J-S28: 名前の前に `<` や他の文字があってもタグ判定は回避できない', () => {
+  // 独立検証6 F2。旧 corpus は 26680 形ありながら、**名前を始める `<` より
+  // 前に `<` を置いた形を 1 つも含んでいなかった**。検証4 Finding 1 は名前の
+  // **後ろ**の `<` を扱ったが、**前**は誰も扱っていなかった。
+  // その結果「最初の `<` だけ見る」変異が suite を無傷で通過していた。
+  // Chromium 実測: '<1<img src=x onerror=alert(1)>' は img 要素を生む。
+  const PREFIXES = ['<1', '<<', '<@', '<あ', '< ', '</ ', '</1', '3 < 5 なので ', '<!x ', '<'];
+  const TAGS = ['img src=x onerror=alert(1)', 'svg onload=alert(1)', 'a href=x', 'script'];
+  let checked = 0;
+  PREFIXES.forEach((prefix) => {
+    TAGS.forEach((tag) => {
+      [`${prefix}<${tag}>`, `${prefix}</${tag}>`].forEach((text) => {
+        checked++;
+        assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+          /matched known-unsafe pattern: html-like-tag/, text);
+      });
+    });
+  });
+  assert.equal(checked, PREFIXES.length * TAGS.length * 2);
+  // 前置きを実際に持っていること自体を固定する（再び欠けたら落ちる）。
+  assert.equal(PREFIXES.filter((p) => p.indexOf('<') !== -1).length >= 7, true);
+});
+
 test('P2J-S26: 本体が長くてもタグ判定は回避できない', () => {
   // 独立検証5 Finding 1。Review 4 の修復で本体に `{0,300}` の上限を
   // 置いたため、301文字以上の本体が**丸ごと素通り**していた。
@@ -787,6 +829,7 @@ test('P2J-S27: パーサが要素を作らない形は拒否しない（行き�
     '</ img>',                       // bogus comment
     '</1img>',                       // bogus comment
     '＜img onerror=alert(1)＞',      // 全角・テキストになる
+    '<//a>', '</ >', '<!>',          // bogus comment系（検証6 F2: 行き過ぎ検出用）
     '<', '<<<', '>>>'
   ].forEach((text) => {
     assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);

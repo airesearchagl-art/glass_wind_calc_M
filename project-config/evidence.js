@@ -169,17 +169,27 @@
     }
   }
 
-  // 全角ASCII（U+FF01..U+FF5E）と全角スペースを半角へ畳む。
-  // IMEは `．` `ｐｄｆ` を容易に生む一方、regexの文字クラスは半角しか見て
-  // いなかった（`構造計算書．ｐｄｆ` が素通りしていた）。
-  function foldFullwidthAscii(text) {
+  // 全角のうち**ファイル名判定に必要な文字だけ**を半角へ畳む。
+  //
+  // 範囲を U+FF01..U+FF5E 全体にすると**逆に穴が開く**（独立検証6 F1）。
+  // その範囲には `（ ） ＂ ＇ ， ； ＜ ＞` が含まれ、これらは畳むと
+  // 幹の区切り文字クラス `[^\s<>"'(),;:：、。「」『』]` に入ってしまう。
+  // つまり `構造計算書（最新）.pdf` の幹が dot の直前で切れ、
+  // 畳む前なら拒否できていたものが通るようになる。
+  // 全角括弧は日本語ファイル名で最もよく使われる装飾であり、
+  // 実測で 224/224 の形が拒否→受理へ反転していた。
+  //
+  // 必要なのは「区切りの `．`」と「拡張子の全角英数字」だけ。
+  // 全角句読点・括弧類は幹の一部として**そのまま残す**。
+  function foldFullwidthFilenameChars(text) {
     var out = '';
     for (var i = 0; i < text.length; i++) {
       var code = text.charCodeAt(i);
-      if (code >= 0xff01 && code <= 0xff5e) {
+      if ((code >= 0xff10 && code <= 0xff19) ||   // ０-９
+          (code >= 0xff21 && code <= 0xff3a) ||   // Ａ-Ｚ
+          (code >= 0xff41 && code <= 0xff5a) ||   // ａ-ｚ
+          code === 0xff0e) {                      // ．
         out += String.fromCharCode(code - 0xfee0);
-      } else if (code === 0x3000) {
-        out += ' ';
       } else {
         out += text.charAt(i);
       }
@@ -193,10 +203,21 @@
   // 一方 .html/.js/.md 等は本ツール自身の公開ファイル名として既存の
   // publicDescription に現れるため、意図的に含めない。
   // stem の {1,120} は上限付きなので走査は線形（QD-J04）。
-  var PRIVATE_DOCUMENT_FILENAME = /[^\s<>"'(),;:：、。「」『』]{1,120}\.(pdf|dwg|dxf|jww|jwc|xdw|sfc|p21|ifc|dwf|pln|rvt|skp|xls[xm]?|doc[xm]?|ppt[xm]?|od[tsp]|jpe?g|png|gif|bmp|tiff?|heic|heif|webp|zip|rar|7z|lzh|tar|gz|msg|eml|txt|csv|bak)(?![A-Za-z0-9])/i;
+  // 拡張子集合は**ここが唯一の定義**である。
+  // 消費側の一つは project-config/miyoshi.js の FILENAME_LIKE_CASE_ID_PATTERN
+  // で、そちらがこの値を読んで組み立てる（依存の向きは一方向のまま）。
+  // 独立検証6 F3: 以前は「同じ集合を使う」と**コメントで述べているだけ**
+  // だったため、こちらを拡張した瞬間に 2 つがさして、caseId 側で
+  // `plan_dwg` は拒否 / `plan_jww` は受理 という、本修理が閉じたのと
+  // まったく同じ非対称が隣のモジュールで再現していた。
+  // 同じことを 2 か所で判定しない（本Campaignの反復する教訓）。
+  var PRIVATE_DOCUMENT_EXTENSION_SOURCE = 'pdf|dwg|dxf|jww|jwc|xdw|sfc|p21|ifc|dwf|pln|rvt|skp|xls[xm]?|doc[xm]?|ppt[xm]?|od[tsp]|jpe?g|png|gif|bmp|tiff?|heic|heif|webp|zip|rar|7z|lzh|tar|gz|msg|eml|txt|csv|bak';
+  var PRIVATE_DOCUMENT_FILENAME = new RegExp(
+    '[^\\s<>"\'(),;:\uff1a\u3001\u3002\u300c\u300d\u300e\u300f]{1,120}\\.('
+    + PRIVATE_DOCUMENT_EXTENSION_SOURCE + ')(?![A-Za-z0-9])', 'i');
 
   function containsPrivateDocumentFilename(text) {
-    return PRIVATE_DOCUMENT_FILENAME.test(foldFullwidthAscii(text));
+    return PRIVATE_DOCUMENT_FILENAME.test(foldFullwidthFilenameChars(text));
   }
 
   // public-safe boundary（RF-02）: publicDescription（および将来
@@ -788,6 +809,7 @@
     VERIFICATION_STATUSES: Object.freeze(VERIFICATION_STATUSES),
     CHECKED_AT_PATTERN: CHECKED_AT_PATTERN,
     PUBLIC_UNSAFE_TEXT_PATTERNS: Object.freeze(PUBLIC_UNSAFE_TEXT_PATTERNS),
+    PRIVATE_DOCUMENT_EXTENSION_SOURCE: PRIVATE_DOCUMENT_EXTENSION_SOURCE,
     isValidCheckedAt: isValidCheckedAt,
     assertOrdinaryObject: assertOrdinaryObject,
     assertPublicSafeEvidenceText: assertPublicSafeEvidenceText,

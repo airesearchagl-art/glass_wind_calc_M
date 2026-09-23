@@ -460,8 +460,12 @@
   // ここにも等しく当てはまる。図面番号やファイル名をそのままcaseIdに持ち込む経路を
   // 構造的に塞ぐため、公開して差し支えない短い記号IDだけを許す（fail closed）。
   var CASE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
-  var FILENAME_LIKE_CASE_ID_PATTERN =
-    /[._-](pdf|dwg|dxf|xls[xm]?|doc[xm]?|ppt[xm]?|jpe?g|png|zip|csv|rvt|skp)$/i;
+  // 拡張子集合は evidence.js が唯一の定義を持つ（独立検証6 F3）。
+  // 以前はここに同じ一覧を**手で写して**おり、evidence.js 側だけを
+  // 日本の実務形式へ拡張した結果 2 つがさし、caseId だけ `plan_jww` が
+  // 通る状態になっていた。caseId は UI・export package・PR本文にそのまま出る。
+  var FILENAME_LIKE_CASE_ID_PATTERN = new RegExp(
+    '[._-](' + ProjectEvidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE + ')$', 'i');
 
   function validateVerifiedCase(caseObj) {
     if (!caseObj || typeof caseObj !== 'object') {
