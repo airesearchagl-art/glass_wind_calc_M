@@ -1008,3 +1008,97 @@ tag pattern 280KB → 7ms                                              （線形
 ```
 
 タグ判定は線形。二次なのは本Phaseで触っていないパターンであり QD-J04 に記録した。
+
+## §38 — 4回目の独立検証（head `e4434ae`）
+
+```text
+verdict : PASS WITH FINDINGS
+findings: Hard Gate 0 / **Required Fix 2** / Advisory 3 / Info 2
+npm     : 622 pass / 0 fail（独立実測）
+browser : VERIFIED（独自harness）
+probes  : 19 KILLED / 0 SURVIVED（自身の PATCH-MISS 2件を開示して数えていない）
+wave counts: 9点すべて独立再実行して一致（500…622）
+```
+
+### Finding 1（Required Fix / 自分で再現）— 本体の `<` 1文字で素通り
+
+```text
+<img src=x onerror=alert(1)>         拒否    ← control
+<img onerror=alert(1<2)>             ACCEPTED
+<img src=x onerror="alert(1);a<b">   ACCEPTED
+<img src=x onerror=alert(1) alt="<"> ACCEPTED
+自己実測 78/78 ／ 検証者 710/710（Chromiumで実要素生成・handler発火まで確認）
+```
+
+**元の規則から在った穴**であり、3度の修理でも3度の検証でも
+本体の文字クラスが見られていなかった。
+Wave 6c の「素通りを無くした」という結論は**falsified**。
+
+### Finding 2（Required Fix / 自分で再現）— 日本語ファイル名だけが素通り
+
+```text
+plan.pdf        拒否
+構造計算書.pdf  ACCEPTED        図面.dwg ACCEPTED        意匠図一式.pdf ACCEPTED
+自己実測: 現実的な日本語ファイル名 12/15 が素通り
+end-to-end: makeEvidence(...,'社内の 構造計算書.pdf により確認',...) が通る
+```
+
+**この案件で実際に起こりうる形だけが**素通りしていた。
+`publicDescription` は公開repositoryにもCandidate JSONにも出る経路である。
+
+## §39 — 4回目の修理と、corpus の作り直し
+
+```text
+tag body      : [^<>]* → [^>]{0,300}（`<` を許し、上限で線形性を保つ）
+filename stem : [A-Za-z0-9_-]+ → 区切り文字以外の連なり（上限120）
+```
+
+### corpus を commit した（Finding 3 / 4 への対応）
+
+旧corpus（未commit・508形）は正規表現と同じ思考から作られており、
+508/508「拒否」と報告しながら独立corpusの 710/710 素通りを1つも見つけていなかった。
+3回目検証の指摘（「14/14死んでも正しさの証明ではない」）が corpus 層で再発した形である。
+
+```text
+commit 済み corpus:
+  HTML_TAG_NAMES 142件 × TAG_BODY_FORMS 25形（`<` を含む形・`[\s/]` で始まらない形を必ず含む）
+  日本語ファイル名 15幹 × 16拡張子 = 240形
+```
+
+独立実測（修理後）:
+
+```text
+tag corpus        : 3458形すべて拒否（0 素通り）
+JP filename corpus:  240形すべて拒否（0 素通り）
+must-accept       :   18形すべて受理
+validateAllEvidence(): []
+```
+
+### mutation（6件・挙動変化を先に確認）
+
+```text
+Y-01 本体を [^<>]* へ戻す（4度目の穴）  ltBypass=ACCEPTED → KILLED (S18)
+Y-02 本体を [^>]* へ（無制限・二次）    → KILLED (S21)  ← 検証者が load-bearing と評した test
+Y-03 tag ルール無効化                   → KILLED (S01)
+Y-04 filename 幹を ASCII 限定へ戻す     jpFile=ACCEPTED → KILLED (S24)
+Y-05 filename ルール無効化              → KILLED (S01)
+Y-06 拡張子判定を外す（過剰拒否）       indexHtml=REJECTED → KILLED (12件)
+```
+
+### 修理中に既存テストが自分を捕まえた
+
+Finding 2 の修理コメントに案件名を含む例を書いたところ、
+既存テスト §8（generic moduleに案件名を含まない）が落ちた。合成例へ置換した。
+
+## §40 — 4回目の修理後の実測
+
+```text
+npm test        : 624 pass / 0 fail（622 → +2）
+browser         : 34 + 8 + 10 + 10 = 62 checks / 0 fail
+protected values: 5件すべて一致
+validateAllEvidence(): []
+project state   : BLOCKED / 0 of 12 / 0 of 4 / 0 of 8 / candidate null
+                  verifiedCases [] / V0 34 / roughness III
+線形性          : tag 28KB→7ms / 56KB→14ms / 112KB→31ms
+                  filename 2KB→4ms / 4KB→7ms / 8KB→16ms
+```

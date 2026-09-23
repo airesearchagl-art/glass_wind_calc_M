@@ -21,7 +21,7 @@
 | AC-J02 | Evidence Closure Observation v1成立 | PASS | schemaVersion 1 / observationType固定 / 8 field厳密 / detach + deep freeze |
 | AC-J03 | strict fact allowlist | PASS | closure fact 5件。generic allowlistの部分集合であることをmodule評価時にassert |
 | AC-J04 | fact-specific schema | PASS | scope種別 / 単位 / scalar数値をfactごとに固定。単位変換なし |
-| AC-J05 | private reference非保持 | PASS | candidate/exportともに所在なし。Wave 5でprose側の4クラス（email/私的文書名/タグ/制御文字）も塞いだ |
+| AC-J05 | private reference非保持 | PASS（強化） | candidate/exportに所在なし。**4回目検証で日本語ファイル名の素通りを発見し修理**（幹のASCII前提を撤廃 / D-034） |
 | AC-J06 | Phase2F Evidence contract reuse | PASS | export surfaceを実測。§3の列挙と完全一致。再実装しない前提を確定（D-002 / EVIDENCE §3） |
 | AC-J07 | Evidence-first reconciliation | PASS | gateが先、数値は後。gate FAIL時は値一致でも INSUFFICIENT_EVIDENCE（P2J-C45 / W3-01,02） |
 | AC-J08 | value matchだけではpromotion不可 | PASS | 値一致 + Evidence不十分 → BLOCKED を合成presetで実測（P2J-C45） |
@@ -35,12 +35,12 @@
 | AC-J16 | trust spoof rejection | PASS | Observation側に加えcandidate側のfield（candidateStatus/notApplied/gateSummary等）も拒否（P2J-S07 / W5-14） |
 | AC-J17 | current verifiedCases unchanged | PASS | `[]` のまま。P2J-TB16で固定 |
 | AC-J18 | current preset status unchanged | PASS | W/H/圧力/V0=34/粗度IIIすべて不変。P2J-TB16で固定（D-006） |
-| AC-J19 | calculation regressionなし | PASS（Wave 6c時点） | 622 pass / 0 fail。保護値5件を3度目の修理後も直接再測定 |
+| AC-J19 | calculation regressionなし | PASS（Wave 6d時点） | 624 pass / 0 fail。保護値5件を4度目の修理後も直接再測定 |
 | AC-J20 | Review/Batch/Profile regressionなし | PASS（Wave 5時点） | Phase 2F〜2Iの既存suiteを無改変のまま全緑 |
 | AC-J21 | actual evidence availabilityを正直に記録 | PASS | 開発セッションの調査結果（UNAVAILABLE）はRun Artifactに残し、UIにはruntime真実（Observation 0件）だけを出す（D-021 / P2J-U19） |
 | AC-J22 | private evidence unavailableならpromotion NONE | PASS | UI実測で candidate「なし」/ 0 of 12 / 0 of 4 / 0 of 8 |
 | AC-J23 | README/documentation sync | PENDING | |
-| AC-J24 | independent verifier | 部分PASS | 3回実施（1784fe3 / 978ab6b / 1556fc4）。いずれも Hard Gate 0。3回目は Required Fix 2件（同一ガードの3度目の欠陥）→ 修理済み。**4回目の検証が未完** |
+| AC-J24 | independent verifier | 部分PASS | 4回実施（1784fe3 / 978ab6b / 1556fc4 / e4434ae）。いずれも Hard Gate 0。4回目は Required Fix 2件（本体の`<`素通り・日本語ファイル名素通り）→ 修理済み。**5回目の検証が未完** |
 | AC-J25 | Draft PR / Human Gate STOP | PENDING | |
 
 ## Next Action

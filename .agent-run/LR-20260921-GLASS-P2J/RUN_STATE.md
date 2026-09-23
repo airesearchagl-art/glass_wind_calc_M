@@ -10,7 +10,7 @@
 - Base SHA: 44e4032a2fb3bd3a48bab04d3a5a76c5a6a912eb
 - Current artifact-sync head: `RESOLVE_DYNAMICALLY`
 - Implementation verification head: `RESOLVE_AT_CHECKPOINT`
-- Current wave: Wave 6 — 独立検証3回 / 同一ガードを3度修理（4回目の検証待ち）
+- Current wave: Wave 6 — 独立検証4回 / prose guard を4度修理（5回目の検証待ち）
 - Task Packet ID: LRP-20260921-GLASS-P2J
 - Task Packet revision: 1
 - Task Packet SHA-256: aa9ce07dac4767afc0ad9ff4b13663ae8cc2ab1be98e9e44ef80498da3acc446
@@ -122,6 +122,59 @@ mutation 5件: M1/M2/M3/M5 は KILLED。M4（`hasOwnProperty`→`in`）は **SUR
 
 §29 の「inherited-field defectが見つかったらWave 2の前にFIXする。
 さもなくばWave 1はBLOCKED」は満たしている。
+
+## Wave 6d — 4回目の検証: 穴は元の規則から在った
+
+```text
+4回目 verdict : PASS WITH FINDINGS
+                Hard Gate 0 / **Required Fix 2** / Advisory 3 / Info 2
+                npm 622/0（独立実測）/ browser VERIFIED / probes 19 KILLED
+```
+
+### Finding 1 — 本体の `<` 1文字で素通りしていた
+
+```text
+<img src=x onerror=alert(1)>   拒否
+<img onerror=alert(1<2)>       **素通り**（自己実測 78/78 / 検証者 710/710）
+```
+
+本体クラス `[^<>]*` が `<` を除外していたため。
+**3度の修理で入ったものではなく、元の規則から在った。**
+3回の修理も3回の検証も本体の文字クラスを見ていなかった。
+
+Wave 6c は「素通りを無くすために誤検知を受け入れる」と述べたが、
+**素通りは残っていた。払ったコストが買うはずのものを買えていなかった。**
+D-032 の結論に訂正を入れた。
+
+### Finding 2 — 日本語のファイル名だけが素通りしていた（実害に最も近い）
+
+```text
+plan.pdf 拒否 / 構造計算書.pdf **素通り** / 図面.dwg **素通り**
+自己実測: 現実的な日本語ファイル名 12/15 が素通り
+```
+
+幹を `[A-Za-z0-9_-]+` に限っていたため、
+**この案件で実際に起こりうる形だけが**通っていた。
+`publicDescription` は公開repositoryにもCandidate JSONにも出る。
+
+「ASCIIか日本語か」を「安全か危険か」に重ねた誤りで、
+タグ判定の3度目の欠陥（「日本語があれば散文」）と同じ取り違えを別の場所で繰り返した。
+
+### corpus が実装の盲点を相続していた（Finding 3 / 4）
+
+旧corpus（未commit・508形）は正規表現と同じ思考から作られ、
+508/508「拒否」と報告しながら独立corpusの素通りを1つも見つけていなかった。
+3回目検証の指摘が corpus 層で再発した形である。
+
+corpus を commit し、`<` を含む形と `[\s/]` で始まらない形を必ず入れた。
+実測（修理後）: タグ 3458形 / 日本語ファイル名 240形 すべて拒否、
+must-accept 18形すべて受理。
+
+### tag クラスを持つべきか（Q4）→ Human Gate 申し送り
+
+検証者は privacy クラスの維持と tag クラスの retire/置換を勧めた。
+Task Packet（Wave 5 §8）が tag 拒否を明示要求しているため本Phaseでは retire せず、
+測定済みの選択肢3案を QD-J06 に記録して Human Gate へ上げる。
 
 ## Wave 6c — 3回目の独立検証で同じガードに3度目の欠陥
 
@@ -425,7 +478,19 @@ distinct mutants 16 / KILLED 16 / SURVIVED 0 / PATCH-MISS 0
 真の last-one-wins と first-one-wins を別々に実装して再実行した。
 詳細と訂正の記録は EVIDENCE.md §9。
 
-## Wave 6c final state（4回目の検証待ち）
+## Wave 6d final state（5回目の検証待ち）
+
+```text
+npm                        : 624 pass / 0 fail
+browser                    : 62 checks / 0 fail
+protected values           : 5件すべて一致
+validateAllEvidence()      : []
+独立corpus（commit済み）   : tag 3458形 / JP filename 240形 すべて拒否
+線形性                     : tag / filename とも実測で線形
+Implementation verification head : **未確定**（§44・§47）
+```
+
+## Wave 6c final state
 
 ```text
 npm                        : 622 pass / 0 fail
@@ -556,24 +621,23 @@ Wave 6再検証 → Wave 7（TASK_QUEUE.md参照）
 
 ## Next action
 
-3度目の修理後の**新しい exact head** に対する4回目の独立検証（§44）。
+4度目の修理後の**新しい exact head** に対する5回目の独立検証（§44）。
 
 ```text
 - 実装セッションは自己認証しない
 - 重点:
-  (a) 1文字回避（CJK / 全角 / 属性値内）が本当に塞がったか
-  (b) 誤検知の受け入れが「回避方法あり」で妥当か、
-      既存11件と将来の散文が実務上書けるか
-  (c) テストが再び欠陥を仕様として固定していないか
-      （S17/S18/S22 が「正しい挙動」を固定しているか）
-  (d) QD-J04（二次コスト）/ QD-J05（受け入れたコスト）の記録が妥当か
+  (a) 本体の `<` 経路が本当に塞がったか（5度目の bypass が無いか）
+  (b) 日本語ファイル名の穴が塞がり、かつ過剰拒否していないか
+      （index.html / calc.js / README.md が通ること）
+  (c) commit した corpus が**実装から独立に**組まれているか。
+      corpus 自体が盲点を相続していないか
+  (d) QD-J06（tag クラスの retire 提案）を Human Gate へ上げた判断が妥当か
 - 検証が閉じてから §47 の implementation verification head を確定する
 ```
 
-**同じ箇所を3度直している。** 4度目が無いことを特に確かめる。
-mutation が全滅しても正しさの証明にならないことは3回目の検証で示された
-（出荷済みの挙動は mutation では露出しない）ため、
-仕様そのものを疑う視点で見る必要がある。
+**同じ prose guard を4度直している。** そのうち2度は
+「直したつもりが別の穴を開けた」、1度は「元から在った穴を見落としていた」である。
+5度目が無いことを、実装ではなく **corpus と仕様**の側から確かめる必要がある。
 
 実案件の状態は変わらない:
 `BLOCKED_BY_MISSING_EVIDENCE` / promotion `NONE` / `verifiedCases: []` /

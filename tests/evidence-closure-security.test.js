@@ -533,27 +533,59 @@ test('P2J-S17: 比較の散文は「空白を置く」書き方で通る（誤�
     '空白無しの比較は拒否される（既知・文書化済みのコスト）');
 });
 
-test('P2J-S18: タグ形は本体の書式・言語によらず拒否される', () => {
-  // 独立検証3回ぶんの回帰をまとめて固定する。
-  //   F1: 崩れた属性（バッククォート値・数字始まりの属性名 等）
-  //   3rd: 本体に1文字でも日本語/全角を混ぜると素通りしていた（実測114/114）
-  //        `alt="図面"` は**日本語HTMLとして自然な記述**であり、
-  //        「日本語があれば散文」という前提そのものが誤りだった。
-  const TAGS = ['a', 'b', 'i', 'p', 'br', 'hr', 'td', 'h1', 'img', 'svg', 'div',
-    'span', 'script', 'iframe', 'object', 'embed', 'input', 'style', 'form',
-    'meta', 'base', 'link', 'table', 'marquee', 'textarea', 'button'];
-  const BODIES = [
-    '', ' src=x onerror=1', ' src=x onerror=alert(1)', ' src=x onerror=alert`1`',
-    ' src=x onerror=alert(1) あ',          // 末尾にCJK1文字（旧: 素通り）
-    ' alt="図面" onerror=alert(1)',        // 属性値にCJK（旧: 素通り / 自然な日本語HTML）
-    ' src=x onerror=alert(1) Ａ',          // 全角Latin（旧: 素通り）
-    ' src=x onerror=alert(1)\u3000',       // 全角スペース（旧: 素通り）
-    ' "q"', ' =v', ' 1=2', ' -x=1', ' .x=1', ' x=1 2', " x=a'b", ' x=a"b',
-    ' disabled', ' 日本語', '/', '/onload=1', ' \n href=x', ' \t id=y'
-  ];
+/**
+ * 網羅corpus は**実装からではなくHTML側の語彙から**組み立てる。
+ *
+ * 独立検証4 Finding 4 の指摘: 旧corpus（未commit・508形）は正規表現と
+ * 同じ思考から作られていたため 508/508 「拒否」と報告しながら、
+ * 独立に組んだcorpusでは 710/710 が素通りしていた。
+ * corpus が実装の盲点を相続していた。
+ *
+ * そこで (a) corpus を commit して反証可能にし、
+ * (b) 本体形に「`[\s/]` で始まらない形」「`<` を含む形」を必ず入れる。
+ */
+const HTML_TAG_NAMES = (
+  'a abbr address area article aside audio b base bdi bdo blockquote body br ' +
+  'button canvas caption cite code col colgroup data datalist dd del details ' +
+  'dfn dialog div dl dt em embed fieldset figcaption figure footer form h1 h2 ' +
+  'h3 h4 h5 h6 head header hgroup hr html i iframe img input ins kbd label ' +
+  'legend li link main map mark menu meta meter nav noscript object ol optgroup ' +
+  'option output p param picture pre progress q rp rt ruby s samp script section ' +
+  'select slot small source span strong style sub summary sup table tbody td ' +
+  'template textarea tfoot th thead time title tr track u ul var video wbr ' +
+  'marquee applet frame frameset basefont big blink center font strike tt ' +
+  'acronym dir isindex keygen listing plaintext spacer xmp noframes nobr'
+).split(' ');
+
+/** 本体形。`<` を含む形と `[\s/]` で始まらない形を必ず含める。 */
+const TAG_BODY_FORMS = [
+  '',                               // 裸タグ
+  ' src=x onerror=alert(1)',        // 通常の属性
+  ' onerror=alert(1<2)',            // ← 本体に `<`（Finding 1 の本体）
+  ' onerror="a<b"',                 // ← 引用値の中に `<`
+  ' x="<"',                         // ← 属性値が `<` のみ
+  ' a<b<c',                         // ← `<` 複数
+  ' onload=alert(1<2) あ',          // `<` + CJK（過去2欠陥の合わせ技）
+  ' alt="図面" onerror=1',          // 属性値にCJK（自然な日本語HTML）
+  ' src=x onerror=alert(1) Ａ',     // 全角Latin
+  ' src=x onerror=alert(1)\u3000',  // 全角スペース
+  ' src=x onerror=alert`1`',        // バッククォート値
+  ' "q"', ' =v', ' 1=2', ' -x=1', ' .x=1', " x=a'b", ' x=a"b',
+  ' disabled', ' 日本語',
+  '/', '/onload=1',                 // `/` 区切り
+  ' \n href=x', ' \t id=y', '  '    // 空白類
+];
+
+test('P2J-S18: タグ形は本体の書式・言語・`<`の有無によらず拒否される', () => {
+  // 4回の独立検証で見つかった回帰をまとめて固定する:
+  //   F1   崩れた属性（バッククォート値・数字始まりの属性名 等）
+  //   3rd  本体に日本語/全角を1文字 → 素通り（114/114）
+  //   4th  本体に `<` を1つ → 素通り（710/710）
+  //        `<img onerror=alert(1)>` は拒否、`<img onerror=alert(1<2)>` は素通り、
+  //        という逆転が**元の規則から**存在していた
   let checked = 0;
-  TAGS.forEach((tag) => {
-    BODIES.forEach((body) => {
+  HTML_TAG_NAMES.forEach((tag) => {
+    TAG_BODY_FORMS.forEach((body) => {
       [`<${tag}${body}>`, `</${tag}${body}>`].forEach((s) => {
         checked++;
         assert.throws(() => Evidence.assertPublicSafeEvidenceText(s, 'prose'),
@@ -561,7 +593,58 @@ test('P2J-S18: タグ形は本体の書式・言語によらず拒否される',
       });
     });
   });
-  assert.equal(checked >= 1000, true, '網羅数: ' + checked);
+  assert.equal(checked >= 3000, true, '網羅数: ' + checked);
+});
+
+test('P2J-S23: 本体に `<` を入れてもタグ判定は回避できない', () => {
+  // 4度目の欠陥の核心を単体で読めるよう独立させる。
+  // 「拒否される形」と「1文字だけ違う形」を並べて固定する。
+  const pairs = [
+    ['<img src=x onerror=alert(1)>', '<img onerror=alert(1<2)>'],
+    ['<img src=x onerror="alert(1)">', '<img src=x onerror="alert(1);a<b">'],
+    ['<img src=x onerror=alert(1)>', '<img src=x onerror=alert(1) alt="<">'],
+    ['<svg onload=alert(1)>', '<svg onload=alert(1<2)>']
+  ];
+  pairs.forEach(([control, bypass]) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(control, 'prose'),
+      /html-like-tag/, 'control: ' + control);
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(bypass, 'prose'),
+      /html-like-tag/, 'bypass: ' + bypass);
+  });
+});
+
+test('P2J-S24: 私的文書のファイル名判定は幹がASCIIであることを前提にしない', () => {
+  // 独立検証4 Finding 2。本案件のEvidence散文は日本語であり、
+  // 私的文書の名前も日本語である。旧実装は幹を `[A-Za-z0-9_-]+` に限っており、
+  // **現実にありそうな日本語ファイル名だけが素通り**していた
+  // （`plan.pdf` は落ちるのに `構造計算書.pdf` は通る）。
+  // publicDescription は公開repositoryにもCandidate JSONにも出る。
+  const STEMS = ['構造計算書', '図面', '意匠図一式', '伏図', '詳細図', '計算書',
+    '案件資料', '外装材検討', '施工図', '仕様書', '見積書', '議事録',
+    '検討書', '平面図', '立面図'];
+  const EXTS = ['pdf', 'dwg', 'dxf', 'xls', 'xlsx', 'xlsm', 'doc', 'docx',
+    'ppt', 'pptx', 'jpg', 'jpeg', 'png', 'zip', 'rvt', 'skp'];
+  let checked = 0;
+  STEMS.forEach((stem) => {
+    EXTS.forEach((ext) => {
+      checked++;
+      const text = '社内の ' + stem + '.' + ext + ' により確認';
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+        /matched known-unsafe pattern: private-document-filename/, text);
+    });
+  });
+  assert.equal(checked, STEMS.length * EXTS.length);
+
+  // ASCII の幹も引き続き落ちる（片方だけ直していないこと）
+  ['plan.pdf', 'plan_A.pdf', 'A-102.dwg'].forEach((s) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(s, 'prose'),
+      /private-document-filename/, s);
+  });
+  // 拡張子が対象外のリポジトリ内ファイルは通る（過剰拒否していない）
+  ['index.html の初期値として導入された値', 'calc.js を参照', 'README.md に記載']
+    .forEach((s) => {
+      assert.equal(Evidence.assertPublicSafeEvidenceText(s, 'prose'), true, s);
+    });
 });
 
 test('P2J-S22: 1文字混ぜてもタグ判定は回避できない', () => {
