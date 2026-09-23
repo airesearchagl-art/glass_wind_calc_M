@@ -26,6 +26,16 @@ allowed).
 
     node tools/browser-checks/browser-w4.mjs
 
+The repository root is derived from each harness's own location
+(`new URL('../../', import.meta.url)`), so they measure the tree they ship in.
+
+This was not true when they were first committed: they hardcoded one absolute
+checkout path, which meant a harness copied into a candidate worktree silently
+measured the *original* tree. Independent review 8 (F8-04) proved the
+consequence — a copy whose `containsHtmlLikeTag` had been replaced with
+`return false;` still reported "BYPASSES: 0". After the fix the same sabotage
+reports 19 bypasses, and the real tree still reports 0.
+
 Requires Playwright with Chromium. These import it by absolute path:
 
     /opt/node22/lib/node_modules/playwright/index.mjs

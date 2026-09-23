@@ -748,35 +748,67 @@ test('P2J-S24: 私的文書のファイル名判定は幹がASCIIであること
 });
 
 test('P2J-S29: 全角畳みは拒否を**増やすだけ**であり減らさない', () => {
-  // 独立検証7 F7-03。畳んだテキスト**だけ**を見ていたため、
-  // `構造計算書.pdfＡ` が畳みによって `...pdfA` になり、
-  // `(?![A-Za-z0-9])` が失敗して**通っていた**（畳み導入前は拒否）。
-  // D-039 で畳み範囲を狭めてもこのクラスは残っていた——
-  // 範囲をいじる限り同じ形の欠陥が隣で再発する。
+  // 独立検証7 F7-03 で導入し、検証8 F8-01 で**このテスト自体が
+  // 不変式ではなく標本を押さえていた**ことが分かった。
+  // 旧版の REJECTED_BASES はすべて半角拡張子だった——つまり
+  // 不変式が成立する側の半分だけを手で選んでいた。
+  // 全角拡張子（`図面．ｄｗｇ`）を入れると落ちていた。
   //
-  // よって**実装に依存しない不変式**で固定する:
-  //   拒否されるテキストの末尾に全角英数字を 1 文字足しても、
-  //   受理に転じてはならない。
-  const REJECTED_BASES = ['構造計算書.pdf', '図面.dwg', '見積書.xlsx', 'plan.pdf',
-    '図面.jww', '書類.xdw', '納品.7z'];
-  const TRAILING = ['Ａ', 'Ｚ', 'ａ', 'ｚ', '０', '９', '１'];
+  // よって base を**手で選ばずに生成する**。拡張子は実装が持つ
+  // 唯一の定義から引き、半角・全角の両方の dot と拡張子形を網羅する。
+  function expandExt(alt) {
+    let out = [''];
+    let i = 0;
+    while (i < alt.length) {
+      let tok;
+      if (alt.charAt(i) === '[') {
+        const j = alt.indexOf(']', i);
+        tok = alt.slice(i + 1, j).split('');
+        i = j + 1;
+      } else { tok = [alt.charAt(i)]; i += 1; }
+      const opt = alt.charAt(i) === '?';
+      if (opt) i += 1;
+      const nx = [];
+      out.forEach((p) => { if (opt) nx.push(p); tok.forEach((c) => nx.push(p + c)); });
+      out = nx;
+    }
+    return Array.from(new Set(out));
+  }
+  const toFullwidth = (t) => t.replace(/[!-~]/g, (c) =>
+    String.fromCharCode(c.charCodeAt(0) + 0xfee0));
 
-  // positive control: base が実際に拒否されていなければ下の assert は空だ。
-  REJECTED_BASES.forEach((base) => {
-    assert.throws(() => Evidence.assertPublicSafeEvidenceText(base, 'prose'),
-      /private-document-filename/, 'base が拒否されていない: ' + base);
-  });
-
-  let checked = 0;
-  REJECTED_BASES.forEach((base) => {
-    TRAILING.forEach((ch) => {
-      checked++;
-      assert.throws(() => Evidence.assertPublicSafeEvidenceText(base + ch, 'prose'),
-        /private-document-filename/,
-        '末尾に全角英数字を足すと通った: ' + base + ch);
+  const exts = Evidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE.split('|')
+    .reduce((a, alt) => a.concat(expandExt(alt)), []);
+  const bases = [];
+  ['図面', '構造計算書', 'plan'].forEach((stem) => {
+    exts.forEach((ext) => {
+      ['.', '．'].forEach((dot) => {
+        bases.push(stem + dot + ext);
+        bases.push(stem + dot + toFullwidth(ext));
+      });
     });
   });
-  assert.equal(checked, REJECTED_BASES.length * TRAILING.length);
+
+  const rejects = (t) => {
+    try { Evidence.assertPublicSafeEvidenceText(t, 'prose'); return false; }
+    catch (e) { return /private-document-filename/.test(e.message); }
+  };
+
+  // positive control: 生成した base が実際に拒否されていなければ
+  // 下の不変式は空を回すだけになる。全部拒否されることを先に要求する。
+  const notRejected = bases.filter((b) => !rejects(b));
+  assert.deepEqual(notRejected, [],
+    '拡張子を持つファイル名が拒否されていない: ' + notRejected.slice(0, 8).join(' / '));
+  assert.equal(bases.length > 500, true, 'base 数: ' + bases.length);
+
+  // 不変式本体: 末尾に全角英数字を 1 文字足しても受理に転じてはならない。
+  const TRAILING = ['Ａ', 'Ｚ', 'ａ', 'ｚ', '０', '９', '１', '５'];
+  const leaked = [];
+  bases.forEach((b) => {
+    TRAILING.forEach((ch) => { if (!rejects(b + ch)) leaked.push(b + ch); });
+  });
+  assert.deepEqual(leaked, [],
+    '末尾に全角英数字を足すと通った: ' + leaked.slice(0, 8).join(' / '));
 });
 
 test('P2J-S25: tag name の継続文字は `[A-Za-z0-9-]` に限られない', () => {
@@ -833,6 +865,71 @@ test('P2J-S28: 名前の前に `<` や他の文字があってもタグ判定は
   assert.equal(checked, PREFIXES.length * TAGS.length * 2);
   // 前置きを実際に持っていること自体を固定する（再び欠けたら落ちる）。
   assert.equal(PREFIXES.filter((p) => p.indexOf('<') !== -1).length >= 7, true);
+});
+
+test('P2J-S32: 全角畳みは U+FF01..U+FF5E の**全数**を写像する', () => {
+  // 独立検証8 F8-03。範囲を持つ実装を「代表的な文字」で押さえると、
+  // 端点を 1 つずらす変異が必ず生き残る。実際 `FF5E→FF5D` は
+  // `～/Users/x`（全角チルダ + unix home path）を漏らすまま生き残っていた。
+  //
+  // 文字を選んでは同じことが繰り返されるので、**範囲全体を写像として**検査する。
+  const fold = Evidence.foldFullwidthAscii;
+  assert.equal(typeof fold, 'function');
+  let checked = 0;
+  for (let code = 0xff01; code <= 0xff5e; code++) {
+    const full = String.fromCharCode(code);
+    const half = String.fromCharCode(code - 0xfee0);
+    assert.equal(fold(full), half, 'U+' + code.toString(16) + ' が畳まれていない');
+    checked++;
+  }
+  assert.equal(checked, 0xff5e - 0xff01 + 1);
+  assert.equal(fold('\u3000'), ' ', '全角スペース');
+  // 範囲外は触らない（半角カナ・漢字・既存 ASCII）
+  ['ｱ', 'ﾟ', '図面', 'plan.pdf', 'あ'].forEach((t) => assert.equal(fold(t), t, t));
+  assert.equal(fold('\uff00'), '\uff00');
+  assert.equal(fold('\uff5f'), '\uff5f');
+
+  // 畳みが実際に全規則へ効いていること（端点を含む証人）
+  ['～/Users/x', '～／Ｕｓｅｒｓ／ｘ', '＜！－－x－－＞',
+   'ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ', 'ａｂｃ＠ｅｘａｍｐｌｅ．ｃｏｍ'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /must not contain private URLs/, text);
+  });
+});
+
+test('P2J-S30: tag name の頭文字は ASCII 英字 52 文字全部が対象', () => {
+  // 独立検証8 F8-03。scanner は `a-z` / `A-Z` の 2 範囲で判定するが、
+  // corpus は `a` しか押さえていなかった——範囲の端点を 1 つずらす変異
+  // （`z→y` / `A→B` / `Z→Y`）が 630/0 で生き残り、Chromium 実測で
+  // `<zz onclick=alert(1)>` が実要素になる素通りを作っていた。
+  // 範囲を持つ実装は**両端を押さえる**こと。
+  let checked = 0;
+  for (let c = 0; c < 26; c++) {
+    [String.fromCharCode(97 + c), String.fromCharCode(65 + c)].forEach((letter) => {
+      [letter, letter + letter, letter + '1'].forEach((name) => {
+        [`<${name} onclick=alert(1)>`, `</${name}>`].forEach((text) => {
+          checked++;
+          assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+            /matched known-unsafe pattern: html-like-tag/, text);
+        });
+      });
+    });
+  }
+  assert.equal(checked, 26 * 2 * 3 * 2);
+});
+
+test('P2J-S31: `>` は**名前の後ろ**に無ければタグではない', () => {
+  // 独立検証8 F8-03。scanner は `indexOf('>', j)`（名前開始以降）を見る。
+  // これを `indexOf('>', 0)` にする変異が生き残っていた。
+  // Chromium 実測: `a>b <img src=x` は要素を生まない（`>` が前にしか無い）。
+  ['a>b <img src=x', '結果>基準 なので <img src=x', '> <a href=x'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+  // 対照: 名前の後ろに `>` があればタグ。
+  ['a>b <img src=x>', '> <a href=x>'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /html-like-tag/, text);
+  });
 });
 
 test('P2J-S26: 本体が長くてもタグ判定は回避できない', () => {

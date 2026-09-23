@@ -413,6 +413,18 @@ test('P2J-TB19: caseId の filename-like 判定は evidence.js の拡張子集�
     });
   });
 
+  // 区切り文字クラス `[._-]` の 3 つとも押さえる（独立検証8 F8-03）。
+  // 旧テストは `_` だけだったため `[._-]→[._]` の変異が生き残り、
+  // `A102-dwg`（図面番号の現実的な形）が通っていた。
+  // caseId に `.` は CASE_ID_PATTERN が先に禁じるので到達しないが、
+  // `-` は到達する。
+  ['SYN-pdf', 'A102-dwg', 'A-102-jww', 'SYN-xdw'].forEach((id) => {
+    const c = synVerifiedCase();
+    c.caseId = id;
+    assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(c),
+      /caseId/, 'filename-like caseId が通った: ' + id);
+  });
+
   // `$` アンカーを固定する。末尾でない `_pdf` はファイル名らしくないので通る。
   // これが無いとアンカーを外す変異（= 過剰拒否）を検知できない。
   ['SYN_pdf_x', 'SYN_dwg_rev2', 'PDF_SYN'].forEach((id) => {
@@ -428,5 +440,36 @@ test('P2J-TB19: caseId の filename-like 判定は evidence.js の拡張子集�
     'miyoshi.js は拡張子集合を evidence.js から読むこと');
   assert.doesNotMatch(miyoshiSrc, /\/\[\._-\]\(pdf\|dwg/,
     'miyoshi.js に拡張子一覧を再度ハードコードしている');
+});
+
+test('P2J-TB20: 拡張子集合が届かなければ module load で落ちる（fail closed）', () => {
+  // 独立検証8 F8-06。この型検査は load-bearing だが未テストだった。
+  // 無いと `/[._-](undefined)$/i` という**有効だが何も防がない**規則になり、
+  // `plan_pdf` が通る。「コメントにしか存在しない guard」は本Campaignの反復する教訓。
+  const path = require.resolve('../project-config/miyoshi.js');
+  const realEvidence = require('../project-config/evidence.js');
+  const stub = {};
+  Object.keys(realEvidence).forEach((k) => { stub[k] = realEvidence[k]; });
+  delete stub.PRIVATE_DOCUMENT_EXTENSION_SOURCE;
+
+  const savedGlobal = globalThis.ProjectEvidence;
+  const savedModule = require.cache[path];
+  try {
+    globalThis.ProjectEvidence = stub;
+    delete require.cache[path];
+    assert.throws(() => require('../project-config/miyoshi.js'),
+      /PRIVATE_DOCUMENT_EXTENSION_SOURCE/,
+      '拡張子集合が無いまま module が読み込めてしまった');
+
+    // positive control: 完全な contract なら読み込めること。
+    globalThis.ProjectEvidence = realEvidence;
+    delete require.cache[path];
+    assert.equal(typeof require('../project-config/miyoshi.js').validateVerifiedCase, 'function');
+  } finally {
+    if (savedGlobal === undefined) delete globalThis.ProjectEvidence;
+    else globalThis.ProjectEvidence = savedGlobal;
+    delete require.cache[path];
+    if (savedModule) require.cache[path] = savedModule;
+  }
 });
 

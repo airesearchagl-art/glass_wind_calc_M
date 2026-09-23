@@ -1,4 +1,12 @@
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+import { fileURLToPath } from 'url';
+// リポジトルートは**このファイルの位置から**求める。
+// 絶対パスを埋め込むと、harness は自分が入っている tree ではなく
+// **そのパスにある tree** を測る。独立検証8 F8-04 は、tag guard を
+// `return false;` にした copy で parser-boundary がなお「bypass 0」と
+// 報告することを実証した——欠陥を原理的に検出できない形だった。
+const REPO = fileURLToPath(new URL('../../', import.meta.url));
+
 let pass=0, fail=0; const out=[];
 const ck=(id,c,d)=>{ if(c){pass++;out.push(`  ok   ${id}  ${d??''}`);} else {fail++;out.push(`  FAIL ${id}  ${d??''}`);} };
 
@@ -8,7 +16,7 @@ const consoleErrors=[], pageErrors=[], requests=[];
 page.on('console', m=>{ if(m.type()==='error') consoleErrors.push(m.text()); });
 page.on('pageerror', e=>pageErrors.push(e.message));
 page.on('request', r=>{ if(!r.url().startsWith('file://')) requests.push(r.url()); });
-await page.goto('file:///home/user/glass_wind_calc_m/index.html');
+await page.goto('file://' + REPO + 'index.html');
 await page.waitForTimeout(400);
 
 // existing feature surfaces still present and wired

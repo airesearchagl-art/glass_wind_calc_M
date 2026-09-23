@@ -1287,3 +1287,71 @@ mutation        : 5/5 KILLED（すべて 54b15a7 時点では生存）
 protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
 ```
 
+## §44 — 独立検証8 の修理実測（D-041）
+
+### F8-01: 真の原因は lookahead（全角固有ではなかった）
+
+```text
+witness            df88109  HEAD
+図面．ｄｗｇ１        受理     拒否
+構造計算書．ｐｄｆＡ     受理     拒否
+図面.ｐｄｆ９         受理     拒否
+構造計算書.pdf2      受理     拒否   ← 純 ASCII。畳みと無関係に最初から開いていた
+図面.dwg1           受理     拒否
+```
+
+### F8-05: 畳みを 1 か所へ集約した効果
+
+```text
+                                  df88109  HEAD
+ａｂｃ＠ｅｘａｍｐｌｅ．ｃｏｍ             受理     拒否
+ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ                受理     拒否
+Ｃ：＼Ｕｓｅｒｓ＼ｘ                      受理     拒否
+ｎｏｔｉｏｎ．ｓｏ/ｐａｇｅ                 受理     拒否
+＜img onerror=alert(1)＞           受理     受理   ← detect 規則には畳みを適用しない
+```
+
+### 単調性の確認（F8-02 の原因が消えたこと）
+
+```text
+証人 2208（3幹 × 46拡張子 × dot 2形 × 半角/全角 × 末尾 4形）
+  shipped は 2208/2208 を拒否
+  fold を FF41..FF5A へ狭める mutant : stricter 0 / looser 1128
+  fold 上端 FF5E→FF5D              : stricter 0 / looser 0
+→ 畳みを狭める変更は**単調に緩くなるだけ**。
+   「狭めると拒否が増える」という F8-02 の非単調性は原理的に消滅した。
+```
+
+### harness の反証可能性（F8-04）
+
+```text
+tag guard を `return false;` にした copy を作り、**その copy の** harness を実行:
+  修正前（絶対パス） : BYPASSES 0   ← 欠陥を見ていない
+  修正後（相対パス） : BYPASSES 19
+  実 repository        : BYPASSES 0
+```
+
+### コスト（畳みを全規則へ広げた影響）
+
+```text
+入力                          N=2000  4000   8000   16000
+  ASCII 散文（畳み不要）        0.2    0.3    0.5    0.8 ms
+  全角散文（畳む）           4.9    9.6   20.1   39.3 ms
+  最悪 ASCII ("ab."*N)        4.2   14.2   52.9  200.9 ms
+  最悪 全角 ("ａｂ．"*N)       5.5   17.5   59.6  265.7 ms
+```
+
+二次の部分は既存の `email-like`（QD-J04）であり、畳みはその上に
+定数倍（最悪 +32%）を乗せるだけ。新しい計算量クラスは入っていない。
+ASCII のみのテキストは 2 度目の検査をする必要がないので影響を受けない。
+
+### 回帰（修理後・全量）
+
+```text
+npm test        : 634 pass / 0 fail
+browser         : 62 pass / 0 fail（harness は相対パス化済み）
+parser boundary : 42形 / bypass 0
+mutation        : 13/13 KILLED（検証8 の 11 生存変異 + 畳み端点 2）
+protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
+```
+

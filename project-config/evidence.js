@@ -169,27 +169,26 @@
     }
   }
 
-  // 全角のうち**ファイル名判定に必要な文字だけ**を半角へ畳む。
+  // 全角 ASCII（U+FF01..U+FF5E）と全角スペースを半角へ畳む。
   //
-  // 範囲を U+FF01..U+FF5E 全体にすると**逆に穴が開く**（独立検証6 F1）。
-  // その範囲には `（ ） ＂ ＇ ， ； ＜ ＞` が含まれ、これらは畳むと
-  // 幹の区切り文字クラス `[^\s<>"'(),;:：、。「」『』]` に入ってしまう。
-  // つまり `構造計算書（最新）.pdf` の幹が dot の直前で切れ、
-  // 畳む前なら拒否できていたものが通るようになる。
-  // 全角括弧は日本語ファイル名で最もよく使われる装飾であり、
-  // 実測で 224/224 の形が拒否→受理へ反転していた。
+  // この関数は Wave 6d で一度導入し、**重大な回帰を生んだ**。
+  // 理由は範囲ではなく**使い方**だった——畳んだテキストだけを見ていたので、
+  // `（）` が幹の区切り文字に化けて拒否が**消えた**（独立検証6 F1、368形）。
+  // 範囲を狭めてしのいだが、それでも同じ形の欠陥が隣に残っていた
+  // （独立検証7 F7-03、続いて 検証8 F8-01）。
   //
-  // 必要なのは「区切りの `．`」と「拡張子の全角英数字」だけ。
-  // 全角句読点・括弧類は幹の一部として**そのまま残す**。
-  function foldFullwidthFilenameChars(text) {
+  // 正しい形は「畳みを**和**で使う」ことだけである。
+  // raw と folded の両方を見れば、畳みは拒否を**増やすだけ**になり、
+  // 範囲を広げても決して壊れない。だから範囲を狭める必要がなくなり、
+  // 「4 つの範囲の端点」を個別に押さえる問題も消える（検証8 F8-03）。
+  function foldFullwidthAscii(text) {
     var out = '';
     for (var i = 0; i < text.length; i++) {
       var code = text.charCodeAt(i);
-      if ((code >= 0xff10 && code <= 0xff19) ||   // ０-９
-          (code >= 0xff21 && code <= 0xff3a) ||   // Ａ-Ｚ
-          (code >= 0xff41 && code <= 0xff5a) ||   // ａ-ｚ
-          code === 0xff0e) {                      // ．
+      if (code >= 0xff01 && code <= 0xff5e) {
         out += String.fromCharCode(code - 0xfee0);
+      } else if (code === 0x3000) {
+        out += ' ';
       } else {
         out += text.charAt(i);
       }
@@ -197,12 +196,17 @@
     return out;
   }
 
-  // 拡張子は「欧米ソフトの形式だけ」では足りない。日本の実務で案件原典と
-  // なるのは JW_CAD(.jww/.jwc)・DocuWorks(.xdw)・SXF(.sfc/.p21) 等であり、
-  // `構造計算書.pdf` を拒否して `構造計算書.jww` を通すのは境界として不整合。
-  // 一方 .html/.js/.md 等は本ツール自身の公開ファイル名として既存の
-  // publicDescription に現れるため、意図的に含めない。
-  // stem の {1,120} は上限付きなので走査は線形（QD-J04）。
+  // 畳む必要があるかを先に見る（普通のテキストでは 2 度目の検査を省く）。
+  function hasFullwidthForm(text) {
+    for (var i = 0; i < text.length; i++) {
+      var code = text.charCodeAt(i);
+      if ((code >= 0xff01 && code <= 0xff5e) || code === 0x3000) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // 拡張子集合は**ここが唯一の定義**である。
   // 消費側の一つは project-config/miyoshi.js の FILENAME_LIKE_CASE_ID_PATTERN
   // で、そちらがこの値を読んで組み立てる（依存の向きは一方向のまま）。
@@ -214,20 +218,8 @@
   var PRIVATE_DOCUMENT_EXTENSION_SOURCE = 'pdf|dwg|dxf|jww|jwc|xdw|sfc|p21|ifc|dwf|pln|rvt|skp|xls[xm]?|doc[xm]?|ppt[xm]?|od[tsp]|jpe?g|png|gif|bmp|tiff?|heic|heif|webp|zip|rar|7z|lzh|tar|gz|msg|eml|txt|csv|bak';
   var PRIVATE_DOCUMENT_FILENAME = new RegExp(
     '[^\\s<>"\'(),;:\uff1a\u3001\u3002\u300c\u300d\u300e\u300f]{1,120}\\.('
-    + PRIVATE_DOCUMENT_EXTENSION_SOURCE + ')(?![A-Za-z0-9])', 'i');
+    + PRIVATE_DOCUMENT_EXTENSION_SOURCE + ')', 'i');
 
-  // 畳んだテキスト**だけ**を見ると、畳みが逆に拒否を潰すケースがある。
-  // 例: `構造計算書.pdfＡ` は畳む前なら `(?![A-Za-z0-9])` が `Ａ` を見て
-  // 拒否できるが、畳むと `A` になり lookahead が失敗して通ってしまう
-  // （独立検証7 F7-03。D-039 で畳み範囲を狭めてもこのクラスは残っていた）。
-  //
-  // よって**両方**を見る。拒否集合が和になるので、畳みは
-  // 「拒否を増やすだけ」になり、決して減らせない（P2J-S29 で固定）。
-  // これがないと、畳みの範囲をいじるたびに「直したつもりで隣を壊す」が再発する。
-  function containsPrivateDocumentFilename(text) {
-    return PRIVATE_DOCUMENT_FILENAME.test(text) ||
-           PRIVATE_DOCUMENT_FILENAME.test(foldFullwidthFilenameChars(text));
-  }
 
   // public-safe boundary（RF-02）: publicDescription（および将来
   // publicEvidenceDescription等）へ渡してよいテキストかどうかを検証する
@@ -273,7 +265,7 @@
     //
     // 幹は「区切り文字以外の連なり」とする。長さは上限を置く
     // （否定クラス + リテラルの組は witness 次第で二次コストになりうる。QD-J04）。
-    { name: 'private-document-filename', detect: containsPrivateDocumentFilename },
+    { name: 'private-document-filename', pattern: PRIVATE_DOCUMENT_FILENAME },
 
     // タグの形をした内容。これは**privacy/内容の境界**であって、
     // XSS対策そのものではない（DOM側は textContent / createElement で別に守る）。
@@ -348,9 +340,22 @@
     if (typeof text !== 'string' || !text) {
       throw new Error((label || 'publicDescription') + ' must be a non-empty string');
     }
+    var folded = hasFullwidthForm(text) ? foldFullwidthAscii(text) : null;
     for (var i = 0; i < PUBLIC_UNSAFE_TEXT_PATTERNS.length; i++) {
       var entry = PUBLIC_UNSAFE_TEXT_PATTERNS[i];
-      var matched = entry.detect ? entry.detect(text) : entry.pattern.test(text);
+      // 全角畳みは**ここ 1 か所だけ**で行う。以前はファイル名規則の
+      // 中だけで畳んでいたため、他の 10 規則は全角の IME 出力を見逃していた
+      // （検証8 F8-05: `ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ` や全角の private provider URL が素通り）。
+      // raw ∨ folded なので単調——拒否を増やすだけで決して減らさない。
+      // detect 規則（html-like-tag）には適用しない: `＜img＞` は Chromium で
+      // 要素を生まないので、畳んで拒否すると過剰拒否になる（P2J-S27）。
+      var matched;
+      if (entry.detect) {
+        matched = entry.detect(text);
+      } else {
+        matched = entry.pattern.test(text) ||
+                  (folded !== null && entry.pattern.test(folded));
+      }
       if (matched) {
         throw new Error(
           (label || 'publicDescription') + ' must not contain private URLs/paths/identifiers (matched known-unsafe pattern: ' + entry.name + ')'
@@ -819,6 +824,8 @@
     CHECKED_AT_PATTERN: CHECKED_AT_PATTERN,
     PUBLIC_UNSAFE_TEXT_PATTERNS: Object.freeze(PUBLIC_UNSAFE_TEXT_PATTERNS),
     PRIVATE_DOCUMENT_EXTENSION_SOURCE: PRIVATE_DOCUMENT_EXTENSION_SOURCE,
+    // 範囲の端点をテストから直接押さえるために export する（P2J-S32）。
+    foldFullwidthAscii: foldFullwidthAscii,
     isValidCheckedAt: isValidCheckedAt,
     assertOrdinaryObject: assertOrdinaryObject,
     assertPublicSafeEvidenceText: assertPublicSafeEvidenceText,

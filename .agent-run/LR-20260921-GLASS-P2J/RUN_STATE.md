@@ -773,3 +773,35 @@ Evidence protected state : verifiedCases [] / promotion NONE /
 Wave 7 は引き続き blocked。
 ```
 
+## Wave 6h final state（独立検証8 の修理 / D-041）
+
+```text
+npm                        : 634 pass / 0 fail
+browser                    : 62 checks / 0 fail（相対パス化し、sabotage で検出能力を実証）
+parser boundary            : 42形 / bypass 0
+mutation                   : 13/13 KILLED
+protected values           : 5件すべて一致
+validateAllEvidence()      : []
+Implementation verification head : **未確定**（9 回目の独立検証が必要 / §44・§47）
+```
+
+### この Wave で確定したこと
+
+```text
+- `(?![A-Za-z0-9])` が F8-01 の真因だった（全角固有ではなかった）。削除
+- 畳みを assertPublicSafeEvidenceText の 1 か所へ集約し、全 pattern 規則へ効かせた
+  → F8-05（全角 URL / email / path / provider の素通り）を Human Gate 送りにせず閉じた
+- union なので畳みは単調——F1 型の回帰は原理的に起きない
+- P2J-S29 が標本を押さえていたのを、実装の定義からの**生成**へ変えた
+- harness の絶対パスを除去。sabotage で 19 bypass を検出できることを実証
+- D-040 の差分表（stricter 0）は誤りだった——証人集合が小さすぎた。訂正済み
+```
+
+### 変わっていないこと
+
+```text
+Evidence protected state : verifiedCases [] / promotion NONE /
+                           1250×2050 sample_default unverified / V0 34 / roughness III
+QD-J10（caseId の経路）は引き続き Human Gate 送り。Wave 7 は blocked。
+```
+

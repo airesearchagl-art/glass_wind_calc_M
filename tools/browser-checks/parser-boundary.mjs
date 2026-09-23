@@ -1,7 +1,15 @@
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 import { createRequire } from 'module';
+import { fileURLToPath } from 'url';
+// リポジトルートは**このファイルの位置から**求める。
+// 絶対パスを埋め込むと、harness は自分が入っている tree ではなく
+// **そのパスにある tree** を測る。独立検証8 F8-04 は、tag guard を
+// `return false;` にした copy で parser-boundary がなお「bypass 0」と
+// 報告することを実証した——欠陥を原理的に検出できない形だった。
+const REPO = fileURLToPath(new URL('../../', import.meta.url));
+
 const require = createRequire(import.meta.url);
-const E = require('/home/user/glass_wind_calc_m/project-config/evidence.js');
+const E = require(REPO + 'project-config/evidence.js');
 const guardRejects = t => { try { E.assertPublicSafeEvidenceText(t,'d'); return false; } catch { return true; } };
 
 const FORMS = [
