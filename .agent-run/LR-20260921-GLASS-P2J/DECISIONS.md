@@ -1687,6 +1687,115 @@ R10-09 control-character 下端      KILLED (S01)
 `window.document`——あれは lookahead を全削除していた head であり、
 その振舞い自体が F9-03 で指摘された欠陥だった。意図した修正である。
 
+> **【D-044による訂正（検証11 F11-04）】「regression 0 / 唯一の差分は window.document」は誤り。**
+> 実測用の corpus を commit して測り直した（`tools/guard-diff/`、212,058 入力）:
+>
+> ```text
+> vs 2659e3c / cb7a75b / 54b15a7 / df88109 : regression 0
+> vs 4573d01 : 6262（すべて private-document-filename）
+> vs e336428 : 11411（すべて private-document-filename）
+> ```
+>
+> どちらも**語境界 `(?![A-Za-z])` を一様に適用した結果**の同じクラス
+> （`構造計算書.pdfA` 型）で、P2J-S35 が意図として固定している。
+> 他の規則での regression は 0。
+> 「1 件」と書いたのは手元の corpus がそのクラスを 1 件しか含んでいなかったからであり、
+> **数字ではなく corpus の問題**だった。以後この種の数値は commit された corpus で出す。
+
+### 守っているもの
+
+Evidence protected state は未変更: `verifiedCases: []` / promotion NONE /
+1250×2050 `sample_default` `unverified` / V0=34 / roughness III。
+
+## D-044 — 個数は集合の射影である（11回目検証）
+
+独立検証11 の判定は **FAIL**。前回の設計変更（幹を捨てる）は
+「正しく、戻すべきではない」と評価されたが、その commit が含んだ
+**唯一の削除**が回帰を生んでいた。
+
+### F11-01 — 削除の根拠にした「行動差 0（実測）」が偽だった
+
+```text
+資料＿ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ
+  e336428 : 拒否（www）
+  e51d7aa : 受理        ← 削除した narrow fold だけが捕まえられていた
+```
+
+仕組み: U+FF3F `＿` は広い畳みで `_`——**単語文字**になる。
+`www` 規則は `\b` を使うので、`＿www` には境界があり `_www` には無い。
+つまり広い畳みはこの入力クラスで**狭い畳みより弱い**。
+
+自分の測定が 0 を出したのは、corpus が**ファイル名規則中心**であり
+`＿` を含めていなかったからである。「この規則にとって寄与が無い」を
+「全体にとって寄与が無い」と読み替えた。**畳みは他規則の境界アンカーを壊せる**。
+
+復旧した。追加は単調なので安全である。
+
+### なぜ guard が黙っていたか——本当の教訓
+
+前回の P2J-S34 は `TEXT_NORMALIZER_COUNT === 2` を見ていた。
+diff は normalizer を**1 つ削除して 1 つ追加**したので、個数は 2 のままだった。
+この削除を止めるために書いた test が、削除と追加がペアだったその理由で通った。
+
+検証11 の言い方が正確である:
+
+```text
+この suite の不変式は**射影**だった——個数、範囲の端点、代表文字、
+手で列挙した軸の直積。review 5 以降の欠陥はすべて
+**射影が捨てた座標**から入っている。
+射影でない唯一の test は P2J-TB19（定数とは独立に全員を列挙）であり、
+それが唯一漏れたことの無い集合である。
+```
+
+よって:
+- P2J-S34 は個数をやめ、**名前と専用証人**で固定する
+- P2J-S37 を新設し、`DOT_EQUIVALENTS` の 12 メンバを TB19 と同じく
+  **定数とは独立に**全員列挙する（F11-02: 12 中 10 が未固定だった）
+
+### F11-05 — 数値を反証可能にした
+
+「行動差 0 / 8 / 4」のような数値を corpus なしで書いてきたのが
+5 回連続で再現しない数字を生んだ原因である。
+`tools/guard-diff/` を commit した——corpus と差分スクリプト。
+
+```text
+node tools/guard-diff/diff-heads.mjs <base-rev> [head-rev]
+corpus 212,058 入力（11 規則クラスを含む）
+```
+
+### 回帰スイープ（commit された corpus で）
+
+```text
+vs 2659e3c / cb7a75b / 54b15a7 / df88109 / e51d7aa : regression 0
+vs 4573d01 :  6262（すべて private-document-filename）
+vs e336428 : 11411（すべて private-document-filename）
+```
+
+後者 2 つは語境界 `(?![A-Za-z])` を一様に適用した結果の同じクラスで、
+P2J-S35 が意図として固定している。**他規則での regression は 0**。
+
+### その他
+
+```text
+F11-06 closure guard を「黙って打ち切る」から throw へ。
+       不完全な閉包を黙って返すのは本Campaign が罰してきた形そのもの。
+F11-07 DOT_EQUIVALENTS の採用基準を明記（QD-J11）。
+       「散文を壊すか」では `。` と `・` を区別できない——
+       実際の軸は「ファイル名の拡張子区切りとして現れるか」である。
+F11-03 `。` の偽陽性コストを QD-J11 へ記録（前回は ASCII 裸拡張子だけ書いていた）。
+```
+
+### mutation
+
+```text
+R11-01 narrow fold を削除            KILLED (S34)
+R11-02 closure guard を黙って打ち切る   KILLED (S33/S34/S35)
+drop U+3002 / FF61 / FE12 / 2024 / FE52 / 2027 /
+     2E33 / 0387 / 06D4 / 0701 / A4F8 / 02D9   すべて KILLED (S37)
+```
+
+14/14。うち 11 件は前 1 回では生き残っていた。
+
 ### 守っているもの
 
 Evidence protected state は未変更: `verifiedCases: []` / promotion NONE /

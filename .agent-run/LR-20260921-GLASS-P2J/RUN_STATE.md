@@ -872,3 +872,36 @@ Evidence protected state : verifiedCases [] / promotion NONE /
 Human Gate 送り: QD-J06 / QD-J10 / QD-J11。Wave 7 は blocked。
 ```
 
+## Wave 6k final state（独立検証11 の修理 / D-044）
+
+```text
+npm                        : 639 pass / 0 fail
+browser                    : 62 checks / 0 fail
+parser boundary            : 42形 / bypass 0
+mutation                   : 14/14 KILLED（うち 11 件は前 1 回では生存）
+回帰スイープ                 : tools/guard-diff/ で再現可能。他規則の regression 0
+protected values           : 5件すべて一致
+validateAllEvidence()      : []
+Implementation verification head : **未確定**（12 回目の独立検証が必要 / §44・§47）
+```
+
+### この Wave で確定したこと
+
+```text
+- 「この規則にとって寄与 0」は「全体にとって 0」ではない。
+  畳みは他規則の境界アンカー（`\b`）を壊せる → narrow fold を復旧
+- 個数は集合の射影。remove+add は個数では見えない → S34 を名前と証人へ
+- DOT_EQUIVALENTS を TB19 型（定数と独立に全員列挙）へ → P2J-S37
+- closure guard を throw へ（黙って不完全にならない）
+- 数値を反証可能にした → tools/guard-diff/ を commit
+- `。` の偽陽性コストと採用基準を QD-J11 へ記録
+```
+
+### 変わっていないこと
+
+```text
+Evidence protected state : verifiedCases [] / promotion NONE /
+                           1250×2050 sample_default unverified / V0 34 / roughness III
+Human Gate 送り: QD-J06 / QD-J10 / QD-J11 / QD-J12。Wave 7 は blocked。
+```
+

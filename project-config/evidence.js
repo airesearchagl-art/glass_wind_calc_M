@@ -230,13 +230,37 @@
     return out;
   }
 
-  // 残った 2 つはそれぞれ**他方が捕まえられない形**を持つ（P2J-S34 が固定）。
-  // 以前あった narrowFold（dot と英数字だけを畳む）は削除した。
-  // あれは「広い畳みが `（）` を区切り文字に変えて幹を切る」ことだけを
-  // 防ぐためのもので、幹を捨てた今は寄与が無い——
-  // 全規則を含む corpus で行動差 **0**（実測）。
-  // 削除は本来単調ではないので、推論ではなく測定で確かめている。
-  var TEXT_NORMALIZERS = [foldFullwidthAscii, foldDotEquivalents];
+  // 全角のうち**ファイル名判定に必要な文字だけ**を畳む（dot と英数字）。
+  //
+  // これは一度「幹を捨てたので寄与 0」と判断して削除し、**回帰を生んだ**（独立検証11 F11-01）。
+  // 寄与が無いのはファイル名規則に対してだけで、**他規則に対してはあった**:
+  //   U+FF3F `＿` は広い畳みで `_`（**単語文字**）になるが、狭い畳みでは変わらない。
+  //   `www` 規則は `\b` を使うので、`＿www` には境界があり `_www` には無い。
+  //   つまり `資料＿ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ` は狭い畳みだけが捕まえられる。
+  //
+  // 教訓: **畳みは他規則の境界アンカーを壊せる**。
+  // 「この規則にとって寄与が無い」を「全体にとって寄与が無い」と読み替えてはならない。
+  function foldFullwidthFilenameChars(text) {
+    var out = '';
+    for (var i = 0; i < text.length; i++) {
+      var code = text.charCodeAt(i);
+      if ((code >= 0xff10 && code <= 0xff19) ||
+          (code >= 0xff21 && code <= 0xff3a) ||
+          (code >= 0xff41 && code <= 0xff5a) ||
+          code === 0xff0e) {
+        out += String.fromCharCode(code - 0xfee0);
+      } else {
+        out += text.charAt(i);
+      }
+    }
+    return out;
+  }
+
+  // この配列は**追加のみ単調**である。削除と差し替えは回帰しうる。
+  // P2J-S34 は**どの normalizer が居るか**を名前で固定する——
+  // 以前は個数（=== 2）しか見ておらず、削除と追加を同時にやると
+  // 個数が変わらず **guard が黙って通した**（検証11 F11-01）。
+  var TEXT_NORMALIZERS = [foldFullwidthFilenameChars, foldFullwidthAscii, foldDotEquivalents];
 
   // 拡張子集合は**ここが唯一の定義**である。
   // 消費側の一つは project-config/miyoshi.js の FILENAME_LIKE_CASE_ID_PATTERN
@@ -402,9 +426,15 @@
     // 閉包なので normalizer を追加しても合成を手で列挙し直す必要がない。
     var normalized = [];
     var frontier = [text];
+    // guard は「黙って打ち切る」形にしない。打ち切ったら閉包が不完全になり、
+    // どの形を見逃したか誰も気づかない（本Campaign が繰り返し罰してきた形）。
+    // 現在の normalizer はすべて冪等かつ可換なので深さは高々 3。
     var guard = 0;
-    while (frontier.length && guard < 64) {
+    while (frontier.length) {
       guard++;
+      if (guard > 16) {
+        throw new Error('assertPublicSafeEvidenceText: normalization closure did not converge');
+      }
       var next = [];
       for (var q = 0; q < frontier.length; q++) {
         for (var k = 0; k < TEXT_NORMALIZERS.length; k++) {
@@ -904,6 +934,7 @@
     PRIVATE_DOCUMENT_EXTENSION_SOURCE: PRIVATE_DOCUMENT_EXTENSION_SOURCE,
     // 範囲の端点をテストから直接押さえるために export する（P2J-S32）。
     foldFullwidthAscii: foldFullwidthAscii,
+    foldFullwidthFilenameChars: foldFullwidthFilenameChars,
     foldDotEquivalents: foldDotEquivalents,
     DOT_EQUIVALENTS: DOT_EQUIVALENTS,
     TEXT_NORMALIZER_COUNT: TEXT_NORMALIZERS.length,

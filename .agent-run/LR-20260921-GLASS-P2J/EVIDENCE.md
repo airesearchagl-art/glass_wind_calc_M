@@ -1490,3 +1490,42 @@ mutation        : 9/9 KILLED
 protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
 ```
 
+## §47 — 独立検証11 の修理実測（D-044）
+
+### F11-01: 削除の根拠が偽だった
+
+```text
+witness 資料＿ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ
+  2659e3c 受理 / cb7a75b 受理 / 54b15a7 受理 / df88109 受理 / 4573d01 受理
+  e336428 拒否（www）   ← narrow fold だけが捕まえられていた
+  e51d7aa 受理          ← 削除して失った
+  HEAD    拒否（www）   ← 復旧
+```
+
+### 回帰スイープ（commit された corpus、212,058 入力）
+
+```text
+vs 2659e3c : 0      vs cb7a75b : 0      vs 54b15a7 : 0
+vs df88109 : 0      vs e51d7aa : 0
+vs 4573d01 : 6262   すべて private-document-filename（語境界クラス / 意図）
+vs e336428 : 11411  同上
+再現方法: node tools/guard-diff/diff-heads.mjs <rev>
+```
+
+### F11-02: dot 写像 12 メンバの固定
+
+```text
+修正前: 12 中 2 のみ固定。残り 10 を削除する変異がすべて 639/0 で生存
+修正後: 12/12 KILLED（P2J-S37 が定数とは独立に全員列挙）
+```
+
+### 回帰（修理後・全量）
+
+```text
+npm test        : 639 pass / 0 fail
+browser         : 62 pass / 0 fail
+parser boundary : 42形 / bypass 0
+mutation        : 14/14 KILLED
+protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
+```
+

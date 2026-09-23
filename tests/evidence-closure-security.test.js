@@ -828,22 +828,27 @@ test('P2J-S36: control-character 規則は宣言した範囲を全数覆う', ()
   });
 });
 
-test('P2J-S34: 正規化は集合であり、各要素が固有の形を持つ', () => {
-  // 独立検証10 F10-04: 旧版の「wide 専用」証人 `ｗｗｗ．…` は専用ではなかった
-  // （U+FF57 は narrow でも畳まる）。つまり何も固定していなかった。
-  // 現在の 2 つは、他方だけでは届かない形を**実測で**持っている。
-  assert.equal(Evidence.TEXT_NORMALIZER_COUNT, 2);
-
-  // wide だけが畳める: 英数字以外の全角記号（＠ ： ＼）
-  ['ａｂｃ＠ｅｘａｍｐｌｅ．ｃｏｍ', 'Ｃ：＼Ｕｓｅｒｓ＼ｘ'].forEach((text) => {
-    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
-      /must not contain private URLs/, 'wide fold だけが捕まえられる形: ' + text);
-  });
-
-  // dot 写像だけが届く: U+3002 は全角 ASCII 範囲の外なので wide では畳まない
-  ['構造計算書。pdf', '図面｡dwg'].forEach((text) => {
-    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
-      /private-document-filename/, 'dot 写像だけが捕まえられる形: ' + text);
+test('P2J-S34: normalizer は**名前で**固定する（個数ではなく）', () => {
+  // 独立検証11 F11-01。旧版は `TEXT_NORMALIZER_COUNT === 2` だけを見ていた。
+  // 前回の diff は normalizer を 1 つ**削除して 1 つ追加**したので、
+  // 個数が変わらず **guard が黙って通した**——そして回帰が出た。
+  // 個数は集合の**射影**であり、捨てた座標から欠陥が入る。
+  //
+  // よって各 normalizer を「それだけが捕まえられる証人」で名指しする。
+  const WITNESSES = [
+    // 狭い畳みだけ: U+FF3F は広い畳みだと `_`（単語文字）になり、
+    // `www` 規則の `\\b` が消える。狭い畳みは `＿` を触らないので境界が残る。
+    ['foldFullwidthFilenameChars', '資料＿ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ', /www/],
+    // 広い畳みだけ: 英数字以外の全角記号（＠ ： ＼）
+    ['foldFullwidthAscii', 'ａｂｃ＠ｅｘａｍｐｌｅ．ｃｏｍ', /email-like/],
+    ['foldFullwidthAscii', 'Ｃ：＼Ｕｓｅｒｓ＼ｘ', /windows-absolute-path/],
+    // dot 写像だけ: U+3002 は全角 ASCII 範囲の外
+    ['foldDotEquivalents', '構造計算書。pdf', /private-document-filename/]
+  ];
+  WITNESSES.forEach(([owner, text, rule]) => {
+    assert.equal(typeof Evidence[owner], 'function', owner + ' が export されていない');
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), rule,
+      owner + ' だけが捕まえられる形が通った: ' + text);
   });
 
   // 合成が必要な形（閉包を取っていること）
@@ -852,9 +857,41 @@ test('P2J-S34: 正規化は集合であり、各要素が固有の形を持つ',
       /private-document-filename/, '合成が必要な形: ' + text);
   });
 
-  assert.equal(Evidence.foldFullwidthAscii('。'), '。', 'wide fold は U+3002 を触らない');
+  // 役割分担を直接固定する。
+  assert.equal(Evidence.foldFullwidthFilenameChars('＿'), '＿', '狭い畳みは ＿ を触らない');
+  assert.equal(Evidence.foldFullwidthAscii('＿'), '_', '広い畳みは ＿ を _ にする');
+  assert.equal(Evidence.foldFullwidthAscii('。'), '。', '広い畳みは U+3002 を触らない');
   assert.equal(Evidence.foldDotEquivalents('。'), '.', 'dot 写像は U+3002 を写す');
-  assert.equal(Evidence.foldDotEquivalents('・'), '・', '中黒は写さない（散文の並列区切り）');
+  assert.equal(Evidence.foldDotEquivalents('・'), '・', '中黒は写さない');
+});
+
+test('P2J-S37: dot 写像集合は**全員を個別に**押さえる', () => {
+  // 独立検証11 F11-02。前回導入した 12 メンバのうち押さえていたのは 2 だけで、
+  // 残り 10 を削除する変異がすべて生き残っていた——
+  // 検証8 F8-03（fold 範囲）、検証10 F10-05（control 範囲）と**同じ形**を
+  // それらの修理と同じ commit で新しく作っていた。
+  //
+  // 定数を読んで回すと定数を縮める変更に気づけないので、
+  // P2J-TB19 と同じく**定数とは独立に**列挙する。
+  const EXPECTED_DOTS = ['。', '｡', '︒', '․', '﹒', '‧',
+                         '⸳', '·', '۔', '܁', 'ꓸ', '˙'];
+  EXPECTED_DOTS.forEach((ch) => {
+    assert.equal(Evidence.DOT_EQUIVALENTS.indexOf(ch) !== -1, true,
+      'dot 写像集合から U+' + ch.charCodeAt(0).toString(16).toUpperCase() + ' が消えている');
+    assert.equal(Evidence.foldDotEquivalents(ch), '.',
+      'U+' + ch.charCodeAt(0).toString(16).toUpperCase() + ' が `.` へ写されていない');
+    // 行動でも固定する（写像だけでは規則へ繋がっている保証が無い）。
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText('構造計算書' + ch + 'pdf', 'prose'),
+      /private-document-filename/, '構造計算書' + ch + 'pdf');
+  });
+  assert.equal(Evidence.DOT_EQUIVALENTS.length, EXPECTED_DOTS.length,
+    '定数側にここで列挙していないメンバがある');
+
+  // 除外しているものも固定する（行き過ぎの検出）。
+  ['・', '･'].forEach((ch) => {
+    assert.equal(Evidence.DOT_EQUIVALENTS.indexOf(ch), -1, '中黒を写像に入れてはならない');
+    assert.equal(Evidence.assertPublicSafeEvidenceText('PDF' + ch + 'doc形式で提出', 'prose'), true);
+  });
 });
 
 test('P2J-S35: 語境界を見るのは raw 側だけ（過剰拒否のコストを固定）', () => {
