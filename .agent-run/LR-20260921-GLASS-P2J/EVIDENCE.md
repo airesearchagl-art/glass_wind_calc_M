@@ -1972,3 +1972,73 @@ protected       : verifiedCases 0 / sample_default / 1250×2050 /
                   V0 34 / roughness III
 ```
 
+## §55 — FP-01 Delta Independent Re-verify の結果と修理
+
+### 結果: **FINDINGS**（1 件、non-blocking）——対象 head a09b880
+
+```text
+1  Fresh Gate         PASS（a09b880、親は 7886ae4、tree clean）
+2  delta scope        PASS。blob-SHA で 13 ファイルの不変を確認
+3  FP-01 correctness  PASS。合成 module を落として roots 7→8 を実測
+4  derivation         PASS。load 失敗が黙って root を減らさないことも実測
+5  test quality       実質 PASS だが **欠陥 1 件**（下記）
+6  M-28               PASS。anchor 1 回、byte 差あり、真の ERR_ASSERTION。
+                      検証者が自分で 28/28 KILLED を再現
+7  trust boundary     PASS。lint は runtime / UI / promotion から import されない
+8  FP-02              unchanged。新しい trust path は生じていない
+9  regression         658 pass / 0 fail（検証者実測）
+10 project state      PASS。BLOCKED / 0／12 / 0／4 / 0／8 / candidate null /
+                      verifiedCases [] / V0 34 / roughness III
+```
+
+### 指摘された欠陥（自分が書いた test の中）
+
+FP-01 test の期待経路が、実装の文法と 2 点ずれていた。
+
+```text
+                実装                                    test（旧）
+配列            root.verifiedCases[0].publicEviden…     root.verifiedCases.0.publicEviden…
+最上位          root.publicDescription                  root..publicDescription
+```
+
+かつ `..` を潰す replace を **actual** 側にかけていた——
+actual に `..` は決して現れないので、潰したい方にかかっていなかった。
+
+自分で再現した（合成 module を project-config へ一時的に置いて）:
+
+```text
+lint が出す  : zz-probe.publicDescription
+             zz-probe.verifiedCases[0].publicEvidenceDescription
+test が作る : zz-probe..publicDescription
+             zz-probe.verifiedCases.0.publicEvidenceDescription
+→ 正しい lint を「見逃した」と偽告発する
+```
+
+影響は**偽の失敗のみ**で偽の成功は無いので FP-01 の保護は生きていた。
+ただし `verifiedCases` はまさに配列であり
+`publicEvidenceDescription` の定位置なので、中身が入った日に
+**正しい lint を告発する赤**になる。その種の赤は assertion を緩めさせる。
+
+### 修理
+
+```text
+- test の walker を実装と同じ文法へ（配列は [i]、最上位は root 名から）
+- actual 側の replace を削除
+- FP-01b を新設: 合成 root で経路文法を直接固定する
+  （最上位 / 配列 / 深い入れ子の 3 形を deepEqual）
+- M-29 / M-30 を新設: 文法を崩す変異 2 件
+```
+
+検証:
+
+```text
+同じ probe module を置いて npm test  : 659 pass / 0 fail（以前は偽失敗）
+positive control（旧 lint へ戻す）    : FP-01 test が落ちることを実測
+```
+
+### 検証者が指摘した共有盲点
+
+```text
+readdirSync が実装・test 両方で非再帰。QD-J23 へ記録（本 round では直さない）。
+```
+

@@ -198,6 +198,16 @@ test('FP-01: lint の inventory は出荷済みの公開面値を**すべて**�
   const fs = require('node:fs');
   const dir = path.join(__dirname, '..', 'project-config');
 
+  // 経路の組み立て方は collectInventory() と**同じ文法**でなければならない。
+  // 初版は 2 点ずれていた（delta re-verify の指摘）:
+  //   配列   実装 `a.verifiedCases[0].b` / test `a.verifiedCases.0.b`
+  //   最上位 深さ 0 で p が '' なので `a..b` と二重ドットになる
+  // その上 `..` を潰す replace を **actual** 側にかけていた——actual に `..` は
+  // 決して現れないので、潰したい方にかかっていなかった。
+  //
+  // 影響は偽の失敗のみで偽の成功は無いが、verifiedCases はまさに配列であり
+  // publicEvidenceDescription の定位置なので、中身が入った日に
+  // **正しい lint を告発する赤**になる。その種の赤は assertion を緩めさせる。
   const expected = new Set();
   for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.js'))) {
     const mod = require(path.join(dir, file));
@@ -205,17 +215,22 @@ test('FP-01: lint の inventory は出荷済みの公開面値を**すべて**�
     (function walk(node, p) {
       if (!node || typeof node !== 'object' || seen.has(node)) return;
       seen.add(node);
+      if (Array.isArray(node)) {
+        node.forEach((v, i) => walk(v, p + '[' + i + ']'));
+        return;
+      }
       for (const [k, v] of Object.entries(node)) {
+        const here = p + '.' + k;
         if (typeof v === 'string' && lint.PUBLICATION_FACING_FIELDS.includes(k)) {
-          expected.add(file.replace(/\.js$/, '') + '.' + p + '.' + k);
+          expected.add(here);
         } else if (v && typeof v === 'object') {
-          walk(v, p ? p + '.' + k : k);
+          walk(v, here);
         }
       }
-    }(mod, ''));
+    }(mod, file.replace(/\.js$/, '')));
   }
 
-  const actual = new Set(lint.collectInventory().map((i) => i.path.replace(/\.\./g, '.')));
+  const actual = new Set(lint.collectInventory().map((i) => i.path));
   assert.equal(expected.size > 0, true, '期待値が空——歩き方が壊れている');
 
   const missed = [...expected].filter((p) => !actual.has(p));
@@ -229,6 +244,37 @@ test('FP-01: lint の inventory は出荷済みの公開面値を**すべて**�
   assert.equal(roots.length >= 5, true, 'default roots が縮んでいる: ' + JSON.stringify(roots));
   ['miyoshi', 'manual'].forEach((name) => {
     assert.equal(roots.includes(name), true, 'default roots に ' + name + ' が無い');
+  });
+});
+
+test('FP-01b: inventory の経路文法を固定する（最上位と配列の 2 形）', () => {
+  // FP-01 の test はこの 2 形で実装とさしていた。
+  // 文法を直接押さえておくことで、両方が同時にずれない限り再発しない。
+  // 合成 root だけを使う——出荷 config に probe を置かない。
+  return loadLint().then((lint) => {
+    const inventory = lint.collectInventory({
+      synth: {
+        publicDescription: '最上位の場合（合成fixture）',
+        verifiedCases: [
+          { caseId: 'case_a', publicEvidenceDescription: '配列の中（合成fixture）' },
+          { caseId: 'case_b' }
+        ],
+        nested: { deep: { publicDescription: '深い場所（合成fixture）' } }
+      }
+    });
+    const paths = inventory.map((i) => i.path).sort();
+    assert.deepEqual(paths, [
+      'synth.nested.deep.publicDescription',
+      'synth.publicDescription',
+      'synth.verifiedCases[0].caseId',
+      'synth.verifiedCases[0].publicEvidenceDescription',
+      'synth.verifiedCases[1].caseId'
+    ], '経路文法が変わった: ' + JSON.stringify(paths));
+    // 二重ドットや dot-index が混ざらないこと
+    paths.forEach((p) => {
+      assert.equal(p.includes('..'), false, '二重ドット: ' + p);
+      assert.equal(/\.\d+\./.test(p), false, '配列添字が dot 表記: ' + p);
+    });
   });
 });
 

@@ -122,5 +122,13 @@ export const MUTANTS = [
   { id: 'M-28', describes: 'FP-01: lint default roots hand-listed again',
     file: 'tools/evidence-publication-lint.mjs',
     find: '  return sources;\n}',
-    replace: "  return { miyoshi: sources.miyoshi };\n}" }
+    replace: "  return { miyoshi: sources.miyoshi };\n}" },
+  { id: 'M-29', describes: 'inventory path grammar: array index emitted as .N not [N]',
+    file: 'tools/evidence-publication-lint.mjs',
+    find: "node.forEach((v, i) => walk(v, path + '[' + i + ']'));",
+    replace: "node.forEach((v, i) => walk(v, path + '.' + i));" },
+  { id: 'M-30', describes: 'inventory path grammar: leading segment separator dropped',
+    file: 'tools/evidence-publication-lint.mjs',
+    find: "      const here = path + '.' + key;",
+    replace: "      const here = path + '..' + key;" }
 ];

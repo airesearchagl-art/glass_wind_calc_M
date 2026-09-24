@@ -833,3 +833,29 @@ lintPublicEvidenceText() にかけること。
 §24 の分類では Required Fix ではない（警告を計算して捨てているわけでは無い）。
 QD-J17 と同じ形のリスクなので記録する。
 
+## QD-J23 — publication lint の root 走査は非再帰（実装と test の共有盲点）
+
+FP-01 delta re-verify が 1 行で指摘した。
+
+```text
+defaultRoots()  : readdirSync(project-config) —— 非再帰
+FP-01 test      : 同じく readdirSync —— 非再帰
+→ project-config/ の**サブディレクトリ**に config module を置くと
+  両方が見逃し、test はそれでも通る。
+```
+
+現状サブディレクトリは存在しないので実害は無い。
+この round では**直さない**。理由:
+
+```text
+- 報告された Recommended Fix は test の経路文法だけであり、
+  再帰化は defaultRoots() の**振る舞い変更**になる
+- freeze 直前に審査範囲外の実行コードを変えると
+  delta 検証をもう一周回すことになる（無限後退の入口）
+```
+
+ただしこれは QD-J20 / QD-J21 と同じ類型であることを明記する:
+**実装と計器が同じ仮定を共有していると、その軸には誰も気づかない**。
+Wave 7 以降で project-config に階層を導入するなら、
+その変更と同じ commit で再帰化すること。
+
