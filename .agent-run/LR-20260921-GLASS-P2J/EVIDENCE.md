@@ -2042,3 +2042,41 @@ positive control（旧 lint へ戻す）    : FP-01 test が落ちることを�
 readdirSync が実装・test 両方で非再帰。QD-J23 へ記録（本 round では直さない）。
 ```
 
+## §56 — Final Test-Only Delta Confirmation と凍結
+
+### 結果: **CLEAN**（対象 head e273ef0）
+
+```text
+ 3 delta 分類     PASS。git ls-tree 全体比較で 4 パスのみ相違。runtime 差分 0
+ 4 旧欠陥の再現  実測。a09b880 へ probe module を落として旧 test が偽失敗することを確認
+ 5 修正 test      PASS。実装の path builder を呼ばず独立に期待値を作る
+ 6 positive ctrl  PASS。旧 roots へ戻すと FP-01 が落ち、見逃した経路を名指す
+ 7 文法 pin       PASS。M-29 / M-30 の下で実際に落ちることを実演
+ 8 M-29 / M-30    両方 KILLED。検証者が自分で 30/30 を再現
+ 9 regression     659 pass / 0 fail（検証者実測）
+10 QD-J23         悪化していない。delta に readdirSync の変更行無し
+11 runtime 同一   PASS。blob ハッシュで byte 一致
+```
+
+### 凍結
+
+```text
+Implementation verification head : **e273ef0df4762861c5ffe8224efdea9ad2c9577f**
+Wave 6 : CLOSED
+```
+
+### 凍結時点の測定値
+
+```text
+npm test          : 659 pass / 0 fail
+browser           : 62 pass / 0 fail（browser 34 / probe 8 / fail-open 10 / stageA 10）
+parser boundary   : bypass 0
+変異              : KILLED 30 / SURVIVED 0 / EQUIVALENT 0 / PATCH-MISS 0 / HARNESS ERROR 0
+guard-diff        : corpus 643,284。降格 3 規則以外の差分 0
+publication lint  : 12 値、advisory 0 / hard 違反 0
+protected         : verifiedCases [] / observations 0 / closure BLOCKED /
+                    slots 0／12 / categories 0／4 / case scopes 0／8 /
+                    Promotion Candidate NONE / 1250×2050 sample_default unverified /
+                    V0 34 / roughness III
+```
+

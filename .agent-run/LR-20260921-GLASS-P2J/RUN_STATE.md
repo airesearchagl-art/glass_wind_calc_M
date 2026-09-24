@@ -1211,3 +1211,140 @@ browser           : 62 pass / 0 fail / bypass 0
 **本セッションの判断では凍結しない**。凍結対象の選択を Human Gate へ返す。
 （§47: independent review が閉じた head だけを凍結する）
 
+## Wave 7 — 凍結後の文書収束（D-052）
+
+```text
+Implementation verification head : **e273ef0df4762861c5ffe8224efdea9ad2c9577f**（凍結済み）
+Wave 6 : CLOSED
+```
+
+Wave 7 で触ったのは README / Run Artifact のみ。
+runtime 実装 / tests / 変異演算子 / tools / UI は一行も変えていない。
+
+```text
+README : 「公開安全guard（hard 9 / advisory 3）」節を新設。
+         - この関数を通っても機密情報が無い証明にはならないことを明記
+         - 警告が空であることも証明ではないことを明記
+         - lint:evidence-publication の位置づけ（gate ではない）
+         - caseId 契約が advisory に依存しないこと
+         changelog に v1.11.0-phase2j 行を追加
+```
+
+---
+
+# Phase 2J Completion Report
+
+## 何をやったか
+
+公開安全guard の**強制境界を分けた**。
+
+```text
+hard reject  9 規則 : 構造として判定できる形。例外を投げる
+advisory     3 規則 : 開いた集合に対するメンバシップ検査。警告だけを出す
+```
+
+分割の根拠は、3 規則が `drive.g<キリル文字 o>ogle.com` /
+`drive[.]google[.]com` / `drive dot google dot com` のいずれにも届かないこと。
+NFKC は互換性関係であって confusable 関係（UTS #39）ではない。
+
+## 最も重要なこと
+
+**降格を沈黙にしなかったこと**を推論ではなく実測で示した。
+
+```text
+corpus 643,284 入力のうち throw をやめた値 : 126
+うち advisory 警告が出る値               : 126
+黙って受理された値                     : **0**
+```
+
+この repository には既に反例があった——`blockerKinds` は計算・集計・
+deep-freeze されながらどこにも描画されていない。
+advisory 警告をその 2 例目にしないために
+`npm run lint:evidence-publication` を同じ変更で出した。
+
+## 数字
+
+```text
+npm test         : 659 pass / 0 fail
+browser          : 62 checks / 0 fail / parser bypass 0
+変異             : 30 演算子、**30 KILLED / 0 SURVIVED / 0 EQUIVALENT /
+                   0 PATCH-MISS / 0 HARNESS ERROR**。演算子は repo に commit 済み
+guard-diff       : corpus 643,284。降格 3 規則以外の差分 0
+publication lint : 12 値、advisory 0 / hard 違反 0
+独立検証         : 本 Phase で 18 回
+```
+
+## Evidence は一切変えていない
+
+```text
+Primary Evidence    : UNAVAILABLE
+actual observations : 0
+closure             : BLOCKED_BY_MISSING_EVIDENCE
+slots / categories / case scopes : 0／12 / 0／4 / 0／8
+Promotion Candidate : NONE
+verifiedCases       : []
+dimensions          : 1250×2050 sample_default / unverified
+V0                  : 34   roughness : III
+```
+
+§17 に従い、一次資料が本実行環境から利用できないので推測していない。
+架空の Observation を current project 候補として作っていない。
+
+## 残した債務（Human Gate 向け）
+
+```text
+QD-J19  コロン付き円表記の過剰 reject（本 phase の受入れ済みコスト）
+QD-J22  observation → Promotion Candidate の散文経路は lint の外。
+        最初の candidate が出る前に Human Review 手順へ一行必要
+QD-J23  readdirSync が実装・test 両方で非再帰（サブディレクトリ導入時に同時修正）
+QD-J24  計器と実装が仮定を共有する家族の総括
+QD-J06  tag class retire、QD-J10  未 guard の caseId 経路、
+QD-J11  stem-drop 表記コスト、QD-J12  収束、QD-J13  dot 集合の導出原則
+```
+
+## 本Campaign が学んだこと
+
+```text
+検証方法の方が拘束条件だった。
+round 5..18 を通して、**計器の欠陥の方が実装の欠陥より多かった**。
+規則を増やすより、計器が実装と独立であることを
+構造的に保証する方が利回りが大きい（QD-J24）。
+```
+
+## Next action
+
+Human Gate。Draft PR の Ready化 / merge / Production 反映は本Campaign に含めない。
+
+```text
+main : 44e4032a2fb3bd3a48bab04d3a5a76c5a6a912eb のまま
+```
+
+## Stop conditions status
+
+```text
+Fresh Gate            : PASS
+Hard Gate failure     : なし
+BLOCKED transition    : 発生していない
+no_progress_waves     : 0 / 2
+same_hypothesis_retry : 0 / 2
+repair_strategies     : 0 / 3
+```
+
+## Resume instructions
+
+```text
+1. RUN_MANIFEST.md から binding を確認
+2. TASK_PACKET_SNAPSHOT.md を再 hash し
+   aa9ce07dac4767afc0ad9ff4b13663ae8cc2ab1be98e9e44ef80498da3acc446 と一致することを確認
+   （不一致なら BLOCKED。推測で継続しない）
+3. git fetch origin claude/phase2j-evidence-closure-gate で現在 head を確認
+   Implementation verification head は e273ef0df4762861c5ffe8224efdea9ad2c9577f
+   これと違う場合、runtime / tests / tools / UI に差分があれば
+   **凍結は無効**であり、exact-head の独立確認をやり直す
+4. HUMAN_GATE_GUARD_POLICY.md を読む（§2 は SUPERSEDED、§11/§12' が正）
+5. EVIDENCE.md §56 を読む（凍結時点の測定値）
+6. QUALITY_DEBT.md を読む（特に QD-J19 / J22 / J23 / J24）
+7. npm test で smoke check（659 pass を期待）
+8. 上記 Next action から再開する
+```
+

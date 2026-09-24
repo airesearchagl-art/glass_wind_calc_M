@@ -2226,3 +2226,31 @@ UI : Production UI に入力・承認ボタン・昇格操作を一切追加し�
      Human Review の場は開発・公開 workflow 側の CLI。
 ```
 
+## D-052 — Implementation verification head を e273ef0 で凍結し、Wave 6 を閉じる
+
+```text
+状態 : 確定（Human Gate §12 の条件を満たした）
+Implementation verification head : e273ef0df4762861c5ffe8224efdea9ad2c9577f
+```
+
+### 凍結に至るまでの独立検証（Human Gate が scope を事前固定した 3 回）
+
+```text
+7886ae4  Guard Policy Focused Independent Re-review  CLEAN（scope A–G）
+a09b880  FP-01 Delta Independent Re-verify           FINDINGS 1（non-blocking）
+e273ef0  Final Test-Only Delta Confirmation          **CLEAN**
+```
+
+最終確認は runtime 実装ファイルが a09b880 と e273ef0 で **byte 一致**であることを
+blob ハッシュで確認した。よって focused Guard Policy review の再実行は不要。
+
+### 凍結後の制約（Human Gate §13）
+
+```text
+Wave 7 で変えてよいもの : README / Run Artifact / documentation / Draft PR metadata
+変えてはいけないもの   : runtime 実装 / tests / 変異演算子 / tools / UI
+引き続き禁止             : Ready / merge / Production / Evidence promotion
+```
+
+上記を一つでも破ると凍結が無効になり、exact-head の独立確認をやり直すことになる。
+
