@@ -78,6 +78,307 @@
     return true;
   }
 
+  // ============================================================
+  // 構造ガード（Phase 2J Wave 1）
+  // ============================================================
+
+  /**
+   * prototype chain に細工の無い素の object だけを通す。
+   *
+   * ── なぜ field ごとの検査では閉じないか ──────────────────────
+   *
+   * `Object.create({level: 'primary', ...})` で継承させたkeyは
+   * `Object.keys()` にも `hasOwnProperty()` にも現れない。したがって
+   *   - 「余計なfieldが無いこと」を Object.keys で確かめる allowlist は**空虚に真**になり
+   *   - `evidence.level` のような素の property read は継承値を読んでしまう
+   * という形で、契約検査を通り抜けたまま契約値を注入できる。
+   *
+   * これは prototype pollution ではない（Object.prototype は一切変更されない）。
+   * 呼び出し側objectの prototype に契約値を載せる
+   * **inherited-field consumption / custom-prototype contract-value injection** である。
+   * 名前を取り違えると、対策が key sanitization の方向へ逸れて的を外す。
+   *
+   * ── null prototype を通す理由（Phase 2J §23 の明示的決定）────
+   *
+   * 継承元が無い＝継承値が入り得ないため、`Object.prototype` 付きより素直な
+   * データである。required fieldは必ず own property になる。
+   * これは「たまたま通っている」のではなく意図した決定であり、testで固定する。
+   *
+   * ── 判定はここ1か所だけで行う ────────────────────────────────
+   *
+   * field ごとの継承チェックを増やさない。増やすと、前段が生きている限り
+   * 後段が発火せず、どちらが効いているのか分からなくなる。
+   */
+  function assertOrdinaryObject(value, label) {
+    var where = label || 'value';
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(where + ' must be a plain object');
+    }
+    var proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+      throw new Error(where + ' must be a plain object with no inherited properties');
+    }
+    // own "__proto__" は**別の形**であり、prototypeの付け替えではない（実測）。
+    // `JSON.parse('{"__proto__":{...}}')` はprototypeを変えないので上の判定を通る。
+    // しかしこのkeyを持ったまま下流で `Object.assign({}, value)` のような
+    // [[Set]] を使ったcopyが起きると、`Object.prototype.__proto__` のsetterが
+    // 発火してcopyのprototypeが差し替わる。つまり「素のdata」として通した値が、
+    // 一手先で custom prototype として**再生する**。
+    // 値そのものは無害でも運搬体として危険なので、予期しないown fieldとして塞ぐ。
+    if (Object.prototype.hasOwnProperty.call(value, '__proto__')) {
+      throw new Error(where + ' must not carry an own "__proto__" field');
+    }
+    return value;
+  }
+
+  // ---- 検出ヘルパ（regexでは正しく書けない2クラス） -------------------------
+  //
+  // 本Phaseでこの2規則は4度修正され、そのたび「目の前の抜けは塞いだが
+  // 1文字ずれた同じ抜けは見落とす」を繰り返した。原因は規則の形にある。
+  // 単一regexでは「線形時間」「`<` による素通りなし」「長さによる素通り
+  // なし」を同時に満たせない（本体を `[^>]{0,N}` で縛れば N+1 文字で素通り、
+  // 縛らなければ quadratic）。よって regex をやめ、後戻りのない前方走査に
+  // 置き換える。以後この2関数は「文字クラスを足す」形では触らない。
+
+  // HTML5 の tag open / tag name state に忠実な線形スキャナ。
+  // タグとみなす条件は「`<`、任意で `/`、ASCII英字、そしてどこかに `>`」
+  // のみ。tag name は tab/LF/FF/space/`/`/`>` 以外では終わらないため、
+  // 名前部分に文字クラス制約を置かない（`<img:` `<a_` `<img\u200b` は
+  // Chromium実測で live handler を持つ実要素になる）。本体長の上限も置かない。
+  // この形に当てはまらないものはブラウザが要素として解釈しない（実測）:
+  // `</ img>` `</1img>` は bogus comment、`＜img＞` はテキスト、
+  // `<img src=x`（`>` なし）は閉じられない。
+  function containsHtmlLikeTag(text) {
+    var i = 0;
+    while (true) {
+      i = text.indexOf('<', i);
+      if (i === -1) {
+        return false;
+      }
+      var j = i + 1;
+      if (text.charAt(j) === '/') {
+        j += 1;
+      }
+      var c = text.charAt(j);
+      if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+        // 名前が始まった。閉じられて初めて実タグ。ここに `>` が無ければ
+        // これより後ろの `<` にも `>` は無いので、残り全体がタグ無しと確定。
+        return text.indexOf('>', j) !== -1;
+      }
+      i += 1;
+    }
+  }
+
+  // 全角 ASCII（U+FF01..U+FF5E）と全角スペースを半角へ畳む。
+  //
+  // この関数は Wave 6d で一度導入し、**重大な回帰を生んだ**。
+  // 理由は範囲ではなく**使い方**だった——畳んだテキストだけを見ていたので、
+  // `（）` が幹の区切り文字に化けて拒否が**消えた**（独立検証6 F1、368形）。
+  // 範囲を狭めてしのいだが、それでも同じ形の欠陥が隣に残っていた
+  // （独立検証7 F7-03、続いて 検証8 F8-01）。
+  //
+  // 正しい形は「畳みを**和**で使う」ことだけである。
+  // raw と folded の両方を見れば、畳みは拒否を**増やすだけ**になり、
+  // 範囲を広げても決して壊れない。だから範囲を狭める必要がなくなり、
+  // 「4 つの範囲の端点」を個別に押さえる問題も消える（検証8 F8-03）。
+  function foldFullwidthAscii(text) {
+    var out = '';
+    for (var i = 0; i < text.length; i++) {
+      var code = text.charCodeAt(i);
+      if (code >= 0xff01 && code <= 0xff5e) {
+        out += String.fromCharCode(code - 0xfee0);
+      } else if (code === 0x3000) {
+        out += ' ';
+      } else {
+        out += text.charAt(i);
+      }
+    }
+    return out;
+  }
+
+  // 正規化の**集合**。規則はいずれかの形でマッチすれば拒否する。
+  //
+  // この形になった理由（独立検証9 F9-01）:
+  // 前回は「raw ∨ fold は単調なので回帰は原理的に起きない」と書いたが、
+  // 単調なのは **raw に対してだけ**である。同じ commit で fold 関数自体を
+  // 広いものに**差し替えていた**ので、実際は
+  //   旧: raw ∨ narrowFold      新: raw ∨ wideFold
+  // という比較になり、どちらも他方を含まない。
+  // 結果 `構造計算書（最新）．ｐｄｆ` が通るようになっていた（1472形）——
+  // wideFold は `（）` を区切り文字に変えてしまい、raw は全角 dot を見られない。
+  //
+  // よって fold を**差し替えない**。集合へ追加する。
+  // 追加は単調（拒否が増えるだけ）だが、**削除と差し替えは単調ではない**。
+  // この配列から要素を減らす変更は回帰である（P2J-S33 が固定）。
+  // dot 相当の符号を ASCII の `.` へ写す。
+  //
+  // 日本語 IME は日本語入力モードのピリオドキーで `。`(U+3002) を出す——
+  // F1 が対象にした `．`(U+FF0E) よりむしろありふれた artefact であるのに、
+  // 6 度の修理を通して一度も見ていなかった（独立検証10 F10-06）。
+  // U+3002 は NFKC 不変なので「NFKC をかける」では閉じない。写像を明示する。
+  //
+  // 中黒（U+30FB `・` / U+FF65）は**意図的に除外**する。
+  // 「仕様・図面」のように散文の並列区切りとして普通に使われ、
+  // `PDF・doc形式で提出` のような普通の技術文を落としてしまう。
+  // 採用基準（独立検証12 F12-04 を受けて言い直した）:
+  //   **文末ピリオド類は入れる / 中黒・高さ付きドット類は入れない**。
+  //
+  // 旧基準は「ファイル名の拡張子区切りとして現れるか」だったが、
+  // 12 メンバ中 9 はそれを満たさない（縦書き提示形、ギリシャ文字等）。
+  // さらに U+0387（ギリシャの高さ付きドット）を入れながら
+  // 字形がほとんど同じ U+00B7 を除外しており、どちらの基準でも
+  // 実際の 12/2 の分け方を説明できていなかった——基準が
+  // 「`。` と `・` を分ける」だけのために逆算されていた。
+  //
+  // 今の基準は形式的に適用できる:
+  //   （ここにあった「full stop / 中黒」の分け方は削除した——
+  //     下の集合は U+2027 U+2E33 U+0387 U+02D9 を**含む**ので、
+  //     あの段落はコードと矛盾していた（独立検証14 F14-06）。
+  //     導出原理は無い。列挙である。QD-J13。）
+  // 前回この集合を 12 → 8 へ**縮めてしまった**（独立検証13 F13-03）。
+  // 縮めるのは回帰であると D-044 に自分で書いていたのに、
+  // 「基準を一貫させる」という理由で 16 形の拒否を失った。
+  // 検証13 は 7,084 の実散文で測り、戻しても偽陽性は**0**だと示した。戻した。
+  //
+  // この集合に**導出原理は無い**。3 度基準を言い直し、そのたびに
+  // 例外が見つかった（U+A4F8 は full stop ではなく Lm の**文字**、
+  // U+0701 を入れて U+0702 を除く等）。四度目は試みない。
+  // **導出されたクラスではなく、列挙された脅威リストである**と明記する。
+  // P2J-S37 が全員と除外側を固定し、増減は Human Gate の判断（QD-J13）。
+  var DOT_EQUIVALENTS = '\u3002\uff61\ufe12\u2024\ufe52\u2027\u2e33\u0387\u06d4\u0701\ua4f8\u02d9';
+  function foldDotEquivalents(text) {
+    var out = '';
+    for (var i = 0; i < text.length; i++) {
+      var ch = text.charAt(i);
+      out += (DOT_EQUIVALENTS.indexOf(ch) !== -1) ? '.' : ch;
+    }
+    return out;
+  }
+
+  // 全角のうち**ファイル名判定に必要な文字だけ**を畳む（dot と英数字）。
+  //
+  // これは一度「幹を捨てたので寄与 0」と判断して削除し、**回帰を生んだ**（独立検証11 F11-01）。
+  // 寄与が無いのはファイル名規則に対してだけで、**他規則に対してはあった**:
+  //   U+FF3F `＿` は広い畳みで `_`（**単語文字**）になるが、狭い畳みでは変わらない。
+  //   `www` 規則は `\b` を使うので、`＿www` には境界があり `_www` には無い。
+  //   つまり `資料＿ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ` は狭い畳みだけが捕まえられる。
+  //
+  // 教訓: **畳みは他規則の境界アンカーを壊せる**。
+  // 「この規則にとって寄与が無い」を「全体にとって寄与が無い」と読み替えてはならない。
+  function foldFullwidthFilenameChars(text) {
+    var out = '';
+    for (var i = 0; i < text.length; i++) {
+      var code = text.charCodeAt(i);
+      if ((code >= 0xff10 && code <= 0xff19) ||
+          (code >= 0xff21 && code <= 0xff3a) ||
+          (code >= 0xff41 && code <= 0xff5a) ||
+          code === 0xff0e) {
+        out += String.fromCharCode(code - 0xfee0);
+      } else {
+        out += text.charAt(i);
+      }
+    }
+    return out;
+  }
+
+  // 不可視の書式制御文字を**削除**する。
+  //
+  // 独立検証12 F12-06。これまでの normalizer はすべて**置換**写像だったので、
+  // 文字を**挿入**する回避には原理的に届かなかった:
+  //   `www\u200b.example.com` / `https\u200b://…` / `tanaka\u200b@…` / `構造計算書.p\u200bdf`
+  // これは「集合の全員を押さえたか」では見つからない——
+  // 集合は完全だったが、**種類**が欠けていた。
+  // U+00AD や U+FEFF は Word / PDF / メーラからの貼り付けで**事故的に**入る。
+  // 不可視文字は**Unicode クラスから導出**する。手書きの 24 文字列挙だったときは
+  // 実際に存在する 430 のうち 23 しか閉じていなかった（独立検証13 F13-01）。
+  // U+FE0F（絵文字対応エディタが日常的に出す）や TAG ブロックが抜けていた。
+  // 「種類を追加した」だけでは不十分で、**集合を導出する**必要があった。
+  // `\p{Cf}` だけでは足りない——ハングル/クメールの filler（U+3164 等）は
+  // Cf ではないが Chromium 実測で**幅 0.000px**、つまり人間には見えない
+  // （独立検証14 F14-08: `drive\u3164.google.com/…` が素通り）。
+  // Default_Ignorable_Code_Point を加えるとこのクラスが閉じる——
+  // 実測で偽陽性 0（6,869 の実散文）。
+  // \p{Variation_Selector} は書かない——260 件全部が
+  // Default_Ignorable_Code_Point の部分集合であることを全走査で確認した。
+  // 死んだ条件を残すと「それを削っても test が通る」変異が生まれる。
+  var FORMAT_CHARS = /[\p{Cf}\p{Default_Ignorable_Code_Point}]/gu;
+  function stripFormatChars(text) {
+    return text.replace(FORMAT_CHARS, '');
+  }
+
+  // 日本語 Windows の path 区切りは画面上も入力も `\u00a5` である
+  // （JIS X 0201 で 0x5C が YEN SIGN）。`C:\u00a5Users\u00a5案件` は実際にこう書かれる。
+  // windows-absolute-path / unc-path は本Campaign で一度も見ていなかった規則で、
+  // この形は全部素通りしていた（独立検証13 F13-07）。
+  function foldYenToBackslash(text) {
+    // 無条件に畳む。fold は集合であり、置換は monotone でない（e336428）。
+    //
+    // 独立検証14 F14-03 で `Price:\u00a5500` の過剰 reject を見つけたとき、
+    // ここに `(?!\d)` を足して逃がした。それが独立検証15 F15-A1 ——
+    // 数字で始まる segment を持つ path が全部素通りするようになった。
+    //   `C:\u00a52024年度\u00a5案件` / `\u00a5\u00a5192.168.10.5\u00a5共有`
+    // IPv4 で指した file server は区切りの直後が必ず数字なので、
+    // `\u00a5\u00a5<any IPv4>\u00a5<share>` が無条件に通っていた（実測 63.1% が regress）。
+    //
+    // 誤りは fold ではなく規則側にあった。`Price:` の `e:` を
+    // drive letter と読む windows-absolute-path が緩すぎただけで、
+    // drive letter を「英数字に前置されない 1 文字」に締めれば
+    // 無条件 fold のまま `Price:\u00a5500` は通り `C:\u00a52024` は落ちる。
+    // 通貨の例外を normalizer 側に置くと、fold が文脈依存になり
+    // 「union に足せば単調」という closure の性質そのものを壊す。
+    return text.replace(/[\u00a5\uffe5]/g, '\\');
+  }
+
+  // Unicode 正規化（NFKC）。数学用英字等の astral lookalike
+  // （`\ud835\uddc0\ud835\uddc0\ud835\uddc0.example.com`）を ASCII へ戻す。
+  // 手書きの畳みでは追いきれない範囲なので、標準の写像を使う。
+  function foldCompatibility(text) {
+    try {
+      return text.normalize('NFKC');
+    } catch (e) {
+      return text;
+    }
+  }
+
+  // この配列は**追加のみ単調**である。削除と差し替えは回帰しうる。
+  // P2J-S34 は**どの normalizer が居るか**を名前で固定する——
+  // 以前は個数（=== 2）しか見ておらず、削除と追加を同時にやると
+  // 個数が変わらず **guard が黙って通した**（検証11 F11-01）。
+  // 集合は 3 つの**種類**を持つ: 置換写像 / 削除 / 標準正規化。
+  // 「全員を押さえたか」だけでは種類の欠落は見えない（検証12 F12-06）。
+  var TEXT_NORMALIZERS = [foldFullwidthFilenameChars, foldFullwidthAscii, foldDotEquivalents,
+                          stripFormatChars, foldCompatibility,
+                          foldYenToBackslash];
+
+  // 拡張子集合は**ここが唯一の定義**である。
+  // 消費側の一つは project-config/miyoshi.js の FILENAME_LIKE_CASE_ID_PATTERN
+  // で、そちらがこの値を読んで組み立てる（依存の向きは一方向のまま）。
+  // 独立検証6 F3: 以前は「同じ集合を使う」と**コメントで述べているだけ**
+  // だったため、こちらを拡張した瞬間に 2 つがさして、caseId 側で
+  // `plan_dwg` は拒否 / `plan_jww` は受理 という、本修理が閉じたのと
+  // まったく同じ非対称が隣のモジュールで再現していた。
+  // 同じことを 2 か所で判定しない（本Campaignの反復する教訓）。
+  var PRIVATE_DOCUMENT_EXTENSION_SOURCE = 'pdf|dwg|dxf|jww|jwc|xdw|sfc|p21|ifc|dwf|pln|rvt|skp|xls[xm]?|doc[xm]?|ppt[xm]?|od[tsp]|jpe?g|png|gif|bmp|tiff?|heic|heif|webp|zip|rar|7z|lzh|tar|gz|msg|eml|txt|csv|bak';
+  // 幹（dot の前の非区切り文字列）を**要求しない**。`.ext` だけを見る。
+  //
+  // 幹を要求する形は本Phase で 6 度修理され、そのたびに区切り文字の選び方で
+  // 新しい素通りを生んだ。原因は要求が矛盾していることである（独立検証10）:
+  //   幹が周囲の散文を飲み込まないよう → 区切り文字は**多く**したい
+  //   区切りを含むファイル名を見逃さないよう → 区切り文字は**少なく**したい
+  // space / 括弧 / 引用符 / カンマは散文の区切りであり、同時に Windows・macOS で
+  // 合法なファイル名文字でもある。どちらを取ってももう一方が壊れる。
+  // 実際 `plan (1).pdf`（Explorer が自分で付ける名前）は 10304/10304 素通りしていた。
+  //
+  // よって幹を捨てる。これは tag 規則で既に下したのと同じ判断である——
+  // 「巧妙な例外を足さない。偽陽性を受け入れて素通りを消す」。
+  // 実測: 出荷済みの publicDescription 9 件は 1 件も影響を受けない。
+  // 副次効果として `{1,120}` の ReDoS 面と QD-J04 のコストガードも消える。
+  //
+  // 語境界 `(?![A-Za-z])` は残す: `.doc` が `document` の中でマッチしないよう。
+  var PRIVATE_DOCUMENT_FILENAME = new RegExp(
+    '\\.(' + PRIVATE_DOCUMENT_EXTENSION_SOURCE + ')(?![A-Za-z])', 'i');
+
+
   // public-safe boundary（RF-02）: publicDescription（および将来
   // publicEvidenceDescription等）へ渡してよいテキストかどうかを検証する
   // 共通ガード。既知のURL/パス/プロバイダ/opaqueトークンのパターンに
@@ -85,28 +386,283 @@
   // 正式案件名・機密名称等の非パターン文字列までは検出できない
   // （repository-wide review・Human reviewが別途必要）。
   var PUBLIC_UNSAFE_TEXT_PATTERNS = [
-    { name: 'url-scheme', pattern: /\b[a-z][a-z0-9+.-]*:\/\//i },
-    { name: 'www', pattern: /\bwww\./i },
-    { name: 'known-private-provider', pattern: /drive\.google|docs\.google|notion\.(so|com)|sharepoint|dropbox/i },
-    { name: 'windows-absolute-path', pattern: /[A-Za-z]:\\/ },
-    { name: 'unc-path', pattern: /\\\\[^\\\s]+\\[^\\\s]*/ },
-    { name: 'unix-home-or-absolute-path', pattern: /(^|\s)(~\/|\/Users\/|\/home\/|\/mnt\/)/ },
-    { name: 'opaque-long-token', pattern: /\b[A-Za-z0-9_-]{28,}\b/ }
+    // 左文脈のアンカー（`\b` / `(^|\s)`）は外してある（独立検証12 F12-01）。
+    // 日本語の散文は URL や path の前に空白を置かないので、
+    // `図面は/home/user/案件/最新版 に置いた` はアンカー付きでは**一度も発火しない**。
+    // commit したグリッド（P2J-S38 / corpus.mjs LEFT_CONTEXTS）では
+    // 17 前置き × 7 payload = 119 中 74 が通っていた（測定可能な値）。
+    // 最も痛いのは、この規則が `資料＿ｗｗｗ．…`（全角）を拒否しながら
+    // それが正規化された先の `資料_www.example.com` を通していたこと。
+    // 過剰拒否側のコスト（`showwww.` 等）は受け入れる——fail closed。
+    { name: 'url-scheme', pattern: /[a-z][a-z0-9+.-]*:\/\//i },
+    // ── advisory（Human Gate §3）──────────────────────
+    // 以下 3 つは開いた集合に対するメンバシップ検査であり、有限の
+    // normalizer で閉じない。throw せず警告のみを出す（Human Gate §3）。
+    // 分類は規則そのものに持たせる——別の名前一覧を作ると必ずずれる。
+    { name: 'www', advisory: true, pattern: /www\./i,
+      message: 'text contains a www-style hostname; human review required before publication' },
+    { name: 'known-private-provider', advisory: true,
+      pattern: /drive\.google|docs\.google|notion\.(so|com)|sharepoint|dropbox/i,
+      message: 'text resembles a private document-provider reference; human review required before publication' },
+    // drive letter は英数字に前置されない 1 文字（F15-A1: `Price:` の `e:` を
+    // drive と誤読していた）。区切りは `\\` と `/` 両方——`C:/2024/x` は
+    // git-bash・JSON config・tooling 出力での通常の綴り（F15-A2）。
+    { name: 'windows-absolute-path',
+      // 通貨の例外は置かない。3 round この境界をいじって、
+      // 毎回「過剰 reject を消して本物の穴を開ける」を繰り返した:
+      //   F14-03  Price:\u00a5500 が落ちる      → fold に (?!\d) を足した
+      //   F15-A1  それで C:\u00a52024年度 が素通り → 規則側に通貨例外を移した
+      //   F16-01  それで C:\\500 が素通り（\u00a5 無しの素の ASCII 形）
+      // 規則は `\\` も `/` も見るので、\u00a5 にしか無い曖昧さを
+      // ここで解こうとすると必ず ASCII 形を巻き込む。
+      // fold 側へ戻しても同じで、`C:\u00a52024` と `B:\u00a52024`（2024円）は
+      // 文字列として完全に同一——機械的には決定不能。
+      // よって fail-closed を取る。`Price:\u00a5500` は落ちる（QD-J19 に開示）。
+      pattern: /[A-Za-z]:[\\\/]/ },
+    // `//host/share` は Windows API と PowerShell が受ける UNC の綴り（F15-A3）。
+    // `:` 前置は除外——`https://` は url-scheme の担当。
+    { name: 'unc-path',
+      // Windows / PowerShell は区切りが混ざっていても解決する。
+      // 旧形は各位置で同じ文字を要求しており、
+      // `\\\\srv/share` / `//srv\\share` / `\u00a5\u00a5192.168.10.5/共有` が素通りだった（F16-05）。
+      // `https://x/y` は url-scheme が先に発火するので二重計上にはならない。
+      // 末尾は 0 文字でもよい。`\\\\\\\\fileserver\\\\projects\\\\calc` のように
+      // 区切りが全部 2 文字の形だと、1 文字必須にするとマッチしない。
+      pattern: /[\\\/]{2}[^\\\/\s]+[\\\/][^\\\/\s]*/ },
+    // macOS / Windows では大小が同じ path を指す（F15-A4）。
+    { name: 'unix-home-or-absolute-path', pattern: /(~\/|\/Users\/|\/home\/|\/mnt\/)/i },
+    { name: 'opaque-long-token', advisory: true, pattern: /\b[A-Za-z0-9_-]{28,}\b/,
+      message: 'text contains a long opaque identifier; human review required before publication' },
+
+    // ── Phase 2J Wave 5 で実測により追加 ───────────────────────
+    //
+    // 下の4クラスは Wave 5 の probe で**実際に通り抜け**、
+    // 合成READY contextでは Promotion Candidate JSON まで到達した。
+    // publicDescription は公開リポジトリと Candidate JSON の両方に出るため、
+    // ここが唯一の canonical な関門である。
+    // evidence-closure.js / candidate serializer / Matrix UI 側に
+    // 個別のsanitizationを足して塞がない（関門を増やすと、どれが効いているか
+    // 分からなくなり、どれも単独では信用できなくなる）。
+
+    // 担当者のメールアドレス等。個人を特定しうる連絡先は公開しない。
+    // local part は非ASCII可（RFC 6531）、domain は IDN 可。
+    // 引用 local part（RFC 5322）と address literal（RFC 5321）は別枝（F15-A5）。
+    { name: 'email-like',
+      // 量指定子はすべて上限付きで、**入れ子にしない**。
+      // label 単位の入れ子（`(?:\.[…]{0,62}){0,N}`）は、N を実在する domain を
+      // 覆う大きさにすると 2000 label の入力で 18 秒かかる。
+      // N を小さくすれば速いが、その場合 11 label のアドレスが素通りになる（F16-02）。
+      // domain 全体を平たな文字クラス 253（RFC 1035 の上限）で取れば両立する。
+      // RFC 5321 の local part 上限は 64。
+      // 否定クラスを無制限の `+` で広げた版は 40k 入力に 1.8 秒かかった（F15-S21 再発）。
+      pattern: /[^\s@<>()\[\]"]{1,64}@[A-Za-z0-9\u00a1-\uffff][A-Za-z0-9\u00a1-\uffff.-]{0,253}\.[A-Za-z\u00a1-\uffff]{2,24}|"[^"]{0,64}"@[A-Za-z0-9\u00a1-\uffff.-]{1,255}\.[A-Za-z\u00a1-\uffff]{2,24}|@\[(?:[Ii][Pp][Vv]6:)?[0-9A-Fa-f:.]{2,45}\]/ },
+
+    // 私的文書・図面のファイル名。拡張子集合は caseId 側の既存ポリシー
+    // （FILENAME_LIKE_CASE_ID_PATTERN）と**同じ**ものを使う。
+    // 「ドットを含む語」を一律に弾かない: 既存のEvidence散文は
+    // `index.html` のようなリポジトリ内ファイルに正当に言及しており、
+    // それを新たに拒否すると現行configが読み込めなくなる（実測で2件該当）。
+    // 幹を ASCII に限定しない（独立検証4 Finding 2）。
+    // 本案件のEvidence散文は日本語であり、私的文書の名前も日本語である:
+    //   構造計算書.pdf / 図面.dwg / 意匠図一式.pdf / 検討資料_001.xlsx
+    // 旧実装は幹を `[A-Za-z0-9_-]+` としていたため、
+    // **現実にありそうな日本語ファイル名だけが素通り**していた（実測 12/15）。
+    // `plan.pdf` は落ちるのに `構造計算書.pdf` は通る、という逆転である。
+    // これは「ASCIIか日本語か」を「安全か危険か」に重ねた誤りで、
+    // タグ判定の3度目の欠陥とまったく同じ取り違えである。
+    //
+    // 幹は「区切り文字以外の連なり」とする。長さは上限を置く
+    // （否定クラス + リテラルの組は witness 次第で二次コストになりうる。QD-J04）。
+    // 正規化形にも同じ pattern を使う。
+    // 以前は正規化形専用の「語境界無し」変種を当てていたが、
+    // 正規化形は**入力のどこかに**全角があれば存在するので、
+    // 無関係な ASCII 識別子まで境界無しで見られていた（独立検証10 F10-01）。
+    // 入力全体の性質から局所の語境界を推定できるという前提が誤りだった。
+    { name: 'private-document-filename', pattern: PRIVATE_DOCUMENT_FILENAME },
+
+    // タグの形をした内容。これは**privacy/内容の境界**であって、
+    // XSS対策そのものではない（DOM側は textContent / createElement で別に守る）。
+    //
+    // ── ここは3度間違えた。経緯を残す ──────────────────────────
+    //
+    // (1) 元の規則は `<` + 英字 … `>` を一律に拒否していた。
+    //     `W<H かつ P>Q である。` を巻き込む（誤検知）と指摘された。
+    // (2) 「本体が**属性の形**のものだけ拒否」へ変更した。意図が裏返り、
+    //     属性文法に合わない本体が素通りした（崩れたタグほど通る）。
+    // (3) 「本体に**日本語**が無いタグ形だけ拒否」へ変更した。前提が誤りで、
+    //     日本語のHTMLは `alt="図面"` のように属性値に日本語を持つ。
+    //     結果、**1文字混ぜるだけで全タグ名が素通り**した（実測 114/114）。
+    //
+    // ── なぜ賢い規則が作れないのか ───────────────────────────
+    //
+    //     A<B C>D        散文（変数の比較）
+    //     <td nowrap>    タグ
+    //
+    // この2つは `<` + 識別子 + 空白 + 識別子 + `>` で**文字構成が同一**である。
+    // `<…>` の中だけを見る規則では原理的に分離できない。
+    // したがって「どちらの誤りを選ぶか」を決めるしかない。
+    //
+    // ── 選択: 誤検知(fail closed)を取り、素通りを無くす ──────────
+    //
+    // 素通りを許すとこのガードは意味を失う（唯一のcanonicalな関門である）。
+    // 一方、誤検知には**書き方で回避できる**という性質がある:
+    //
+    //     W<H かつ P>Q      拒否される
+    //     W < H かつ P > Q  通る（演算子の前後に空白を置く）
+    //     5<Z<40            通る（`>` で閉じないため一致しない）
+    //
+    // 比較演算子の前後に空白を置くのは組版としても正しい。
+    // 「書けなくなる」のではなく「書き方が決まる」だけなので、
+    // 誤検知側の実害は受け入れられる。
+    // 賢い例外を足さない。3度とも例外の作り込みで壊している。
+    //
+    // ── 4度目の指摘（独立検証4 Finding 1）─────────────────────
+    //
+    // 本体クラスが `[^<>]*` だったため、**本体に `<` が1つ入るだけで**
+    // 一致しなくなり、reject → accept へ反転していた:
+    //
+    //     <img src=x onerror=alert(1)>        拒否
+    //     <img onerror=alert(1<2)>            **素通り**
+    //     <img src=x onerror="alert(1);a<b">  **素通り**
+    //     <img src=x onerror=alert(1) alt="<"> **素通り**
+    //
+    // 実測 78/78（検証者は 142タグ名 × 5形 = 710/710）。Chromium で
+    // 実際に要素が生成され handler が発火することまで確認されている。
+    //
+    // **これは3度の修理で入った欠陥ではなく、元の規則から在った。**
+    // 3回の修理も3回の検証も、本体の文字クラスを見ていなかった。
+    // Wave 6c は「素通りを無くすために誤検知を受け入れる」と述べたが、
+    // 素通りは残っていた。**払ったコストが買うはずのものを買えていなかった。**
+    //
+    // 本体を `[^>]` にする（`<` を許す）。`*` ではなく上限付きにするのは、
+    // 無制限だと二次コストになり P2J-S21 が落ちるためである
+    // （検証者が naive fix で実測。上限付きなら線形のままであることも実測済み）。
+    { name: 'html-like-tag', detect: containsHtmlLikeTag },
+
+    // DOCTYPE の兄弟（ENTITY/ATTLIST/ELEMENT/NOTATION）と `<?=`、CDATA 終端も
+    // 同じ族。列挙漏れであって open-set ではない（F15-A6）。
+    { name: 'markup-construct', pattern: /<!--|<!\[CDATA\[|<![A-Za-z]|<\?[A-Za-z=]|\]\]>/i },
+
+    // 非印字の制御文字。黙って落とさず fail closed にする。
+    // 改行 (\n \r) と タブ (\t) は**意図的に許容**する:
+    // 現行の publicDescription 11件はいずれも使っていないが、
+    // 使うこと自体は privacy 上の危険ではなく、
+    // ここで新たに拒否すると理由のない挙動変更になる（Wave 5 で実測して決めた）。
+    { name: 'control-character', pattern: /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u2028\u2029]/ }
   ];
 
+  // Human Gate §4: canonical な 2 分割。規則本体は上の 1 表だけが持ち、
+  // ここはその射影。Closure / UI 側へ規則を複写しない。
+  var HARD_REJECT_RULES = PUBLIC_UNSAFE_TEXT_PATTERNS.filter(function (e) { return !e.advisory; });
+  var ADVISORY_LINT_RULES = PUBLIC_UNSAFE_TEXT_PATTERNS.filter(function (e) { return !!e.advisory; });
+
+  // 分割が壊れたまま module が load されないようにする。
+  // advisory に message が無ければ警告が無言になる——それは QD-J17 そのもの。
+  (function () {
+    if (!HARD_REJECT_RULES.length || !ADVISORY_LINT_RULES.length) {
+      throw new Error('evidence.js: rule split is empty on one side');
+    }
+    for (var a = 0; a < ADVISORY_LINT_RULES.length; a++) {
+      if (typeof ADVISORY_LINT_RULES[a].message !== 'string' || !ADVISORY_LINT_RULES[a].message) {
+        throw new Error('evidence.js: advisory rule without a message: ' + ADVISORY_LINT_RULES[a].name);
+      }
+    }
+  }());
+
+  // 正規化閉包。assert と lint の両方が同じものを使う——
+  // 同じ判定を 2 か所に置くと片方だけが古びる（F9-04 で実際に起きた）。
+  //
+  // 各 normalizer を個別に 1 回かけるのでは不十分で、合成が必要な形がある
+  // （F10-06: `構造計算書。ｐｄｆ` は dot 写像だけでも全角畳みだけでも届かない）。
+  function normalizationClosure(text) {
+    var normalized = [];
+    var frontier = [text];
+    // guard は「黙って打ち切る」形にしない。打ち切れば閉包が不完全になり、
+    // どの形を見逃したか誰も気づかない。実測した最大深さは 5（28 形）。
+    var guard = 0;
+    while (frontier.length) {
+      guard++;
+      if (guard > 16) {
+        throw new Error('assertPublicSafeEvidenceText: normalization closure did not converge');
+      }
+      var next = [];
+      for (var q = 0; q < frontier.length; q++) {
+        for (var k = 0; k < TEXT_NORMALIZERS.length; k++) {
+          var form = TEXT_NORMALIZERS[k](frontier[q]);
+          if (form !== text && normalized.indexOf(form) === -1) {
+            normalized.push(form);
+            next.push(form);
+          }
+        }
+      }
+      frontier = next;
+    }
+    return normalized;
+  }
+
+  function ruleMatches(entry, text, normalized) {
+    // detect 規則（html-like-tag）には正規化形を適用しない: `＜img＞` は
+    // Chromium で要素を生まないので、畳んで拒否すると過剰拒否（P2J-S27）。
+    if (entry.detect) { return entry.detect(text); }
+    if (entry.pattern.test(text)) { return true; }
+    for (var f = 0; f < normalized.length; f++) {
+      if (entry.pattern.test(normalized[f])) { return true; }
+    }
+    return false;
+  }
+
+  /**
+   * 構造的に判定可能な 9 規則だけを強制する。
+   *
+   * **この関数を通ったことは、文章に機密情報が含まれないことの証明にはならない。**
+   * 証明するのは「機械的に強制されている構造拒否規則のどれにも一致しなかった」ことだけ。
+   * 正式案件名、担当者名、言い換えた provider 参照、その他の意味的な開示は検出しない。
+   * **最終的な公開可否は Human Review が決める。**
+   *
+   * advisory 規則（www / known-private-provider / opaque-long-token）は
+   * ここでは throw しない。lintPublicEvidenceText() を使うこと。
+   */
   function assertPublicSafeEvidenceText(text, label) {
     if (typeof text !== 'string' || !text) {
       throw new Error((label || 'publicDescription') + ' must be a non-empty string');
     }
-    for (var i = 0; i < PUBLIC_UNSAFE_TEXT_PATTERNS.length; i++) {
-      var entry = PUBLIC_UNSAFE_TEXT_PATTERNS[i];
-      if (entry.pattern.test(text)) {
+    var normalized = normalizationClosure(text);
+    for (var i = 0; i < HARD_REJECT_RULES.length; i++) {
+      var entry = HARD_REJECT_RULES[i];
+      if (ruleMatches(entry, text, normalized)) {
         throw new Error(
           (label || 'publicDescription') + ' must not contain private URLs/paths/identifiers (matched known-unsafe pattern: ' + entry.name + ')'
         );
       }
     }
     return true;
+  }
+
+  /**
+   * advisory 規則を評価し、決定的な警告データを返す。throw しない。
+   *
+   *   { warnings: [ { rule, severity, message } ] }
+   *
+   * 安定した契約は **rule 名**。message は人間向けであり文面は変わりうる。
+   *
+   * **warnings が空であることは公開安全の証明では無い。**
+   * これらは開いた集合に対する heuristic であり、confusable や
+   * 言い換え（`drive dot google dot com` 等）は見逃す。
+   * 見逃した例を見つけても修理契機では無い（Human Gate §13）。
+   */
+  function lintPublicEvidenceText(text, label) {
+    if (typeof text !== 'string' || !text) {
+      throw new Error((label || 'publicDescription') + ' must be a non-empty string');
+    }
+    var normalized = normalizationClosure(text);
+    var warnings = [];
+    for (var i = 0; i < ADVISORY_LINT_RULES.length; i++) {
+      var entry = ADVISORY_LINT_RULES[i];
+      if (ruleMatches(entry, text, normalized)) {
+        warnings.push({ rule: entry.name, severity: 'advisory', message: entry.message });
+      }
+    }
+    return deepFreeze({ warnings: warnings });
   }
 
   // Evidence記述オブジェクトを組み立てるヘルパー。
@@ -181,6 +737,10 @@
     if (!evidence || typeof evidence !== 'object') {
       throw new Error('evidence metadata is required' + (label ? ' for ' + label : ''));
     }
+    // Phase 2J Wave 1: 以降の `evidence.level` / `evidence.checkedAt` /
+    // `evidence.privateReferenceAvailable` はすべて素のproperty readであり、
+    // custom prototype に載せた契約値をそのまま読んでしまう。読む前に構造を閉じる。
+    assertOrdinaryObject(evidence, 'evidence' + (label ? ' (' + label + ')' : ''));
     if (EVIDENCE_LEVELS.indexOf(evidence.level) === -1) {
       throw new Error('evidence.level must be one of ' + EVIDENCE_LEVELS.join(', ') + (label ? ' (' + label + ')' : ''));
     }
@@ -460,6 +1020,9 @@
     if (typeof sourceReference !== 'object' || Array.isArray(sourceReference)) {
       throw new Error('sourceReference must be null or an object' + (label ? ' (' + label + ')' : ''));
     }
+    // 継承させた kind/url は Object.keys ベースのallowlistに現れないため、
+    // 「余計なfieldが無い」検査が空虚に真になったまま契約値だけが通る。
+    assertOrdinaryObject(sourceReference, 'sourceReference' + (label ? ' (' + label + ')' : ''));
     if (sourceReference.kind !== 'public_primary') {
       throw new Error(
         'sourceReference.kind must be "public_primary" (got ' +
@@ -515,6 +1078,11 @@
       return true;
     }
 
+    // options.sourceReference も素のproperty readなので、同じ経路で
+    // 「検証済みpublic referenceがある」と偽れる。ここで構造を閉じる。
+    if (options !== null && options !== undefined) {
+      assertOrdinaryObject(options, 'promotion options' + (label ? ' (' + label + ')' : ''));
+    }
     options = options || {};
     var sourceReference = options.sourceReference;
 
@@ -553,9 +1121,27 @@
   return {
     EVIDENCE_LEVELS: Object.freeze(EVIDENCE_LEVELS),
     VERIFICATION_STATUSES: Object.freeze(VERIFICATION_STATUSES),
-    CHECKED_AT_PATTERN: CHECKED_AT_PATTERN,
-    PUBLIC_UNSAFE_TEXT_PATTERNS: Object.freeze(PUBLIC_UNSAFE_TEXT_PATTERNS),
+    // F4 で「呼び出し側から緩められないよう freeze して返す」と書いたが、
+    // Object.freeze は配列だけを凍らせ、中の規則オブジェクトは可変のままだった。
+    // `...find(e => e.name === 'www').pattern = /$^/` の 1 行で規則が死ぬ（F15-E1）。
+    // deepFreeze はこの同じファイルが export している（F15-E2 も同根）。
+    CHECKED_AT_PATTERN: deepFreeze(CHECKED_AT_PATTERN),
+    PUBLIC_UNSAFE_TEXT_PATTERNS: deepFreeze(PUBLIC_UNSAFE_TEXT_PATTERNS),
+    HARD_REJECT_RULES: deepFreeze(HARD_REJECT_RULES),
+    ADVISORY_LINT_RULES: deepFreeze(ADVISORY_LINT_RULES),
+    lintPublicEvidenceText: lintPublicEvidenceText,
+    PRIVATE_DOCUMENT_EXTENSION_SOURCE: PRIVATE_DOCUMENT_EXTENSION_SOURCE,
+    // 範囲の端点をテストから直接押さえるために export する（P2J-S32）。
+    foldFullwidthAscii: foldFullwidthAscii,
+    foldFullwidthFilenameChars: foldFullwidthFilenameChars,
+    foldDotEquivalents: foldDotEquivalents,
+    stripFormatChars: stripFormatChars,
+    foldYenToBackslash: foldYenToBackslash,
+    foldCompatibility: foldCompatibility,
+    DOT_EQUIVALENTS: DOT_EQUIVALENTS,
+    TEXT_NORMALIZER_COUNT: TEXT_NORMALIZERS.length,
     isValidCheckedAt: isValidCheckedAt,
+    assertOrdinaryObject: assertOrdinaryObject,
     assertPublicSafeEvidenceText: assertPublicSafeEvidenceText,
     makeEvidence: makeEvidence,
     assertEvidenceConsistency: assertEvidenceConsistency,

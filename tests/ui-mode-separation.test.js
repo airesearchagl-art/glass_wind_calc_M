@@ -360,10 +360,14 @@ test('Phase 2F: evidence-ledger.js が evidence.js の後に読み込まれる',
    独立検証(Phase 2F) F10 — Evidence panelは黙って消えない
 ============================================================ */
 
-test('F10: renderProjectEvidencePanels の catch は失敗を画面に出す（黙殺しない）', () => {
+test('F10: Phase 2F Evidence panel の catch は失敗を画面に出す（黙殺しない）', () => {
+  // Phase 2J Wave 4 で、Phase 2F パネル群と Closure Matrix を
+  // **別々にguardする**ためにこの本体は renderPhase2FEvidencePanels へ移した
+  // （片方の失敗でもう片方が消えると、消えたこと自体が「問題なし」と読まれる）。
+  // 契約は変わっていない。見る場所だけを移動する。
   const src = fs.readFileSync(INDEX_HTML_PATH, 'utf8');
-  const start = src.indexOf('function renderProjectEvidencePanels');
-  assert.notEqual(start, -1, 'renderProjectEvidencePanels が見つかるはず');
+  const start = src.indexOf('function renderPhase2FEvidencePanels');
+  assert.notEqual(start, -1, 'renderPhase2FEvidencePanels が見つかるはず');
   const fn = src.slice(start, src.indexOf('\nfunction ', start + 10));
 
   // Evidence contract / promotion gate が失敗したとき、panelが何も言わずに
