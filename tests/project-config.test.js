@@ -521,30 +521,46 @@ test('AC-06: validateVerifiedCase() はpublicEvidenceDescriptionへの内部限�
    assertPublicSafeEvidenceText() でmakeEvidence()の入口からも強制する。
 ============================================================ */
 
+// evidence.js を明示的に require する。このファイル自身が
+// 「global.ProjectEvidence に偶然依存させない」と書いている。
+const ProjectEvidence = require('../project-config/evidence.js');
+
 test('RF-02: assertPublicSafeEvidenceText() が既知の非公開パターン（URL/www/プロバイダ名/Windowsパス/UNCパス/Unix絶対パス/長いopaqueトークン）を例外で拒否する', () => {
   const unsafeTexts = [
     '参照: http://example.com/doc',
     '参照: https://example.com/doc',
     'file:///Users/foo/bar.txt',
-    'see www.example.com for details',
     'https://drive.google.com/file/d/xyz',
-    'see notion.so/internal-doc',
-    'sharepoint.com/sites/foo',
-    'dropbox.com/s/abc',
     'C:\\Users\\foo\\bar.docx',
     '\\\\server\\share\\file.docx',
     '~/Documents/secret.pdf',
     '/Users/foo/secret.pdf',
     '/home/foo/secret.pdf',
     '/mnt/data/secret.pdf',
-    // 架空の長いopaqueトークン（実際の社内file ID等は用いない、fixture値）
-    'ref token: 1A2b3C4d5E6f7G8h9I0jK1L2M3N4O5'
   ];
   for (const text of unsafeTexts) {
     assert.throws(
       () => MiyoshiProjectConfig.assertPublicSafeEvidenceText(text, 'test'),
       `拒否されるはず: ${text}`
     );
+  }
+
+  // Human Gate §3: 以下 3 類は advisory へ降格された。
+  // throw しないが、必ず警告を出す（空の「throw しなかった」test にしない）。
+  const advisoryTexts = [
+    ['see www.example.com for details', 'www'],
+    ['see notion.so/internal-doc', 'known-private-provider'],
+    ['sharepoint.com/sites/foo', 'known-private-provider'],
+    ['dropbox.com/s/abc', 'known-private-provider'],
+    // 架空の長いopaqueトークン（実際の社内file ID等は用いない、fixture値）
+    ['ref token: 1A2b3C4d5E6f7G8h9I0jK1L2M3N4O5', 'opaque-long-token']
+  ];
+  for (const [text, rule] of advisoryTexts) {
+    assert.equal(MiyoshiProjectConfig.assertPublicSafeEvidenceText(text, 'test'), true,
+      `advisory 規則で throw している: ${text}`);
+    const warnings = ProjectEvidence.lintPublicEvidenceText(text, 'test').warnings;
+    assert.equal(warnings.some((w) => w.rule === rule), true,
+      `advisory 警告が出ていない: ${text}`);
   }
 });
 
@@ -605,9 +621,16 @@ test('RF-02: validateVerifiedCase() はpressureEvidence.publicDescriptionへの�
     publicDescription: 'ref: 9zY8xW7vU6tS5rQ4pO3nM2lK1jI0hG',
     privateReferenceAvailable: true
   };
-  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
-    Object.assign({}, fixture, { evidence: Object.assign({}, fixture.evidence, { pressureEvidence: unsafePressureEvidence }) })
-  ));
+  // Human Gate §3: opaque-long-token は advisory へ降格されたので throw しない。
+  // 代わりに publication lint が見つけることを見る（§10: nested も inventory に入る）。
+  const withToken = Object.assign({}, fixture, {
+    evidence: Object.assign({}, fixture.evidence, { pressureEvidence: unsafePressureEvidence })
+  });
+  assert.doesNotThrow(() => MiyoshiProjectConfig.validateVerifiedCase(withToken));
+  const warnings = ProjectEvidence.lintPublicEvidenceText(
+    unsafePressureEvidence.publicDescription, 'publicDescription').warnings;
+  assert.equal(warnings.some((w) => w.rule === 'opaque-long-token'), true,
+    'nested evidence の opaque token に警告が出ていない');
 });
 
 test('RF-02: validateVerifiedCase() のtop-level publicEvidenceDescriptionはWindowsパス・UNCパス・opaqueIDも拒否する（regex拡張後の回帰）', () => {
@@ -617,9 +640,14 @@ test('RF-02: validateVerifiedCase() のtop-level publicEvidenceDescriptionはWin
   assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
     makeValidVerifiedCaseFixture({ publicEvidenceDescription: '\\\\server\\share\\寸法図.pdf' })
   ));
-  assert.throws(() => MiyoshiProjectConfig.validateVerifiedCase(
+  // opaque token は advisory へ降格。structural には有効だが警告が出る。
+  assert.doesNotThrow(() => MiyoshiProjectConfig.validateVerifiedCase(
     makeValidVerifiedCaseFixture({ publicEvidenceDescription: 'ref: 1A2b3C4d5E6f7G8h9I0jK1L2M3N4O5' })
   ));
+  assert.equal(
+    ProjectEvidence.lintPublicEvidenceText('ref: 1A2b3C4d5E6f7G8h9I0jK1L2M3N4O5', 'x')
+      .warnings.some((w) => w.rule === 'opaque-long-token'),
+    true, 'top-level publicEvidenceDescription の opaque token に警告が出ていない');
 });
 
 test('Evidence: 公開config全体にprivate URL/IDが混入しない', () => {

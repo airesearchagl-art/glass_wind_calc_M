@@ -395,8 +395,15 @@
     // それが正規化された先の `資料_www.example.com` を通していたこと。
     // 過剰拒否側のコスト（`showwww.` 等）は受け入れる——fail closed。
     { name: 'url-scheme', pattern: /[a-z][a-z0-9+.-]*:\/\//i },
-    { name: 'www', pattern: /www\./i },
-    { name: 'known-private-provider', pattern: /drive\.google|docs\.google|notion\.(so|com)|sharepoint|dropbox/i },
+    // ── advisory（Human Gate §3）──────────────────────
+    // 以下 3 つは開いた集合に対するメンバシップ検査であり、有限の
+    // normalizer で閉じない。throw せず警告のみを出す（Human Gate §3）。
+    // 分類は規則そのものに持たせる——別の名前一覧を作ると必ずずれる。
+    { name: 'www', advisory: true, pattern: /www\./i,
+      message: 'text contains a www-style hostname; human review required before publication' },
+    { name: 'known-private-provider', advisory: true,
+      pattern: /drive\.google|docs\.google|notion\.(so|com)|sharepoint|dropbox/i,
+      message: 'text resembles a private document-provider reference; human review required before publication' },
     // drive letter は英数字に前置されない 1 文字（F15-A1: `Price:` の `e:` を
     // drive と誤読していた）。区切りは `\\` と `/` 両方——`C:/2024/x` は
     // git-bash・JSON config・tooling 出力での通常の綴り（F15-A2）。
@@ -424,7 +431,8 @@
       pattern: /[\\\/]{2}[^\\\/\s]+[\\\/][^\\\/\s]*/ },
     // macOS / Windows では大小が同じ path を指す（F15-A4）。
     { name: 'unix-home-or-absolute-path', pattern: /(~\/|\/Users\/|\/home\/|\/mnt\/)/i },
-    { name: 'opaque-long-token', pattern: /\b[A-Za-z0-9_-]{28,}\b/ },
+    { name: 'opaque-long-token', advisory: true, pattern: /\b[A-Za-z0-9_-]{28,}\b/,
+      message: 'text contains a long opaque identifier; human review required before publication' },
 
     // ── Phase 2J Wave 5 で実測により追加 ───────────────────────
     //
@@ -543,24 +551,34 @@
     { name: 'control-character', pattern: /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u2028\u2029]/ }
   ];
 
-  function assertPublicSafeEvidenceText(text, label) {
-    if (typeof text !== 'string' || !text) {
-      throw new Error((label || 'publicDescription') + ' must be a non-empty string');
+  // Human Gate §4: canonical な 2 分割。規則本体は上の 1 表だけが持ち、
+  // ここはその射影。Closure / UI 側へ規則を複写しない。
+  var HARD_REJECT_RULES = PUBLIC_UNSAFE_TEXT_PATTERNS.filter(function (e) { return !e.advisory; });
+  var ADVISORY_LINT_RULES = PUBLIC_UNSAFE_TEXT_PATTERNS.filter(function (e) { return !!e.advisory; });
+
+  // 分割が壊れたまま module が load されないようにする。
+  // advisory に message が無ければ警告が無言になる——それは QD-J17 そのもの。
+  (function () {
+    if (!HARD_REJECT_RULES.length || !ADVISORY_LINT_RULES.length) {
+      throw new Error('evidence.js: rule split is empty on one side');
     }
-    // 正規化形を一度だけ作る。元と同じなら検査する意味が無いので落とす。
-    // （以前は `hasFullwidthForm` が範囲を**2 重に持っていた**ので、
-    //  そちらの下端だけが未固定で変異が生き残った——独立検証9 F9-04。
-    //  同じ判定を 2 か所に置かない）
-    // 正規化形の**閉包**を作る。各 normalizer を個別に 1 回だけかけるのでは不十分で、
-    // 合成が必要な形がある（独立検証10 F10-06）:
-    //   `構造計算書。ｐｄｆ` は dot 写像だけでも全角畳みだけでも届かず、
-    //   両方をかけて初めて `構造計算書.pdf` になる。
-    // 閉包なので normalizer を追加しても合成を手で列挙し直す必要がない。
+    for (var a = 0; a < ADVISORY_LINT_RULES.length; a++) {
+      if (typeof ADVISORY_LINT_RULES[a].message !== 'string' || !ADVISORY_LINT_RULES[a].message) {
+        throw new Error('evidence.js: advisory rule without a message: ' + ADVISORY_LINT_RULES[a].name);
+      }
+    }
+  }());
+
+  // 正規化閉包。assert と lint の両方が同じものを使う——
+  // 同じ判定を 2 か所に置くと片方だけが古びる（F9-04 で実際に起きた）。
+  //
+  // 各 normalizer を個別に 1 回かけるのでは不十分で、合成が必要な形がある
+  // （F10-06: `構造計算書。ｐｄｆ` は dot 写像だけでも全角畳みだけでも届かない）。
+  function normalizationClosure(text) {
     var normalized = [];
     var frontier = [text];
-    // guard は「黙って打ち切る」形にしない。打ち切ったら閉包が不完全になり、
-    // どの形を見逃したか誰も気づかない（本Campaign が繰り返し罰してきた形）。
-    // 現在の normalizer はすべて冪等かつ可換なので深さは高々 3。
+    // guard は「黙って打ち切る」形にしない。打ち切れば閉包が不完全になり、
+    // どの形を見逃したか誰も気づかない。実測した最大深さは 5（28 形）。
     var guard = 0;
     while (frontier.length) {
       guard++;
@@ -579,30 +597,72 @@
       }
       frontier = next;
     }
-    for (var i = 0; i < PUBLIC_UNSAFE_TEXT_PATTERNS.length; i++) {
-      var entry = PUBLIC_UNSAFE_TEXT_PATTERNS[i];
-      // 全角畳みは**ここ 1 か所だけ**で行う。以前はファイル名規則の
-      // 中だけで畳んでいたため、他の 10 規則は全角の IME 出力を見逃していた
-      // （検証8 F8-05: `ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ` や全角の private provider URL が素通り）。
-      // raw ∨ folded なので単調——拒否を増やすだけで決して減らさない。
-      // detect 規則（html-like-tag）には適用しない: `＜img＞` は Chromium で
-      // 要素を生まないので、畳んで拒否すると過剰拒否になる（P2J-S27）。
-      var matched;
-      if (entry.detect) {
-        matched = entry.detect(text);
-      } else {
-        matched = entry.pattern.test(text);
-        for (var f = 0; !matched && f < normalized.length; f++) {
-          matched = entry.pattern.test(normalized[f]);
-        }
-      }
-      if (matched) {
+    return normalized;
+  }
+
+  function ruleMatches(entry, text, normalized) {
+    // detect 規則（html-like-tag）には正規化形を適用しない: `＜img＞` は
+    // Chromium で要素を生まないので、畳んで拒否すると過剰拒否（P2J-S27）。
+    if (entry.detect) { return entry.detect(text); }
+    if (entry.pattern.test(text)) { return true; }
+    for (var f = 0; f < normalized.length; f++) {
+      if (entry.pattern.test(normalized[f])) { return true; }
+    }
+    return false;
+  }
+
+  /**
+   * 構造的に判定可能な 9 規則だけを強制する。
+   *
+   * **この関数を通ったことは、文章に機密情報が含まれないことの証明にはならない。**
+   * 証明するのは「機械的に強制されている構造拒否規則のどれにも一致しなかった」ことだけ。
+   * 正式案件名、担当者名、言い換えた provider 参照、その他の意味的な開示は検出しない。
+   * **最終的な公開可否は Human Review が決める。**
+   *
+   * advisory 規則（www / known-private-provider / opaque-long-token）は
+   * ここでは throw しない。lintPublicEvidenceText() を使うこと。
+   */
+  function assertPublicSafeEvidenceText(text, label) {
+    if (typeof text !== 'string' || !text) {
+      throw new Error((label || 'publicDescription') + ' must be a non-empty string');
+    }
+    var normalized = normalizationClosure(text);
+    for (var i = 0; i < HARD_REJECT_RULES.length; i++) {
+      var entry = HARD_REJECT_RULES[i];
+      if (ruleMatches(entry, text, normalized)) {
         throw new Error(
           (label || 'publicDescription') + ' must not contain private URLs/paths/identifiers (matched known-unsafe pattern: ' + entry.name + ')'
         );
       }
     }
     return true;
+  }
+
+  /**
+   * advisory 規則を評価し、決定的な警告データを返す。throw しない。
+   *
+   *   { warnings: [ { rule, severity, message } ] }
+   *
+   * 安定した契約は **rule 名**。message は人間向けであり文面は変わりうる。
+   *
+   * **warnings が空であることは公開安全の証明では無い。**
+   * これらは開いた集合に対する heuristic であり、confusable や
+   * 言い換え（`drive dot google dot com` 等）は見逃す。
+   * 見逃した例を見つけても修理契機では無い（Human Gate §13）。
+   */
+  function lintPublicEvidenceText(text, label) {
+    if (typeof text !== 'string' || !text) {
+      throw new Error((label || 'publicDescription') + ' must be a non-empty string');
+    }
+    var normalized = normalizationClosure(text);
+    var warnings = [];
+    for (var i = 0; i < ADVISORY_LINT_RULES.length; i++) {
+      var entry = ADVISORY_LINT_RULES[i];
+      if (ruleMatches(entry, text, normalized)) {
+        warnings.push({ rule: entry.name, severity: 'advisory', message: entry.message });
+      }
+    }
+    return deepFreeze({ warnings: warnings });
   }
 
   // Evidence記述オブジェクトを組み立てるヘルパー。
@@ -1067,6 +1127,9 @@
     // deepFreeze はこの同じファイルが export している（F15-E2 も同根）。
     CHECKED_AT_PATTERN: deepFreeze(CHECKED_AT_PATTERN),
     PUBLIC_UNSAFE_TEXT_PATTERNS: deepFreeze(PUBLIC_UNSAFE_TEXT_PATTERNS),
+    HARD_REJECT_RULES: deepFreeze(HARD_REJECT_RULES),
+    ADVISORY_LINT_RULES: deepFreeze(ADVISORY_LINT_RULES),
+    lintPublicEvidenceText: lintPublicEvidenceText,
     PRIVATE_DOCUMENT_EXTENSION_SOURCE: PRIVATE_DOCUMENT_EXTENSION_SOURCE,
     // 範囲の端点をテストから直接押さえるために export する（P2J-S32）。
     foldFullwidthAscii: foldFullwidthAscii,

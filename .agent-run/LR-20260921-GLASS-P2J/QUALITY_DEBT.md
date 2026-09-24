@@ -760,3 +760,43 @@ F16-10           偽陽性率の行が bucket と全体を混同していた
 guard の規則ではなく検証方法の方であり、そこを変えない限り
 次の round も同じ形で緑を返す。
 
+---
+
+## 閉じたもの（§8 実装、D-051）
+
+```text
+QD-J14  CLOSED — Human Gate が APPROVE。hard 9 / advisory 3 へ分割済み
+QD-J15  CLOSED — Human Gate が受諾。§2 に SUPERSEDED、§11/§12' へ差し替え済み
+QD-J16  CLOSED — CASE_ID_PATTERN 最大 27 文字。opaque-long-token の throw に依存しない
+QD-J17  CLOSED — publication lint が読み手。M-23 がこれを固定している
+```
+
+QD-J19（コロン付き円表記の過剰 reject）は **未閉**。
+Human Gate §2 が「本 phase での受入れ済みコスト」として明示的に保留した。
+`C:\\500` / `Price:\u00a5500` の区別を再び開かないこと。
+
+QD-J20（検証方法が拘束条件）も **未閉**。
+Human Gate §22 が process 所見として受諾し、corpus の役割を
+「明示的な構造契約の regression detector」へ限定した。
+あらゆる非公開データ表現の oracle としては扱わない。
+
+## QD-J21 — 変異の「等価」判定は probe の解像度に依存する
+
+§8 実装の 1 回目の変異走査で 2 件が EQUIVALENT と出たが、
+どちらも**判定の方の欠陥**だった。
+
+```text
+M-12  deepFreeze を 1 export だけ Object.freeze へ落とす変異
+      → HARD_REJECT_RULES / ADVISORY_LINT_RULES が同じ規則 object を
+        deepFreeze し直すので、確かに等価。つまり**演算子が何も測っていなかった**。
+        deepFreeze 本体を潰す形へ変更した。
+M-22  advisory の message を 'x' へ縮める変異
+      → differential probe が rule 名しか記録していなかったので
+        「差分 0」に見えていた。probe に message を含め、
+        §17 に「人が動ける message であること」を要求させた。
+```
+
+教訓は QD-J20 の形そのもの:
+**計器が見ていない座標は「変化無し」と見分けがつかない**。
+EQUIVALENT を報告するときは、probe が何を観測しているかを必ず書くこと。
+

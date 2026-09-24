@@ -1830,3 +1830,85 @@ repo 散文 reject : 全体 3.8%（両 head 共通。F16-10 の訂正済み）
 protected facts : verifiedCases 0 / sample_default / 1250×2050 / V0 34 / roughness III
 ```
 
+## §53 — §8 Guard Policy 実装の実測（D-051）
+
+### 分割の結果
+
+```text
+hard   (9): url-scheme / windows-absolute-path / unc-path /
+            unix-home-or-absolute-path / email-like /
+            private-document-filename / html-like-tag /
+            markup-construct / control-character
+advisory(3): www / known-private-provider / opaque-long-token
+```
+
+### 降格が沈黙になっていないこと（QD-J17 の核心）
+
+corpus 643,284 入力を 358f468 と照合し、**throw しなくなった値を全部追跡**した。
+
+```text
+throw しなくなった値 : 126
+うち advisory 警告が出る : **126**
+黙って受理された値   : **0**
+```
+
+差分の内訳も意図通りで、**降格した 3 規則の外は 1 件も動いていない**。
+
+```text
+vs 358f468
+  REGRESSIONS : 126 {www 42 / known-private-provider 42 / opaque-long-token 42}
+  tightened   : 0
+  → hard 9 規則の振る舞いは完全に不変
+```
+
+### QD-J16（caseId）
+
+```text
+                                  長さ  結果
+A1BcDeFgHiJkLmNoPqRsTuVwXyZ012345  33  reject（max 27 chars）
+AKIAIOSFODNN7EXAMPLEKEY123456      29  reject（max 27 chars）
+'a' x 28                           28  reject（max 27 chars）
+'a' x 27                           27  受理
+sharepoint_case_01                 18  受理 + advisory 警告
+plan_jww                            8  reject（filename-like、hard のまま）
+```
+
+長さの保護は opaque-long-token の throw を**一切使っていない**。
+provider 風の名前は構造的には有効のままで、advisory に回す（§9）。
+
+### 変異（§21 の 5 分類）
+
+```text
+KILLED 27 / SURVIVED 0 / EQUIVALENT 0 / PATCH-MISS 0 / HARNESS ERROR 0  (of 27)
+演算子は tools/guard-diff/mutants.mjs に commit 済み。
+node tools/guard-diff/mutate.mjs で誰でも再導出できる。
+```
+
+1 回目の走査では 2 件が EQUIVALENT と出たが、どちらも**判定側の欠陥**だった。
+QD-J21 に記録。訂正後は生存 0。
+
+```text
+M-12  演算子が何も測っていなかった（他の 2 export が同じ object を deepFreeze し直す）
+      → deepFreeze 本体を潰す形へ
+M-22  probe が rule 名しか見ていなかったので message を潰す変異が「差分 0」に見えていた
+      → probe に message を含め、§17 に「人が動ける message」を要求させた
+```
+
+### 回帰（§21）
+
+```text
+npm test                : 657 pass / 0 fail
+browser                 : 62 pass / 0 fail / parser bypass 0
+publication lint        : 出荷 config 11 値、advisory 0 / hard 違反 0
+guard-diff              : corpus 643,284、差分は降格 3 規則のみ
+変異                    : 27/27 KILLED
+protected（§20）        : verifiedCases 0 / sample_default /
+                          1250×2050 unverified / V0 34 / roughness III /
+                          observations 0 / Promotion Candidate NONE /
+                          validateAllEvidence() []
+UI 側（§8）            : browser-w4 B20（input/button 0 個）、
+                          B21（Promote/適用 文字列無し）、
+                          B7 0/12 ・ B8 0/4 ・ B9 0/8 ・ B33 4、
+                          B-facts すべて pass。UI は一行も変えていない
+```
+

@@ -13,6 +13,9 @@
 // is then counted as KILLED. mutate.mjs treats any anchor count != 1 as a
 // first-class failure for exactly that reason.
 //
+// Each entry may carry `file` (repo-relative); it defaults to
+// project-config/evidence.js.
+//
 // Usage: node tools/guard-diff/mutate.mjs
 
 const BS = String.fromCharCode(92);
@@ -58,9 +61,12 @@ export const MUTANTS = [
   { id: 'M-11', describes: 'markup: back to DOCTYPE only',
     find: '<!--|<!' + BS + '[CDATA' + BS + '[|<![A-Za-z]|<' + BS + '?[A-Za-z=]|' + BS + ']' + BS + ']>',
     replace: '<!--|<!' + BS + '[CDATA' + BS + '[|<!DOCTYPE|<' + BS + '?[A-Za-z]' },
-  { id: 'M-12', describes: 'exported rule table: deepFreeze downgraded',
-    find: 'PUBLIC_UNSAFE_TEXT_PATTERNS: deepFreeze',
-    replace: 'PUBLIC_UNSAFE_TEXT_PATTERNS: Object.freeze' },
+  { id: 'M-12', describes: 'deepFreeze neutered (every frozen contract goes shallow)',
+    // Downgrading one export no longer tests anything: HARD_REJECT_RULES and
+    // ADVISORY_LINT_RULES are deep-frozen too and share the same rule objects,
+    // so they re-freeze them. Target the function itself.
+    find: '  function deepFreeze(value) {',
+    replace: '  function deepFreeze(value) { return value; } function deepFreezeUnused(value) {' },
   { id: 'M-13', describes: 'checkedAt contract left unfrozen',
     find: 'CHECKED_AT_PATTERN: deepFreeze(CHECKED_AT_PATTERN)',
     replace: 'CHECKED_AT_PATTERN: CHECKED_AT_PATTERN' },
@@ -78,5 +84,39 @@ export const MUTANTS = [
     replace: BS + 'p{Cf}' },
   { id: 'M-18', describes: 'control characters: U+2028/2029 dropped',
     find: U('007F') + '-' + U('009F') + U('2028') + U('2029') + ']',
-    replace: U('007F') + '-' + U('009F') + ']' }
+    replace: U('007F') + '-' + U('009F') + ']' },
+
+  // ---- Human Gate §8 surface ------------------------------------------
+  { id: 'M-19', describes: 'advisory demotion reverted: www throws again',
+    find: "{ name: 'www', advisory: true,",
+    replace: "{ name: 'www', advisory: false," },
+  { id: 'M-20', describes: 'advisory demotion reverted: provider rule throws again',
+    find: "{ name: 'known-private-provider', advisory: true,",
+    replace: "{ name: 'known-private-provider', advisory: false," },
+  { id: 'M-21', describes: 'lint returns no warnings at all',
+    find: '        warnings.push({ rule: entry.name,',
+    replace: '        if (false) warnings.push({ rule: entry.name,' },
+  { id: 'M-22', describes: 'advisory message emptied (warning becomes mute)',
+    find: "      message: 'text contains a www-style hostname; human review required before publication' },",
+    replace: "      message: 'x' }," },
+  { id: 'M-23', describes: 'QD-J17: consumer computes warnings then drops them',
+    file: 'tools/evidence-publication-lint.mjs',
+    find: '  const withWarnings = results.filter((r) => r.warnings.length > 0);',
+    replace: '  const withWarnings = [];' },
+  { id: 'M-24', describes: 'QD-J17: the safety disclaimer is dropped from the report',
+    file: 'tools/evidence-publication-lint.mjs',
+    find: "  lines.push('An empty advisory list is NOT proof that the prose is safe to publish.');",
+    replace: "  lines.push('');" },
+  { id: 'M-25', describes: 'QD-J16: caseId length bound widened back past the token threshold',
+    file: 'project-config/miyoshi.js',
+    find: 'var CASE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,26}$/;',
+    replace: 'var CASE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;' },
+  { id: 'M-26', describes: 'QD-J16: filename-like caseId rejection removed',
+    file: 'project-config/miyoshi.js',
+    find: '    if (FILENAME_LIKE_CASE_ID_PATTERN.test(caseObj.caseId)) {',
+    replace: '    if (false && FILENAME_LIKE_CASE_ID_PATTERN.test(caseObj.caseId)) {' },
+  { id: 'M-27', describes: 'publication lint stops collecting caseId (§10)',
+    file: 'tools/evidence-publication-lint.mjs',
+    find: "  'caseId'                      // published identifier",
+    replace: "  'caseId_disabled'             // published identifier" }
 ];

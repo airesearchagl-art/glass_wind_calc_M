@@ -464,7 +464,18 @@
   // D-012が factKey に allowlist を課したのと同じ理由（key自体が公開情報になる）が
   // ここにも等しく当てはまる。図面番号やファイル名をそのままcaseIdに持ち込む経路を
   // 構造的に塞ぐため、公開して差し支えない短い記号IDだけを許す（fail closed）。
-  var CASE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
+  // 長さの上限は **opaque-long-token が throw することに依存しない**。
+  // Human Gate §9 / QD-J16: 以前は最大 48 文字を許しており、28 文字以上の
+  // 不透明 ID は guard 側の opaque-long-token だけが止めていた。
+  // その規則が advisory へ降格されるので、暗黙の依存を残さない。
+  // 27 文字は opaque-long-token のしきい値（28）を下回るので、
+  // この規則だけで閉じている（閉じた構造契約）。
+  //
+  // provider 名のような**意味的**な類似はここでは扱わない。
+  // CASE_ID_PATTERN に provider 名を編み込むのは開いた集合を
+  // 閉じた規則で追うことになる——それは advisory lint + Human Review の仕事。
+  var CASE_ID_MAX_LENGTH = 27;
+  var CASE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,26}$/;
   // 拡張子集合は evidence.js が唯一の定義を持つ（独立検証6 F3）。
   // 以前はここに同じ一覧を**手で写して**おり、evidence.js 側だけを
   // 日本の実務形式へ拡張した結果 2 つがさし、caseId だけ `plan_jww` が
@@ -507,7 +518,8 @@
     if (!CASE_ID_PATTERN.test(caseObj.caseId)) {
       throw new Error(
         'verified case caseId must be a public-safe short identifier ' +
-          '(letter, then letters/digits/_/-, max 48 chars): ' + JSON.stringify(caseObj.caseId)
+          '(letter, then letters/digits/_/-, max ' + CASE_ID_MAX_LENGTH + ' chars): ' +
+          JSON.stringify(caseObj.caseId)
       );
     }
     if (FILENAME_LIKE_CASE_ID_PATTERN.test(caseObj.caseId)) {
@@ -516,7 +528,10 @@
           JSON.stringify(caseObj.caseId)
       );
     }
-    // URL・パス・長い不透明トークンも共通ガードで塞ぐ（defense in depth）
+    // URL ・ path は共通 guard の**構造規則**で塞ぐ。
+    // 長い不透明トークンはここではもう止まらない（advisory へ降格された）。
+    // 長さは上の CASE_ID_PATTERN が閉じているので、ここは defense in depth ではなく
+    // URL / path / 制御文字のための構造検査。
     assertPublicSafeEvidenceText(caseObj.caseId, 'verified case caseId');
     if (VERIFIED_CASE_VALID_FLOORS.indexOf(caseObj.floor) === -1) {
       throw new Error('verified case floor must be one of ' + VERIFIED_CASE_VALID_FLOORS.join(', '));

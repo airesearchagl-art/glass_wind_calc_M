@@ -1137,3 +1137,52 @@ promotion NONE / verifiedCases [] / 1250×2050 sample_default / V0 34 / roughnes
 Ready / merge / Production : すべて未許可
 ```
 
+## Wave 7-pre — §8 Guard Policy 実装完了（D-051）
+
+```text
+Human Gate      : APPROVED（§8 実装のみ）
+承認時 head     : 358f4684e3229386272f936de17f71cc94b98743
+npm test        : 657 pass / 0 fail
+browser         : 62 pass / 0 fail / parser bypass 0
+変異            : KILLED 27 / SURVIVED 0 / EQUIVALENT 0 /
+                  PATCH-MISS 0 / HARNESS ERROR 0
+guard-diff      : 差分 126、すべて降格 3 規則。hard 9 は不変
+沈黙検査        : throw をやめた 126 値のうち 126 が警告される（沈黙 0）
+publication lint: npm run lint:evidence-publication
+Implementation verification head : **未確定**（§23 の focused review 後に凍結）
+```
+
+### 実装したもの
+
+```text
+§4   PUBLIC_UNSAFE_TEXT_PATTERNS に advisory フラグ。
+     HARD_REJECT_RULES / ADVISORY_LINT_RULES はその射影（規則の複写無し）
+§5   assertPublicSafeEvidenceText は hard 9 のみ throw。doc に限界を明記
+§6   lintPublicEvidenceText() 新設。{rule, severity, message}
+§7   tools/evidence-publication-lint.mjs + npm run lint:evidence-publication
+§9   CASE_ID_PATTERN 最大 27 文字（opaque-long-token の 28 を下回る）
+§10  lint の inventory は publicDescription /
+     publicEvidenceDescription / caseId
+§11  Human Gate 文書の §2 を SUPERSEDED とし、§11/§12' を追記
+§16-19 test を移行・新設（空の「throw しなかった」test にしていない）
+§21  変異 harness を 5 分類へ。非ゼロ終了の略記をやめた
+```
+
+### やっていないこと
+
+```text
+§8  Production UI に入力・警告 override・承認ボタン・
+    Verify/Promote・Candidate apply を一切追加していない。
+    Evidence Request Matrix は read-only のまま。
+§14/§15 promotion 境界は未変更。advisory は candidateStatus を動かさない
+§26 Ready / merge / Production は行っていない
+```
+
+### 次
+
+```text
+§23  Guard Policy Focused Independent Re-review（scope A–G）
+§25  その close 後に head を凍結 → Wave 7
+§26  Draft PR で STOP
+```
+

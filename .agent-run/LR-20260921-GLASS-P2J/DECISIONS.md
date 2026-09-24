@@ -2154,3 +2154,75 @@ Human Gate が 3 規則について認定した open-set 問題が
 12.7% は QD-J18 の「再計算できない数字」の一つであり、
 それを唯一の根拠に 3 round 分の穴を開けていた。
 
+## D-051 — §8 実装: guard を hard 9 / advisory 3 へ分ける
+
+```text
+状態 : Human Gate 承認済み（APPROVED）。実装のみ。
+        Ready / merge / Production / Evidence promotion / verifiedCases 変更 は含まない。
+承認時の head : 358f4684e3229386272f936de17f71cc94b98743
+```
+
+### 分割の置き場所
+
+規則本体は `PUBLIC_UNSAFE_TEXT_PATTERNS` の **1 表だけ**が持ち、
+分類は各規則の `advisory: true` が持つ。
+`HARD_REJECT_RULES` / `ADVISORY_LINT_RULES` はその射影。
+
+```text
+採らなかった形: advisory 規則名の別一覧を作る
+理由    : 本Campaign は「二重に持った集合の片方だけが古びる」を
+            F3（拡張子）と F9-04（範囲）で 2 度罰されている。
+```
+
+### 契約の変更
+
+```text
+assertPublicSafeEvidenceText(text, label)
+  → hard 9 規則のみ throw。advisory は throw しない。
+  → doc に明記: これを通っても機密情報が無い証明にはならない。
+            最終的な公開可否は Human Review が決める。
+
+lintPublicEvidenceText(text, label)   新設
+  → { warnings: [ { rule, severity, message } ] }。throw しない。
+  → 安定契約は rule 名。message は人間向け。
+```
+
+### 正規化閉包を 1 か所へ
+
+assert と lint が同じ `normalizationClosure()` / `ruleMatches()` を使う。
+2 か所に置くと片方だけが古びる（F9-04 で実際に起きた）。
+
+### QD-J16 を同じ変更で閉じる
+
+```text
+CASE_ID_PATTERN : {0,47} → {0,26}（最大 27 文字）
+理由           : opaque-long-token のしきい値 28 を下回る。
+                 長さの保護が advisory 規則の throw に依存しない。
+採らなかった形 : CASE_ID_PATTERN へ provider 名を編み込む
+                 → 開いた集合を閉じた規則で追うことになる。
+                   意味的な類似は advisory lint + Human Review の仕事。
+```
+
+### QD-J17 を同じ変更で閉じる
+
+`tools/evidence-publication-lint.mjs` + `npm run lint:evidence-publication`。
+`blockerKinds` が計算されて描画されないままになっているのと同じ道を
+advisory 警告に辿らせない——**3 つの throw を 3 つの沈黙にしない**。
+
+```text
+gate ではない: advisory があるだけでは失敗しない。
+失敗するのは hard 規則違反が公開面の text にある場合だけ。
+```
+
+### 変えていないもの
+
+```text
+Evidence level / checkedAt / privateReferenceAvailable /
+sourceReference validation / assertPromotionGate /
+Evidence-first reconciliation / MATCH / MISMATCH /
+closure readiness / candidate readiness / verifiedCases / 現行 config
+→ いずれも未変更。公開審査と Evidence 検証は別の関心事。
+UI : Production UI に入力・承認ボタン・昇格操作を一切追加していない（§8）。
+     Human Review の場は開発・公開 workflow 側の CLI。
+```
+

@@ -636,11 +636,21 @@ test('§15-I: MISMATCHでもpresetは変更されない（副作用なし）', (
 });
 
 test('§15-N: publicDescriptionはURL/パス/private providerを受け付けない', () => {
-  for (const bad of ['参照 https://example.gov/a.pdf', 'drive.google.com/file/d/x',
-                     '/home/user/secret.pdf', 'C:\\docs\\a.pdf', 'www.example.com',
-                     'see https://drive.google.com/x']) {
+  // 構造規則（hard）は引き続き throw する。
+  for (const bad of ['参照 https://example.gov/a.pdf', '/home/user/secret.pdf',
+                     'C:\\docs\\a.pdf', 'see https://drive.google.com/x']) {
     assert.throws(() => Evidence.makeEvidence('primary', '2026-09-20', bad, true),
       /must not contain private URLs\/paths\/identifiers/, JSON.stringify(bad));
+  }
+  // advisory へ降格された規則は throw しないが、警告は**必ず出る**。
+  // 「throw しなかった」だけの空の test にしない（Human Gate §17）。
+  for (const [text, rule] of [['drive.google.com/file/d/x', 'known-private-provider'],
+                              ['www.example.com', 'www']]) {
+    const ev = Evidence.makeEvidence('primary', '2026-09-20', text, true);
+    assert.equal(ev.publicDescription, text, 'advisory 規則で throw している');
+    const warnings = Evidence.lintPublicEvidenceText(text, 'publicDescription').warnings;
+    assert.equal(warnings.some((w) => w.rule === rule), true,
+      'advisory 警告が出ていない: ' + text);
   }
 });
 

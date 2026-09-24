@@ -25,6 +25,28 @@ const path = require('node:path');
 
 const Evidence = require('../project-config/evidence.js');
 const Closure = require('../project-config/evidence-closure.js');
+
+/**
+ * 規則が**発火したこと**を押さえる。どの channel で発火するかは問わない。
+ *
+ * Human Gate §3 で www / known-private-provider / opaque-long-token が
+ * advisory へ降格された。normalizer 集合は assert と lint で**共有**なので、
+ * 「この normalizer が無いと規則に届かない」という検査は
+ * advisory 経由でも同じだけ有効。降格を理由に正規化の被覆を落とさないための helper。
+ */
+function assertRuleFired(text, rulePattern, message) {
+  let hardMessage = null;
+  try { Evidence.assertPublicSafeEvidenceText(text, 'prose'); }
+  catch (e) { hardMessage = e.message; }
+  if (hardMessage && rulePattern.test(hardMessage)) return 'hard';
+  const warnings = Evidence.lintPublicEvidenceText(text, 'prose').warnings;
+  const hit = warnings.some((w) => rulePattern.test(w.rule));
+  assert.equal(hit, true,
+    (message || '') + ' 規則がどちらの channel でも発火しなかった: ' +
+    JSON.stringify(text) + ' hard=' + JSON.stringify(hardMessage) +
+    ' warnings=' + JSON.stringify(warnings.map((w) => w.rule)));
+  return 'advisory';
+}
 const ProjectInput = require('../project-config/project-input.js');
 const WorkspaceCore = require('../workspace.js');
 const ProjectProfile = require('../project-profile.js');
@@ -839,7 +861,7 @@ test('P2J-S38: 規則は**左に何があっても**発火する', () => {
   const PAYLOADS = [
     ['https://internal.example.jp/docs/plan', /url-scheme/],
     ['http://internal.example.jp/p', /url-scheme/],
-    ['www.internal.example.jp/docs', /www/],
+    ['www.internal.example.jp/docs', /www/],   // advisory へ降格済み（Human Gate §3）
     ['/home/user/案件/最新版', /unix-home-or-absolute-path/],
     ['/Users/tanaka/Documents/案件', /unix-home-or-absolute-path/],
     ['/mnt/share/案件', /unix-home-or-absolute-path/],
@@ -854,6 +876,11 @@ test('P2J-S38: 規則は**左に何があっても**発火する', () => {
     PAYLOADS.forEach(([core, rule]) => {
       checked++;
       const text = pre + core;
+      // advisory へ降格された規則は throw しない。発火していればよい。
+      if (Evidence.ADVISORY_LINT_RULES.some((r) => rule.test(r.name))) {
+        try { assertRuleFired(text, rule, 'S38'); } catch (e) { leaked.push(text + ' (advisory miss)'); }
+        return;
+      }
       try { Evidence.assertPublicSafeEvidenceText(text, 'prose'); leaked.push(text); }
       catch (e) {
         // `x/` + `/home/...` = `x//home/...` は構造的に UNC でもある。
@@ -916,8 +943,7 @@ test('P2J-S39: normalizer 集合は**種類**を網羅する（置換・削除�
   BEYOND_THE_OLD_LIST.forEach((ch) => {
     assert.equal(Evidence.stripFormatChars('a' + ch + 'b'), 'ab',
       '導出クラスから漏れている: ' + JSON.stringify(ch));
-    assert.throws(() => Evidence.assertPublicSafeEvidenceText('www' + ch + '.example.com', 'prose'),
-      /www/, 'www' + JSON.stringify(ch));
+    assertRuleFired('www' + ch + '.example.com', /www/, 'S39 ' + JSON.stringify(ch));
   });
 
   // 列挙版でも通っていた形（旧 24）も引き続き回す。
@@ -928,15 +954,14 @@ test('P2J-S39: normalizer 集合は**種類**を網羅する（置換・削除�
     assert.equal(Evidence.stripFormatChars('a' + ch + 'b'), 'ab',
       'U+' + ch.charCodeAt(0).toString(16).toUpperCase() + ' が削除されていない');
     // 行動でも固定する（写像だけでは規則へ繋がっている保証が無い）。
-    assert.throws(() => Evidence.assertPublicSafeEvidenceText('www' + ch + '.example.com', 'prose'),
-      /www/, 'www' + JSON.stringify(ch));
+    assertRuleFired('www' + ch + '.example.com', /www/, 'S39 ' + JSON.stringify(ch));
     assert.throws(() => Evidence.assertPublicSafeEvidenceText('tanaka' + ch + '@example.co.jp', 'prose'),
       /email-like/, 'email' + JSON.stringify(ch));
   });
 
   // 正規化: astral lookalike。手書きの畳みでは追えない範囲。
   assert.equal(Evidence.foldCompatibility('\u{1D5D0}\u{1D5D0}\u{1D5D0}.example.com'), 'www.example.com');
-  assert.throws(() => Evidence.assertPublicSafeEvidenceText('\u{1D5D0}\u{1D5D0}\u{1D5D0}.example.com', 'prose'), /www/);
+  assertRuleFired('\u{1D5D0}\u{1D5D0}\u{1D5D0}.example.com', /www/, 'S39 astral lookalike');
   // ただし別の字は別の字のまま（過剰拒否しない）。
   assert.equal(Evidence.assertPublicSafeEvidenceText('\u{1D5C0}\u{1D5C0}\u{1D5C0}.example.com', 'prose'), true);
 
@@ -972,10 +997,10 @@ test('P2J-S41: 検証13 が見つけた未固定の座標を押さえる', () =>
 
   // (1) 多重度。S39 は不可視文字を**1 文字だけ**挿入していたので、
   //     `FORMAT_CHARS` から /g を外す変異が生き残っていた。
-  ['構造計算書.p\u200bd\u200bf', 'w\u200bw\u200bw.example.com',
-   'tanaka\u200b@ex\u200bample.co.jp'].forEach((text) => {
-    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
-      /must not contain private URLs/, '複数挿入: ' + JSON.stringify(text));
+  [['構造計算書.p\u200bd\u200bf', /private-document-filename/],
+   ['w\u200bw\u200bw.example.com', /www/],            // advisory へ降格済み
+   ['tanaka\u200b@ex\u200bample.co.jp', /email-like/]].forEach(([text, rule]) => {
+    assertRuleFired(text, rule, '複数挿入');
   });
 
   // (2) scheme は http/https だけではない。
@@ -988,8 +1013,7 @@ test('P2J-S41: 検証13 が見つけた未固定の座標を押さえる', () =>
   // (3) private provider は一つずつ意味がある。
   ['docs.google.com/document/d/1AbC の資料', 'drive.google.com/file/d/1AbC',
    'notion.so/案件メモ', 'dropbox.com/s/abc'].forEach((text) => {
-    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
-      /known-private-provider|url-scheme|www/, text);
+    assertRuleFired(text, /known-private-provider|url-scheme|www/, 'S41 provider');
   });
 
   // (4) Windows のドライブ文字は小文字でも書かれる。
@@ -1000,8 +1024,11 @@ test('P2J-S41: 検証13 が見つけた未固定の座標を押さえる', () =>
 
   // (5)(6) opaque token のしきい値と文字クラス。
   //       Drive の file ID は `-` と `_` を含む。
-  assert.throws(() => Evidence.assertPublicSafeEvidenceText('a'.repeat(28), 'prose'),
-    /opaque-long-token/, 'ちょうど 28 文字');
+  // advisory へ降格済み。しきい値自体は変わっていないので、警告側で押さえる。
+  assert.equal(Evidence.lintPublicEvidenceText('a'.repeat(28), 'prose')
+    .warnings.some((w) => w.rule === 'opaque-long-token'), true, 'ちょうど 28 文字');
+  assert.equal(Evidence.lintPublicEvidenceText('a'.repeat(27), 'prose')
+    .warnings.length, 0, '27 文字はしきい値未満');
 
   // (7) 日本語 Windows の path 区切りは `\u00a5`。この形は全部素通りしていた。
   ['C:\u00a5Users\u00a5tanaka\u00a5案件', '原本は C:\u00a5案件\u00a5検討 に置いてある',
@@ -1045,7 +1072,7 @@ test('P2J-S41: 検証13 が見つけた未固定の座標を押さえる', () =>
     assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), /url-scheme/, text);
   });
   ['WWW.EXAMPLE.COM', 'Www.Example.Com'].forEach((text) => {
-    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), /www/, text);
+    assertRuleFired(text, /www/, 'S41 (7d)');
   });
 
   // (8) U+2028 / U+2029 は非印字で、Promotion Candidate JSON まで到達する。
@@ -1054,9 +1081,12 @@ test('P2J-S41: 検証13 が見つけた未固定の座標を押さえる', () =>
       /control-character/, JSON.stringify(text));
   });
   assert.equal(Evidence.assertPublicSafeEvidenceText('a'.repeat(27), 'prose'), true, '27 文字は通る');
+  // 合成の不透明 ID。advisory へ降格されたので throw せず警告を出す。
   ['1BxiMVs0XRA5nFMd-KvBdBZjgmUUqptlbs', 'AKfycbx-9_kQz3LmNoPqRsTuVwXyZaBcDe'].forEach((text) => {
-    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
-      /opaque-long-token/, text);
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true,
+      'advisory 規則で throw している: ' + text);
+    assert.equal(Evidence.lintPublicEvidenceText(text, 'prose')
+      .warnings.some((w) => w.rule === 'opaque-long-token'), true, text);
   });
 });
 
@@ -1070,7 +1100,7 @@ test('P2J-S34: normalizer は**名前で**固定する（個数ではなく）',
   const WITNESSES = [
     // 狭い畳みだけ: U+FF3F は広い畳みだと `_`（単語文字）になり、
     // `www` 規則の `\\b` が消える。狭い畳みは `＿` を触らないので境界が残る。
-    ['foldFullwidthFilenameChars', '資料＿ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ', /www/],
+    ['foldFullwidthFilenameChars', '資料＿ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ', /www/],   // advisory channel
     // 広い畳みだけ: 英数字以外の全角記号（＠ ： ＼）
     ['foldFullwidthAscii', 'ａｂｃ＠ｅｘａｍｐｌｅ．ｃｏｍ', /email-like/],
     ['foldFullwidthAscii', 'Ｃ：＼Ｕｓｅｒｓ＼ｘ', /windows-absolute-path/],
@@ -1079,8 +1109,9 @@ test('P2J-S34: normalizer は**名前で**固定する（個数ではなく）',
   ];
   WITNESSES.forEach(([owner, text, rule]) => {
     assert.equal(typeof Evidence[owner], 'function', owner + ' が export されていない');
-    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), rule,
-      owner + ' だけが捕まえられる形が通った: ' + text);
+    // normalizer 集合は hard / advisory の両方が共有するので、
+    // どちらの channel で発火しても normalizer が生きている証拠になる。
+    assertRuleFired(text, rule, owner + ' だけが捕まえられる形');
   });
 
   // 合成が必要な形（閉包を取っていること）
@@ -1310,11 +1341,15 @@ test('P2J-S32: 全角畳みは U+FF01..U+FF5E の**全数**を写像する', () 
   assert.equal(fold('\uff00'), '\uff00');
   assert.equal(fold('\uff5f'), '\uff5f');
 
-  // 畳みが実際に全規則へ効いていること（端点を含む証人）
-  ['～/Users/x', '～／Ｕｓｅｒｓ／ｘ', '＜！－－x－－＞',
-   'ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ', 'ａｂｃ＠ｅｘａｍｐｌｅ．ｃｏｍ'].forEach((text) => {
-    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
-      /must not contain private URLs/, text);
+  // 畳みが実際に全規則へ効いていること（端点を含む証人）。
+  // hard / advisory の両方を含める——畳みは両方が共有するので、
+  // 降格を理由に端点の被覆を落とさない。
+  [['～/Users/x', /unix-home-or-absolute-path/],
+   ['～／Ｕｓｅｒｓ／ｘ', /unix-home-or-absolute-path/],
+   ['＜！－－x－－＞', /markup-construct|html-like-tag/],
+   ['ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ', /www/],
+   ['ａｂｃ＠ｅｘａｍｐｌｅ．ｃｏｍ', /email-like/]].forEach(([text, rule]) => {
+    assertRuleFired(text, rule, 'S32 端点証人');
   });
 });
 
@@ -1644,7 +1679,12 @@ test('P2J-S48: 公開した契約は呼び出し側から緩められない（F1
   // 攻撃を試みたあとも挙動が変わらないこと（凍結が実効であることの証明）
   try { table.find((e) => e.name === 'www').pattern = /$^/; } catch (e) { /* sloppy は黙殺 */ }
   try { table.find((e) => e.name === 'html-like-tag').detect = () => false; } catch (e) { /* 同上 */ }
-  assert.throws(() => Evidence.assertPublicSafeEvidenceText('www.example.com', 'prose'), /www/);
+  // advisory 規則は throw しないが、攻撃後も**警告を出し続ける**ことを見る。
+  assert.equal(
+    Evidence.lintPublicEvidenceText('www.example.com', 'prose').warnings.some((w) => w.rule === 'www'),
+    true, 'freeze を攻撃したあと advisory が死んだ');
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('C:\\\\Users\\\\x', 'prose'),
+    /windows-absolute-path/, 'hard 規則が攻撃後に死んだ');
   assert.throws(() => Evidence.assertPublicSafeEvidenceText('<img src=x onerror=alert(1)>', 'prose'),
     /html-like-tag/);
 

@@ -449,21 +449,30 @@ test('P2J-C22: private Evidence は URL/path/名称を保持しない', () => {
 // ============================================================
 
 test('P2J-C23: publicDescription の privacy 攻撃は既存 guard で落ちる', () => {
+  // 構造規則（hard）——引き続き throw する。
   const attacks = [
     'https://drive.google.com/file/d/xyz/view の記載',
-    'notion.so のページを参照',
     'C:\\\\share\\\\案件\\\\計算書',
     '\\\\\\\\fileserver\\\\projects\\\\calc',
     '/Users/someone/Documents/calc',
-    '/home/someone/calc',
-    'www.example.jp を参照',
-    'ref abcdefghijklmnopqrstuvwxyz0123456789'
+    '/home/someone/calc'
   ];
   attacks.forEach((text) => {
     assert.throws(
       () => norm(synObservation({ evidence: synEvidence({ publicDescription: text }) })),
       /must not contain private URLs\/paths\/identifiers/,
       'must reject: ' + text);
+  });
+  // advisory へ降格された規則（Human Gate §3）——throw せず警告を出す。
+  // 警告が実際に出ていることまで見る（§17: 空の test にしない）。
+  [['notion.so のページを参照', 'known-private-provider'],
+   ['www.example.jp を参照', 'www'],
+   ['ref abcdefghijklmnopqrstuvwxyz0123456789', 'opaque-long-token']].forEach(([text, rule]) => {
+    const o = norm(synObservation({ evidence: synEvidence({ publicDescription: text }) }));
+    assert.equal(o.evidence.publicDescription, text, 'advisory 規則で throw している: ' + text);
+    const warnings = Evidence.lintPublicEvidenceText(text, 'publicDescription').warnings;
+    assert.equal(warnings.some((w) => w.rule === rule), true,
+      'advisory 警告が出ていない: ' + text);
   });
   // positive control: 安全な記述は通る（上の判定が常時throwではないこと）
   assert.equal(

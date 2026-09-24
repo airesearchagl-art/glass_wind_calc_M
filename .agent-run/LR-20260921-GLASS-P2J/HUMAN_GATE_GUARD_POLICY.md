@@ -45,11 +45,15 @@ completeness property.
 
 ---
 
-## 2. Measured cost of the current design
+## 2. Measured cost of the current design — **SUPERSEDED, §11 を見よ**
 
 ```text
 ~11.3% of this repository's own prose corpus is rejected by the current guard
 ```
+
+> **訂正済み（承認時に Human Gate が受諾、QD-J15）**。
+> この 11.3% は**再現しない**。下の §11 が正しい記述。
+> 本文は履歴として残すが、決定の前提としては無効。
 
 This indicates meaningful false-positive pressure. At the same time the three
 heuristic rules remain bypassable by transformations outside their enumerated
@@ -231,7 +235,7 @@ required even when advisory lint is empty.
 
 ---
 
-## 12. False-positive regression
+## 12. False-positive regression — **SUPERSEDED, §12' を見よ**
 
 Re-run the same repository-prose corpus measurement used to obtain 11.3% and
 report: before hard-rejection rate, after hard-rejection rate, advisory warning
@@ -337,5 +341,54 @@ open-set の論拠（§1）は数字とは独立に成立している。
 QD-J16  CASE_ID_PATTERN が広すぎる。3 規則を降格するなら同じ変更で締める
 QD-J17  blockerKinds に読み手が無い。§9 warnings は描画面を同時に出さないと
         3 つの throw を 3 つの沈黙に変えるだけになる
+```
+
+---
+
+# 承認後の訂正（Human Gate §11 / §12）
+
+## §11. 偽陽性の根拠を差し替える
+
+§2 の **11.3%** は決定の前提としては**無効**。QD-J15 を受諾する。
+履歴は消さず、§2 に SUPERSEDED を付した。
+
+正しい記述:
+
+```text
+- repository 散文の走査を再現すると約 3.8%（実装セッションと独立検証が別々に同値）
+- repository 散文は validator が支配する母集団ではない
+- commit 済みの publicDescription は定義上生存者バイアスを持つ
+  （guard は構築時に強制されるので、通った text しか repository に存在しえない）
+- よって執筆・公開散文の実際の偽陽性率は現在 **UNKNOWN**
+```
+
+政策変更はこの数字に依存しない。主な根拠は:
+
+```text
+3 規則は開いた集合に対する heuristic であり、
+意味的な公開安全性を立証できない。
+```
+
+## §12'. 旧測定計画を廃す
+
+repository 散文の走査を繰り返して「偽陽性率」と呼ばない。
+影響を測るなら、以下を**別々に**報告する。
+
+```text
+- 独立に定義した散文 corpus に対する hard 規則の reject
+- 同じ corpus に対する advisory 警告率
+- 現行 publicDescription との互換性
+- 具体的な既知の過剰 reject 例
+```
+
+目標パーセンテージへの最適化はしない。見出しの % は本 phase では不要。
+
+### 本 phase での実測値（目標ではなく観測）
+
+```text
+現行 publicDescription 互換性 : 出荷済み 11 件すべて hard 適合 / advisory 警告 0
+既知の過剰 reject          : QD-J19（コロン付きラベルの円表記）
+                            `ab:/x/y` 形（D-049）
+                            `x//home/...` の規則帰属（F16-05 副作用）
 ```
 
