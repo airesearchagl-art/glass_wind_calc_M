@@ -1912,3 +1912,63 @@ UI 側（§8）            : browser-w4 B20（input/button 0 個）、
                           B-facts すべて pass。UI は一行も変えていない
 ```
 
+## §54 — Guard Policy Focused Independent Re-review の結果と FP-01 修理
+
+### 結果: **CLEAN**（scope A–G、対象 head 7886ae4）
+
+```text
+A hard 9 規則の構造契約  : 維持。独立に 1,266,703 入力で差分 0、
+                          規則別に見た 11,400,327 比較でも差分 0
+B advisory の警告の可視性: 確認。126/126 が警告され沈黙 0。
+                          検証者自身の 1,266,703 入力でも 61,669/61,669
+C caseId の依存        : 解消。base では 28–48 文字を opaque-long-token が止めていた。
+                          HEAD では pattern 自体が止める。境界は同一
+D lint の読み手        : 実在する。計算された警告はすべて描画される。
+                          blockerKinds の形を再現していない
+E promotion 境界        : 不変。32,229 呼び出しで差分 0。
+                          evaluateClosure の出力は byte 一致。10,966 bytes
+F 案件の状態          : BLOCKED のまま。slots 0/12 / categories 0/4 /
+                          case scopes 0/8 / candidate null / verifiedCases []
+G Ready / merge / Prod  : 行われていない。PR は存在しない
+```
+
+検証者は `diff-heads` より**強い計器**を使った:
+`diff-heads` は最初に一致した規則名しか記録しないので、
+**後ろの規則が陰に隠れる場合に盲目**になる。
+検証者は 9 規則を個別に評価して照合した。この指摘は受け入れる。
+
+### FP-01（low）—— 修理済み
+
+```text
+lint の default roots を miyoshi.js だけ手書きしており、
+manual.js の identity.evidence.publicDescription を見逃していた。
+つまり publicDescription を見ると謳っている lint が、その 1 つを見ていなかった。
+
+inspected : 11 → **12**
+修理     : default roots を project-config/*.js から**導出**する
+```
+
+例を 1 つ足す（manual.js を手で加える）のでは同じ間違いを次の module で繰り返す。
+本Campaign が F3 / F13-03 / F15-E3 / F16-03 で繰り返し罰された形であり、
+今回は**検出側ではなく検査対象の列挙**で同じことをやっていた。
+
+test も列挙を検査しない——project-config を**独立に歩いて**
+経路の集合を照合する（数ではなく集合）。M-28 がこれを固定。
+
+### FP-02（informational）
+
+QD-J22 へ記録。欠陥ではなく承認された政策の帰結。
+Human Review 手順への追記事項として残す。
+
+### 修理後の回帰
+
+```text
+npm test        : 658 pass / 0 fail
+browser         : 62 pass / 0 fail / parser bypass 0
+変異            : KILLED 28 / SURVIVED 0 / EQUIVALENT 0 /
+                  PATCH-MISS 0 / HARNESS ERROR 0
+publication lint: 12 値、advisory 0 / hard 違反 0
+protected       : verifiedCases 0 / sample_default / 1250×2050 /
+                  V0 34 / roughness III
+```
+

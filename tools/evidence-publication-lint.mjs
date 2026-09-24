@@ -22,6 +22,7 @@
 // and spelled-out forms pass them. Human Review remains required either way.
 
 import { createRequire } from 'node:module';
+import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -42,10 +43,30 @@ export const PUBLICATION_FACING_FIELDS = [
   'caseId'                      // published identifier (UI, export package, PR body)
 ];
 
+/**
+ * Default roots are DERIVED, not listed.
+ *
+ * The first version named `project-config/miyoshi.js` by hand and therefore
+ * missed the manual input-mode config's shipped publicDescription entirely
+ * (FP-01) -- the lint claimed to inspect publicDescription and did not inspect
+ * one of them. A hand-written list of what to inspect goes stale the same way
+ * a hand-written list of what to detect does; this campaign has been caught by
+ * that shape repeatedly (F3, F13-03, F15-E3, F16-03). Every config module is
+ * scanned, and a new one is covered the day it is added.
+ */
+export function defaultRoots() {
+  const dir = ROOT + 'project-config';
+  const sources = {};
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.js')).sort()) {
+    // A module that fails to load is a tooling problem, not a clean inventory:
+    // surface it rather than silently inspecting fewer values.
+    sources[file.replace(/\.js$/, '')] = require(dir + '/' + file);
+  }
+  return sources;
+}
+
 export function collectInventory(roots) {
-  const sources = roots || {
-    MiyoshiProjectConfig: require(ROOT + 'project-config/miyoshi.js')
-  };
+  const sources = roots || defaultRoots();
   const found = [];
   const seen = new Set();
   const walk = (node, path) => {

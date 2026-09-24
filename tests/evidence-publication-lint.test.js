@@ -185,3 +185,50 @@ test('§10: publication lint の inventory は caseId と nested な記述も拾
   // path が出ていること（人が場所を特定できる）
   assert.match(rendered, /Synthetic\.verifiedCases\[0\]\.caseId/);
 });
+
+test('FP-01: lint の inventory は出荷済みの公開面値を**すべて**覛く', async () => {
+  // 独立検証（focused re-review, FP-01）。初版は default roots を
+  // miyoshi.js だけ手書きしており、manual.js の publicDescription を
+  // 一つ見逃していた——publicDescription を見ると謳っている lint が、である。
+  //
+  // ここでは lint の実装を使わず、project-config を**独立に**歩いて
+  // 期待値を作る。列挙を検査すると列挙だけが固定されるので、
+  // 数ではなく**経路の集合**を照合する。
+  const lint = await loadLint();
+  const fs = require('node:fs');
+  const dir = path.join(__dirname, '..', 'project-config');
+
+  const expected = new Set();
+  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.js'))) {
+    const mod = require(path.join(dir, file));
+    const seen = new Set();
+    (function walk(node, p) {
+      if (!node || typeof node !== 'object' || seen.has(node)) return;
+      seen.add(node);
+      for (const [k, v] of Object.entries(node)) {
+        if (typeof v === 'string' && lint.PUBLICATION_FACING_FIELDS.includes(k)) {
+          expected.add(file.replace(/\.js$/, '') + '.' + p + '.' + k);
+        } else if (v && typeof v === 'object') {
+          walk(v, p ? p + '.' + k : k);
+        }
+      }
+    }(mod, ''));
+  }
+
+  const actual = new Set(lint.collectInventory().map((i) => i.path.replace(/\.\./g, '.')));
+  assert.equal(expected.size > 0, true, '期待値が空——歩き方が壊れている');
+
+  const missed = [...expected].filter((p) => !actual.has(p));
+  assert.deepEqual(missed, [],
+    'lint が見ていない出荷済みの公開面値: ' + JSON.stringify(missed));
+  assert.equal(actual.size, expected.size,
+    'inventory 数が一致しない: lint ' + actual.size + ' vs 独立走査 ' + expected.size);
+
+  // default roots が手書きに戻っていないことを直接見る。
+  const roots = Object.keys(lint.defaultRoots());
+  assert.equal(roots.length >= 5, true, 'default roots が縮んでいる: ' + JSON.stringify(roots));
+  ['miyoshi', 'manual'].forEach((name) => {
+    assert.equal(roots.includes(name), true, 'default roots に ' + name + ' が無い');
+  });
+});
+

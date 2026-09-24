@@ -800,3 +800,36 @@ M-22  advisory の message を 'x' へ縮める変異
 **計器が見ていない座標は「変化無し」と見分けがつかない**。
 EQUIVALENT を報告するときは、probe が何を観測しているかを必ず書くこと。
 
+## QD-J22 — observation → Promotion Candidate の散文経路は lint の外（FP-02）
+
+focused re-review が記録した。**欠陥ではなく、承認された政策の帰結**。
+
+```text
+makeEvidence('primary','2026-09-24','see www.example.com', true)
+  358f468 : THREW(www)
+  7886ae4 : 構築される（www は advisory へ降格されたため）
+```
+
+この散文は observation に入り、candidate serializer が
+`publicDescription` を Promotion Candidate へ写す。
+publication lint は**commit された config だけ**を見るので、
+この runtime 経路には警告が出ない。
+
+```text
+現在は不活性:
+  案件は BLOCKED / observations 0 なので candidate が生成されない。
+  BLOCKED の closure 出力にこの散文は現れない（検証済み）。
+```
+
+**Human Review 手順への追記事項**（最初の candidate が出るときまでに）:
+
+```text
+candidate を人が見るときは、その publicDescription を
+lintPublicEvidenceText() にかけること。
+それまでは「出荷 config が清浔」だけであって
+「あらゆる公開面文字列が清浔」ではない。
+```
+
+§24 の分類では Required Fix ではない（警告を計算して捨てているわけでは無い）。
+QD-J17 と同じ形のリスクなので記録する。
+

@@ -118,5 +118,9 @@ export const MUTANTS = [
   { id: 'M-27', describes: 'publication lint stops collecting caseId (§10)',
     file: 'tools/evidence-publication-lint.mjs',
     find: "  'caseId'                      // published identifier",
-    replace: "  'caseId_disabled'             // published identifier" }
+    replace: "  'caseId_disabled'             // published identifier" },
+  { id: 'M-28', describes: 'FP-01: lint default roots hand-listed again',
+    file: 'tools/evidence-publication-lint.mjs',
+    find: '  return sources;\n}',
+    replace: "  return { miyoshi: sources.miyoshi };\n}" }
 ];

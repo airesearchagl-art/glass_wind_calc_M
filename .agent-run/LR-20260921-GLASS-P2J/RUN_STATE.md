@@ -1186,3 +1186,28 @@ Implementation verification head : **未確定**（§23 の focused review 後�
 §26  Draft PR で STOP
 ```
 
+## Wave 7-pre b — focused re-review CLEAN、FP-01 修理
+
+```text
+focused re-review : **CLEAN**（scope A–G、対象 7886ae4）
+                    Required Fix 0 / Hard Gate 0 / low 所見 2
+FP-01             : 修理済み。lint inspected 11 → 12
+FP-02             : QD-J22 へ記録（Human Review 手順の追記事項）
+npm test          : 658 pass / 0 fail
+browser           : 62 pass / 0 fail / bypass 0
+変異              : 28/28 KILLED、5 分類で報告
+```
+
+### Implementation verification head について
+
+```text
+検証された head : 7886ae4（focused re-review が見た正確な head）
+現在の head   : FP-01 修理を含む
+差分         : lint の default roots を導出へ + test 1 件 + 変異演算子 1 件
+             guard 本体 / promotion 境界 / UI は一行も触っていない
+```
+
+§25 は「その正確な head を凍結」と言う。修理を入れたので
+**本セッションの判断では凍結しない**。凍結対象の選択を Human Gate へ返す。
+（§47: independent review が閉じた head だけを凍結する）
+
