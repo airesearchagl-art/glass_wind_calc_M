@@ -450,8 +450,8 @@
     },
     {
       "id": "K2-03",
-      "statement": "the symlink guard in discoverConfigModules is EQUIVALENT under mutation: removing it produced byte-identical output on a tree with file, directory and cyclic symlinks, because withFileTypes already reports isDirectory() and isFile() as false for a symlink. The classification is a measurement on THIS filesystem and Node version; a filesystem returning DT_UNKNOWN was not tested.",
-      "status": "equivalent — kept as defence in depth",
+      "statement": "the mutation harness reports the symlink-guard operator as NON-KILLED, and does not assert equivalence. A SEPARATE focused measurement established equivalence for it: removing the guard produced byte-identical output on a tree with file, directory and cyclic symlinks, because withFileTypes already reports isDirectory() and isFile() as false for a symlink. That equivalence belongs to the focused measurement, not to the harness, and holds for THIS filesystem and Node version; a filesystem returning DT_UNKNOWN was not tested. Regenerate with tools/verification/experiments/dirent-symlink.mjs.",
+      "status": "equivalent by separate focused measurement — guard kept as defence in depth",
       "owner": "none"
     },
     {

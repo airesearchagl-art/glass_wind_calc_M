@@ -75,6 +75,23 @@ function divergences(rel, mutatedText) {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
+// A note on what SURVIVED means in this output, because the word is stronger
+// than the measurement behind it for some mutants.
+//
+// For a mutant in project-config/evidence.js the differential probe can tell
+// SURVIVED from EQUIVALENT by measurement. For a mutant in any other file it
+// cannot, and this harness then prints SURVIVED with the detail "not
+// differentiable by the guard probe". The correct reading of that line is
+// SURVIVED_OR_EQUIVALENT_UNDETERMINED (P2K-F15) -- it is NOT a claim that the
+// behaviour demonstrably changed.
+//
+// The label is left as SURVIVED deliberately: the Human Gate's Phase 2K
+// decision separates the two claims in verification-spec.json
+// (mutation-kill ADMISSIBLE / mutation-equivalence-analysis DIAGNOSTIC_ONLY)
+// and directs that mutate.mjs behaviour not be changed merely to support
+// naming. Consequence to know: because an undetermined mutant counts in
+// tally.SURVIVED, this command EXITS 1 whenever one exists, which is the
+// current state of the tree (K2-03).
 const tally = { KILLED: 0, SURVIVED: 0, EQUIVALENT: 0, 'PATCH-MISS': 0, 'HARNESS ERROR': 0 };
 const report = (m, verdict, detail) => {
   tally[verdict]++;

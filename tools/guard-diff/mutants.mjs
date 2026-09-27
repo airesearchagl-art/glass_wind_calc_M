@@ -392,5 +392,8 @@ export const MUTANTS = [
   { id: 'K7-02', describes: 'manual: non-object input guard removed',
     file: 'project-config/manual.js',
     find: "    if (!raw || typeof raw !== 'object') {",
+    replace: '    if (false) {' },
+  { id: 'K7-03', describes: 'evidence metadata guard removed (assertOrdinaryObject used to cover it)',
+    find: "    if (!evidence || typeof evidence !== 'object') {",
     replace: '    if (false) {' }
 ];

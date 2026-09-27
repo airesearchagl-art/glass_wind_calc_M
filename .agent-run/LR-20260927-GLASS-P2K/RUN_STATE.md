@@ -338,6 +338,46 @@ project-config/**  変更 0
 project Evidence state  変更 0（§15 の値と完全一致）
 ```
 
+## 最終独立レビュー（§20）と Required Fix の修理
+
+```text
+結果 : PASS WITH FINDINGS / **Required Fix 3**
+対応 : §21 に従い Ready/merge Human Gate へは提示していない。
+       3 件を修理した。いずれも runtime / Evidence / 分類決定には触れない
+```
+
+```text
+RF-1  自分の triage が project-config.test.js:246 を BENIGN と誤判定していた。
+      guard を消すと assertOrdinaryObject が代わりに投げ、**全 suite が緑**だった。
+      → REQUIRED_FIX へ変更。matcher 3 行 + K7-03
+RF-2  RF の機序説明が偽だった（「後続 guard」ではなく TypeError）。→ 訂正
+RF-3  README の v1.12.0-phase2k 行が head と矛盾していた。→ 訂正
+```
+
+必須でない指摘のうち F-1 / F-2 / F-3 / F-4 / F-7 も直した。
+F-7 は §17 違反であった——K2-03 の equivalence 主張に生成器が無かったので
+`experiments/dirent-symlink.mjs` を追加し P2K-L08 で固定した。
+
+### 新しく記録した限界
+
+```text
+P2K-F16  F08 triage の見出しに「測定で行った」と書いたが、
+         測ったのは message だけで、判定 C は 47 件を推論で埋めていた。
+         その 1 件が実際に誤りだった。残してある限界として明記
+```
+
+### 修正後の測定
+
+```text
+npm test   : 731 / 731 / 0
+mutation   : 90 operator / KILLED 89 / SURVIVED 1 / EQUIVALENT 0 /
+             PATCH-MISS 0 / HARNESS ERROR 0。K7-01/02/03 すべて KILLED
+lint       : exit 0 / manifest exit 0 / package exit 0
+guard-diff : REGRESSIONS 0 / coverage gap 0 / unexpected 0
+§15       : 全項目完全一致
+runtime    : branch 全体で project-config / calc / index.html / 他 変更 0 file
+```
+
 ## Next action
 
 **Draft PR で止まる。**

@@ -266,3 +266,33 @@ test('P2K-L07: QD-J23 実験は再現可能で、木を必ず元に戻す', () =
   assert.equal(report.observed.shippedSuiteNoticed, true,
     '出荷 test が nested な公開不可値に気づかない');
 });
+
+test('P2K-L08: K2-03 の equivalence 主張には committed な生成器がある', () => {
+  // The final independent review pointed out that the only EQUIVALENT claim in
+  // the repository existed as prose in the Run Artifact with no generator, while
+  // this repository's own rule says a load-bearing number needs one (§17). The
+  // measurement is now regenerable, and this test keeps it that way.
+  const out = execFileSync(process.execPath,
+    ['tools/verification/experiments/dirent-symlink.mjs'],
+    { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const report = JSON.parse(out);
+  assert.equal(report.schemaVersion, 1);
+  assert.equal(report.experiment, 'dirent-symlink');
+
+  // The load-bearing property: every symlink is neither file nor directory, so
+  // the two checks in discoverConfigModules already exclude them and the
+  // explicit guard cannot change the outcome HERE.
+  assert.equal(report.observed.symlinkCount >= 3, true,
+    'symlink が 3 件未満——probe の木が壊れている');
+  assert.equal(report.observed.everySymlinkIsNeitherFileNorDirectory, true,
+    'symlink が file または directory として見えている——' +
+    'K2-03 の equivalence 主張がこの環境では成立しない');
+  assert.deepEqual(report.discovered, ['inner/deep.js', 'real.js'],
+    'symlink を辿ったか、実ファイルを落とした: ' + JSON.stringify(report.discovered));
+
+  // The scope must travel with the claim, not be inferred by the reader.
+  assert.match(report.doesNotProve, /DT_UNKNOWN/,
+    '限定（DT_UNKNOWN のファイルシステムは未検証）が報告に無い');
+  assert.ok(report.platform.nodeVersion, 'platform が記録されていない');
+});
+

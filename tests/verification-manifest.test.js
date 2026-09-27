@@ -214,7 +214,7 @@ test('P2K-M08: serialisation is deterministic', async () => {
                m.serializeManifest(m.buildManifest()));
 });
 
-test('P2K-M09: 12 instrument 全部の class と admissibility を literal で固定する', async () => {
+test('P2K-M09: 全 instrument の class と admissibility を literal で固定する', async () => {
   const m = await load();
   const manifest = m.buildManifest();
 
@@ -224,11 +224,11 @@ test('P2K-M09: 12 instrument 全部の class と admissibility を literal で�
   // value was a member of the vocabulary. Re-admitting the mutation harness as
   // ADMISSIBLE would have passed the entire suite.
   //
-  // That matters most for `mutation`: DIAGNOSTIC_ONLY is a JUDGEMENT, not a
-  // measurement. KILLED verdicts come from npm test (admissible), but the
-  // SURVIVED/EQUIVALENT split is decided by the guard corpus probe, which cannot
-  // adjudicate a mutant in any other file. The weaker half sets the label.
-  // A Human Gate may split it; this table makes that a deliberate edit.
+  // The Human Gate has since split `mutation` into two entries, because one
+  // label could not carry both claims: the KILLED verdict comes from npm test
+  // and is ADMISSIBLE, while the generic SURVIVED/EQUIVALENT split is decided by
+  // the guard corpus probe and stays DIAGNOSTIC_ONLY. P2K-M12 pins the split
+  // itself; this table keeps every classification a deliberate edit.
   const EXPECTED = [
     ['browser-w4', 'UNVERIFIED', 'observational'],
     ['failopen-w4', 'UNVERIFIED', 'observational'],

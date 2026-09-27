@@ -693,3 +693,84 @@ browser   : 未実行。§16 に従い、harness も UI も runtime も変えて
             証拠件数を水増ししない
 ```
 
+## §12 — 最終独立レビューの指摘の修理（Required Fix 3 件）
+
+最終レビューは **PASS WITH FINDINGS / Required Fix 3** を返した。
+§21 に従い Ready/merge Human Gate へは提示せず、3 件を修理した。
+いずれも runtime / Evidence / 分類決定には触れない。
+
+### RF-1（最重）: 自分の triage が 1 件を BENIGN と誤判定していた
+
+`tests/project-config.test.js:246`
+`assertEvidenceConsistency('verified', null)`
+
+```text
+初版の判定 : BENIGN、理由「妥当な fixture の 1 field のみ壊している」
+実態       : 入力は null であり fixture でない。理由が 2 重に誤り
+再測定     : `evidence metadata is required` guard を if (false) へ消すと
+             次行の assertOrdinaryObject が
+             `evidence must be a plain object` を投げる
+             かつ **全 suite 730 pass / 0 fail のまま**
+判定       : REQUIRED_FIX。受理済みの RF-2 より強い例である
+             （向こうは AC-05 が赤くなったが、こちらは何も赤くならなかった）
+修理       : 240 / 243 / 246 に個別 matcher。K7-03 を追加し KILLED を確認
+```
+
+**初版の誤りの原因を明記する**。
+「判定は測定で行った」と書いたが、測ったのは **投げられた message だけ**であり、
+**guard を消す測定は疑わしい 2 件にしかやっていなかった**。
+残り 47 件は推論で埋めており、そのうち 1 件が実際に誤りだった。
+これは本Campaign の主題そのものである——
+**測定と呈したものの一部が実は推論だった**。
+
+### RF-2: RFの機序説明が偽だった
+
+```text
+初版 : 「{} は hasFixedPreset も getPublicLabel も欠くので後続 guard が代わりに発火」
+実測 : TypeError: Cannot read properties of undefined (reading 'length')
+       （registry.js の config.projectId.length）
+訂正 : 発火するのは guard ではなく直後の property 読みである。
+       判定と処置は変わらない
+```
+
+### RF-3: committed 文書が head と矛盾していた
+
+```text
+README.md の v1.12.0-phase2k 行 : 「729 / 85 operator / KILLED 84 /
+                                  緩い assert.throws 18 箇所が残る」
+head の実態                    : 731 / 90 operator / KILLED 89 /
+                                  F08 は QUALITY_DEBT で閉じている
+```
+
+P2K-M10 を作ったまさにその失敗形を root README で繰り返していた。
+（P2K-M10 は tools/verification/README.md と spec の間しか見ていない）
+
+### 必須でない指摘のうち、安いものも直した
+
+```text
+F-2  569-572 の「他の到達経路なし」セルが誤り（TypeError が到達する）。
+     gap は生じないが記述が違うので matcher を付け、表を AMBIGUOUS に訂正
+F-3  P2K-M09 の名前が「12 instrument」のままだった。stale comment も書き換え
+F-4  K2-03 の knownLimitations が「is EQUIVALENT under mutation」と始まり、
+     harness の verdict に見えた。「NON-KILLED + 別途測定」へ書き換え
+F-1  mutate.mjs 自体の header が SURVIVED を「振る舞いが変わったことを実証済み」と
+     定義していたが、非差分可能な mutant には当てはまらない。
+     振る舞いは変えず（§5）comment だけ訂正し、exit 1 になることも明記
+F-7  K2-03 の equivalence 主張に committed な生成器が無かった（§17 違反）。
+     tools/verification/experiments/dirent-symlink.mjs を追加し P2K-L08 で固定
+```
+
+### 修正後の triage 内訳
+
+```text
+BENIGN 38 / AMBIGUOUS 8 / REQUIRED_FIX 3 —— untriaged 0
+候補集団は 49 のまま（レビュアーが独立な scanner で set-identical として再現）
+```
+
+### 測定値（修正後）
+
+```text
+npm test : tests 731 / pass 731 / fail 0
+mutation : 90 operator（K7-03 追加）
+```
+
