@@ -188,10 +188,38 @@ K1-01 retarget: どの instrument の admissibility も test で固定されて�
 spec の reason に実測値が入っており P2K-M02 が検査するので、
 戻すなら spec 1 行と M02 の 1 行。
 
+## Wave 4 — browser verification durability
+
+```text
+npm test   : tests 720 / pass 720 / fail 0（+7）
+mutation   : KILLED 73 / SURVIVED 1 / EQUIVALENT 0 /
+             PATCH-MISS 0 / HARNESS ERROR 0（of 74，K4-01..K4-08 追加）
+browser    : **e57e47a で 34 pass / 0 fail  PASS**（tree clean、2 回再現）
+閉じた     : P2K-F06
+```
+
+### 本題は path ではなかった
+
+```text
+PASS 0 / FAIL 1 / UNVERIFIED 3 / ERROR 4
+0 件測って 0 失敗は ERROR（PASS ではない）
+```
+
+§18 の「UNVERIFIED でよい」は、UNVERIFIED を名乗れる形が
+存在してはじめて意味を持つ。
+
+### spec の browser-w4 は UNVERIFIED のまま
+
+測ったのに UNVERIFIED なのは、UNVERIFIED が
+**target についての記述**だからである——
+この repo は任意の head についての browser 測定を持たない。
+e57e47a の測定は EVIDENCE §9 に sha 付きで置いてある。
+
 ## Next action
 
-Wave 4: browser verification durability。P2K-F06（Playwright の絶対 path）。
-§18: exact head の browser 測定がない限り UNVERIFIED のままにする。
+Wave 5: fresh independent verifier trial。
+**committed された成果物だけ**で verifier が再構成できるかを試す。
+§23 / §41 の主要受入基準。P2K-F08 / F11 の同型探しもここで。
 
 ## Stop conditions status
 
@@ -208,13 +236,13 @@ repair_strategies     : 0 / 3
 ## Resume instructions
 
 ```text
-0. 現在位置: Wave 3 完了。次は Wave 4
+0. 現在位置: Wave 4 完了。次は Wave 5
 1. RUN_MANIFEST.md から binding を確認
 2. TASK_PACKET_SNAPSHOT.md を再 hash し
    aa68c9c5c820419c1f4413bbb7864a2d9cf49bc7b0b18c69645174cab0c6aa96
    と一致することを確認（不一致なら BLOCKED）
 3. INSTRUMENT_INVENTORY.md を読む（Wave 0 の全成果）
-4. npm test で smoke check（**713** pass を期待）
+4. npm test で smoke check（**720** pass を期待）
 4b. tools/verification/README.md を読む（Wave 1 の入口）
 5. Next action から再開
 ```

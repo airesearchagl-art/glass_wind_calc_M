@@ -370,3 +370,76 @@ K1-01  PATCH-MISS → 調べたら本物の test 欠陥だった（実害あり�
 どちらも「緑以外の結果を調べる」だけで出てきた。
 PATCH-MISS を harness の雑音として流さないことに意味がある。
 
+## §9 — Wave 4 の実測値
+
+### test / mutation
+
+```text
+npm test : tests 720 / pass 720 / fail 0（713 から +7）
+mutation : KILLED 73 / SURVIVED 1 / EQUIVALENT 0 /
+           PATCH-MISS 0 / HARNESS ERROR 0（of 74）
+           K4-01..K4-08 は 8/8 KILLED
+           SURVIVED 1 = K2-03（Wave 2 で EQUIVALENT と判定済み）
+```
+
+### playwright の解決（実測）
+
+```text
+候補      : bare-specifier → npm-root-g
+（PLAYWRIGHT_MODULE 未設定。npm root -g と interpreter 相対が
+  一致するので重複を 1 つ落としている）
+解決      : npm-root-g
+            → /opt/node22/lib/node_modules/playwright/index.mjs
+```
+
+偶然だが旧版の絶対 path と同じ場所である。だから動いていた。
+違うのは **名前を埋めずに聞いている**ことだけである。
+
+### 本Campaign ではじめての exact head の browser 測定
+
+```text
+測定対象 head : e57e47a568598d3f417e3cfeeb2911b1ae3f0840
+tree          : clean（git status 空。測定前に確認）
+命令          : node tools/browser-checks/browser-w4.mjs
+結果          : 34 pass / 0 fail  outcome PASS  exit 0
+再現          : 2 回連続で同じ（outcome / checksRun / failures）
+engine        : 実 Chromium（playwrightSource npm-root-g）
+```
+
+含まれる確認の主なもの：
+
+```text
+B6  closure 状態     未充足
+B7  確認項目         0 / 12
+B8  closure カテゴリ  0 / 4
+B9  想定 case scope   0 / 8
+B10 Promotion Candidate なし / B10b Observation 0
+B19 Verified 語彙が画面に出ていない
+B20 closure 領域に入力要素 0 / B21 昇格操作なし
+B26 pageErrors 0 / B27 consoleErrors 0 / B28 file:// 外の通信 0
+B29 localStorage / sessionStorage / cookie すべて 0
+B-priv 私的参照の描画なし
+B-facts verifiedCases 0 / sample_default / 1250×2050 / V0 34 / III
+```
+
+**この測定の範囲**を明記する。
+
+```text
+これは e57e47a という 1 つの sha についてのものであり、
+それ以降の commit については何も言っていない。
+spec の browser-w4 を UNVERIFIED のままにしてあるのはそのためであり、
+埋め忘れではない。UNVERIFIED は **target についての記述**である。
+fresh verifier は自分の head で自分で走らせる。
+```
+
+これを Evidence として project 側へ import することはできない（§21）。
+software についての証拠であって project Evidence ではない。
+
+### 自分の缺陥 1 件（P2K-F11）
+
+```text
+resolver の existsSync が注入不可だった。
+つまり「そのマシン上でしか test できない resolver」であり、
+修理対象の欠陥と同じ形。自分の test（P2K-R04）が先に落ちて教えた。
+```
+
