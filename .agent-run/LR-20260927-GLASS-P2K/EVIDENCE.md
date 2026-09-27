@@ -161,3 +161,108 @@ admissibility 位置で拒否していた。`UNVERIFIED` は §6 で admissibili
 これは「とにかく throw したこと」を確かめる test が
 何も固定していないという実例であり、本Campaign の反復主題と同型。
 
+## §7 — Wave 2 の実測値（QD-J23）
+
+### 実験：discovery はどこまで届くか
+
+```text
+node tools/verification/experiments/lint-discovery-depth.mjs
+```
+
+project-config の 1 階下に合成 config module を 1 つ植える。
+公開面値 3 件、うち 1 件は **hard 規則**を踏む。
+
+```text
+                        flat（従来）      recursive（修正後）
+discovery が到達      false             true
+inventory               12（+0）           15（+3）
+advisory を報告        0                 1
+hard 違反を報告       0                 1
+出荷 test               7/7 pass exit 0   6/7 pass exit 1
+```
+
+flat 側が QD-J23 の実害である。
+両列とも同じ script の出力で、flat 列は mutant K2-01 を当てて再現できる。
+実験はどの経路でも probe を必ず削除する（P2K-L07 / K2-08 が押さえる）。
+
+### test
+
+```text
+npm test : tests 695 / pass 695 / fail 0（688 から +7）
+  lint-discovery-independence  P2K-L01..L07
+```
+
+### mutation（50 operator）
+
+```text
+KILLED 49 / SURVIVED 1 / EQUIVALENT 0 / PATCH-MISS 0 / HARNESS ERROR 0
+
+K2-01 非再帰へ戻す（QD-J23 そのもの）  KILLED  L01 L02 L03 L05 L07
+K2-02 nested root 名を basename へ          KILLED  L02 L03
+K2-03 symlink を辿る                       SURVIVED → 下記で EQUIVALENT と判定
+K2-04 読み込み失敗を飲み込む             KILLED  L06
+K2-05 順序を固定しない                   KILLED  L01 L05
+K2-06 拡張子 filter を外す               KILLED  L01 L02 L03
+K2-07 最初の 1 件で打ち切る               KILLED  §18 FP-01 L01..L05 L07
+K2-08 実験が木を復元しなくなる           KILLED  L07
+```
+
+### K2-03 を EQUIVALENT と判定した根拠（推定ではなく測定）
+
+```text
+readdirSync(withFileTypes) の Dirent 実測:
+  dirlink    isSymbolicLink true  / isDirectory false / isFile false
+  linked.js  isSymbolicLink true  / isDirectory false / isFile false
+  inner      isSymbolicLink false / isDirectory true  / isFile false
+  real.js    isSymbolicLink false / isDirectory false / isFile true
+
+つまり isDirectory() / isFile() の 2 つがすでに symlink を除外している。
+
+出力比較（file symlink / directory symlink / 循環 symlink を含む木）:
+  guard あり : ["inner/deep.js","real.js"]
+  K2-03 適用 : ["inner/deep.js","real.js"]   —— byte-identical
+```
+
+guard は残す。振る舞いが Dirent の副作用に依存している状態より、
+明示されている方がよい。ただし comment は「これが循環を防いでいる」と
+誤って言っていたので書き直した。
+
+**この判定の分解能**: このファイルシステムと Node 22 での測定である。
+DT_UNKNOWN を返すファイルシステムは試していない。
+
+### 計器の限界を 1 つ明示しておく
+
+mutate.mjs の SURVIVED / EQUIVALENT の分岐は
+**guard corpus の probe** で決めているので、
+project-config/evidence.js 以外の mutant には適用できない。
+K1-xx / K2-xx の SURVIVED は実際には
+「SURVIVED か EQUIVALENT か未判定」である。
+
+だから Wave 1 で mutation を DIAGNOSTIC_ONLY に置いたのは正しかった——
+KILLED は npm test が決めるので強いが、分岐は弱い。
+K2-03 はその弱い側を **手で別途測定して** 埋めた例である。
+
+### 自分の欠陥 2 件を Wave 内で検出し修理
+
+**(1) P2K-L03 が first-match で何も見ていなかった**
+
+```text
+初版 : results.find(r => r.path.startsWith('sub/beta.'))
+実態 : 最初に当たるのは警告の無い caseId
+修正 : 経路を完全一致で指定し、rule 名を deepEqual
+```
+
+P2K-F03（diff-heads が first match しか記録しない）と同じ形。
+
+**(2) 実験 script 自体が呼ばれ方で逆の読みを返していた**（P2K-F09 / D-007）
+
+```text
+単体      : suite exit 1 / fail 1
+test 経由 : suite exit 0 / summary 全部 null
+原因      : NODE_TEST_CONTEXT の漏れ
+修正      : env sanitize + parse 不能・矛盾時は throw
+```
+
+初版は null の summary を「気づかなかった」として報告していた。
+**白紙の計器を 0 と読む**のと同じ誤りである。
+

@@ -22,7 +22,9 @@ const load = () => import(MODULE);
 const EXPECTED_INSTRUMENT_IDS = [
   'browser-w4', 'failopen-w4', 'guard-diff', 'independent-review', 'mutation',
   'npm-test', 'parser-boundary', 'probe-w4', 'project-state-probe',
-  'publication-lint', 'stageA-regression'
+  'publication-lint', 'stageA-regression',
+  // Wave 2 (QD-J23)
+  'lint-discovery-depth-experiment'
 ];
 
 test('P2K-M01: the manifest lists exactly the known instruments', async () => {
@@ -62,9 +64,22 @@ test('P2K-M03: every instrument declares sharedDependencies explicitly', async (
   const gd = manifest.spec.instruments.find((i) => i.id === 'guard-diff');
   assert.equal(gd.sharedDependencies.some((d) => /DOT_EQUIVALENTS/.test(d)), true);
   assert.equal(gd.sharedDependencies.some((d) => /PRIVATE_DOCUMENT_EXTENSION_SOURCE/.test(d)), true);
+  // QD-J23 was publication-lint's shared assumption: the implementation and
+  // its test walked the config directory with the same flat readdirSync.
+  // Wave 2 closed it, so this assertion is inverted rather than deleted --
+  // the entry must no longer claim a shared walker, and the closure must be
+  // recorded where a fresh verifier reads it. Deleting the assertion would
+  // leave nothing watching whether the repair holds.
   const lint = manifest.spec.instruments.find((i) => i.id === 'publication-lint');
-  assert.equal(lint.sharedDependencies.some((d) => /readdirSync|recursive/i.test(d)), true,
-    'publication-lint must record the QD-J23 shared assumption');
+  assert.equal(lint.sharedDependencies.some((d) => /readdirSync|non-recursive|flat/i.test(d)),
+    false, 'publication-lint still records a shared directory walker (QD-J23 reopened?)');
+
+  const j23 = manifest.spec.knownLimitations.find((k) => k.id === 'QD-J23');
+  assert.ok(j23, 'QD-J23 must stay in knownLimitations, recorded as closed');
+  assert.match(j23.status, /CLOSED/,
+    'QD-J23 status is not CLOSED: ' + j23.status);
+  assert.match(j23.statement, /HARD rule/,
+    'QD-J23 no longer records what the blindness actually cost');
 });
 
 test('P2K-M04: provenance slots exist, including inputDigest (P2K-F07)', async () => {

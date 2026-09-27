@@ -195,8 +195,18 @@ test('FP-01: lint の inventory は出荷済みの公開面値を**すべて**�
   // 期待値を作る。列挙を検査すると列挙だけが固定されるので、
   // 数ではなく**経路の集合**を照合する。
   const lint = await loadLint();
-  const fs = require('node:fs');
-  const dir = path.join(__dirname, '..', 'project-config');
+  const { execFileSync } = require('node:child_process');
+  const repoRoot = path.join(__dirname, '..');
+  const dir = path.join(repoRoot, 'project-config');
+
+  // QD-J23 (Phase 2K Wave 2): this oracle used to call the SAME flat
+  // readdirSync the implementation called, so neither could see a config
+  // module in a subdirectory and this test stayed green while the lint missed
+  // three planted values -- one of them tripping a HARD rule. Discovery is now
+  // recursive on both sides, so the oracle must not be a copy of it. File
+  // discovery here comes from git's index: a different mechanism with no
+  // shared traversal assumption. Depth-level properties are pinned separately
+  // and literally in tests/lint-discovery-independence.test.js.
 
   // 経路の組み立て方は collectInventory() と**同じ文法**でなければならない。
   // 初版は 2 点ずれていた（delta re-verify の指摘）:
@@ -209,7 +219,18 @@ test('FP-01: lint の inventory は出荷済みの公開面値を**すべて**�
   // publicEvidenceDescription の定位置なので、中身が入った日に
   // **正しい lint を告発する赤**になる。その種の赤は assertion を緩めさせる。
   const expected = new Set();
-  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.js'))) {
+  const trackedModules = execFileSync('git',
+    ['ls-files', '-z', '--', 'project-config'],
+    { cwd: repoRoot, encoding: 'utf8' })
+    .split('\0')
+    .filter(Boolean)
+    .filter((f) => f.endsWith('.js'))
+    .map((f) => f.replace(/^project-config\//, ''))
+    .sort();
+  assert.equal(trackedModules.length > 0, true,
+    'git ls-files が空——oracle が壊れている');
+
+  for (const file of trackedModules) {
     const mod = require(path.join(dir, file));
     const seen = new Set();
     (function walk(node, p) {
@@ -236,8 +257,20 @@ test('FP-01: lint の inventory は出荷済みの公開面値を**すべて**�
   const missed = [...expected].filter((p) => !actual.has(p));
   assert.deepEqual(missed, [],
     'lint が見ていない出荷済みの公開面値: ' + JSON.stringify(missed));
-  assert.equal(actual.size, expected.size,
-    'inventory 数が一致しない: lint ' + actual.size + ' vs 独立走査 ' + expected.size);
+
+  // The reverse direction is not automatically a defect. git lists TRACKED
+  // files, so an untracked config module in a working tree is legitimately
+  // discovered by the lint and legitimately absent from this oracle. Requiring
+  // exact equality would turn a work-in-progress file into a red that accuses
+  // a correct lint -- and that kind of red is what gets assertions loosened.
+  // Assert instead that every extra is explained by being untracked.
+  const extras = [...actual].filter((p) => !expected.has(p));
+  const unexplained = extras.filter((p) => {
+    const root = p.split(/[.[]/)[0];
+    return trackedModules.includes(root + '.js');
+  });
+  assert.deepEqual(unexplained, [],
+    'tracked module 由来なのに独立走査に無い経路: ' + JSON.stringify(unexplained));
 
   // default roots が手書きに戻っていないことを直接見る。
   const roots = Object.keys(lint.defaultRoots());

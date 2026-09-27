@@ -30,18 +30,18 @@
       "command": "npm run lint:evidence-publication",
       "evidenceClass": "regression",
       "admissibility": "ADMISSIBLE",
-      "target": "advisory warnings reach a human for every publication-facing value in shipped config",
+      "target": "advisory warnings reach a human for every publication-facing value in shipped config, at any depth",
       "oracle": "production lintPublicEvidenceText as subject; the reader is the rendered report",
       "sharedDependencies": [
-        "PUBLICATION_FACING_FIELDS shared with its own test (closed by a hardcoded deepEqual)",
-        "readdirSync non-recursive in BOTH implementation and test — QD-J23, open"
+        "PUBLICATION_FACING_FIELDS shared with its own test (closed by a hardcoded deepEqual)"
       ],
-      "positiveControl": "restoring the pre-FP-01 hand-listed roots makes the completeness test fail, demonstrated",
+      "positiveControl": "restoring the pre-FP-01 hand-listed roots makes the completeness test fail, demonstrated; reverting discovery to flat makes P2K-L01/L02/L03/L05/L07 fail, demonstrated as mutant K2-01",
       "negativeControl": "clean values produce zero warnings",
-      "proves": "every warning computed for committed config is rendered with its path",
-      "doesNotProve": "runtime-input safety (QD-J22); semantic disclosure; a config module in a subdirectory (QD-J23)",
+      "proves": "every warning computed for committed config is rendered with its path, including config modules in subdirectories",
+      "doesNotProve": "runtime-input safety (QD-J22); semantic disclosure; that an empty advisory list means the prose is publishable",
       "instrumentFiles": [
-        "tools/evidence-publication-lint.mjs"
+        "tools/evidence-publication-lint.mjs",
+        "tests/lint-discovery-independence.test.js"
       ],
       "finding": null,
       "reason": null
@@ -228,6 +228,26 @@
       "instrumentFiles": null,
       "finding": null,
       "reason": null
+    },
+    {
+      "id": "lint-discovery-depth-experiment",
+      "command": "node tools/verification/experiments/lint-discovery-depth.mjs",
+      "evidenceClass": "independent",
+      "admissibility": "ADMISSIBLE",
+      "target": "how deep publication-lint discovery actually reaches",
+      "oracle": "a synthetic config module planted one directory down, carrying three publication-facing values, one of which trips a HARD rule",
+      "sharedDependencies": [
+        "imports nothing from the guard; observes the shipped lint and the shipped suite from outside"
+      ],
+      "positiveControl": "with discovery reverted to flat the same script reports 0 of 3 values found and the suite green — the measured 'before' column of D-006",
+      "negativeControl": "with no probe planted the inventory is unchanged",
+      "proves": "that a config module in a subdirectory is discovered, its unpublishable value reported, and the shipped suite turned red by it",
+      "doesNotProve": "anything about values outside project-config, or about open-set heuristics (homoglyphs, spelled-out forms) at any depth",
+      "instrumentFiles": [
+        "tools/verification/experiments/lint-discovery-depth.mjs"
+      ],
+      "finding": null,
+      "reason": null
     }
   ],
   "protectedInvariants": [
@@ -384,9 +404,9 @@
     },
     {
       "id": "QD-J23",
-      "statement": "publication-lint discovery is non-recursive in BOTH the implementation and its test, so a config module in a subdirectory would be missed by both and the test would still pass. No subdirectories exist today.",
-      "status": "open — shared assumption",
-      "owner": "Wave 2"
+      "statement": "publication-lint discovery was non-recursive in BOTH the implementation and its test. Measured: three publication-facing values planted one directory down — one tripping a HARD rule — were reported as zero, and the shipped suite stayed green.",
+      "status": "CLOSED in Wave 2 — discovery is recursive (D-006); the test oracles are a hand-written literal, git ls-files, and a tree the test builds, so no walker is shared with the implementation",
+      "owner": "closed"
     },
     {
       "id": "QD-J24",
@@ -399,6 +419,18 @@
       "statement": "colon-labelled yen prices are rejected by windows-absolute-path. Accepted cost of the Phase 2J fail-closed decision.",
       "status": "accepted",
       "owner": "frozen by Human Gate"
+    },
+    {
+      "id": "P2K-F09",
+      "statement": "an instrument that spawns a child `node --test` reads differently depending on who invoked it: NODE_TEST_CONTEXT leaking into the child makes it print no summary and exit 0 even when a test fails. Fixed in the Wave 2 experiment (env sanitised; an unparseable or self-contradictory run now throws). Whether mutate.mjs and diff-heads.mjs carry the same dependency is NOT yet examined.",
+      "status": "open for other instruments",
+      "owner": "Wave 3"
+    },
+    {
+      "id": "K2-03",
+      "statement": "the symlink guard in discoverConfigModules is EQUIVALENT under mutation: removing it produced byte-identical output on a tree with file, directory and cyclic symlinks, because withFileTypes already reports isDirectory() and isFile() as false for a symlink. The classification is a measurement on THIS filesystem and Node version; a filesystem returning DT_UNKNOWN was not tested.",
+      "status": "equivalent — kept as defence in depth",
+      "owner": "none"
     }
   ],
   "evidenceStateExpected": {

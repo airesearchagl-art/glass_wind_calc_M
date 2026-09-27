@@ -111,12 +111,49 @@ P2K-F08  新規・本 Wave で修正済み。他箇所の調査は Wave 5
       分割して KILLED を ADMISSIBLE にするのも筋が通る——Human Gate の判断。
 ```
 
+## Wave 2 — publication-lint discovery independence（QD-J23）
+
+```text
+npm test   : tests 695 / pass 695 / fail 0（+7）
+mutation   : KILLED 49 / SURVIVED 1 / EQUIVALENT 0 /
+             PATCH-MISS 0 / HARNESS ERROR 0（of 50，K2-01..K2-08 追加）
+             SURVIVED 1 = K2-03。別途測定で EQUIVALENT と判定（§7）
+QD-J23     : **閉じた**（D-006）
+```
+
+### 決め方
+
+推諡ではなく before/after の実測で決めた。
+flat だと、公開してはいけない値を 1 階下に置くだけで
+lint は 0 件と報告し、出荷 test は全部緑になる。
+
+### 独立性をどう作ったか
+
+```text
+実装     : readdirSync(withFileTypes) の明示 stack 下降
+oracle 1 : 手書き literal（committed fixture 木）
+oracle 2 : git ls-files（git の index。node:fs と無関係）
+oracle 3 : test がその場で作る木
+```
+
+FP-01 test の flat readdirSync を git ls-files へ差し替えた。
+**実装の写しは oracle ではない**というのが本 Wave の規則。
+
+### 新しく見つかったもの
+
+```text
+P2K-F09  計器の読みが NODE_TEST_CONTEXT に依存していた。
+         本 Wave の実験では修正済み。
+         mutate.mjs / diff-heads.mjs は未調査 → Wave 3
+K2-03    EQUIVALENT。guard は残すが comment を訂正
+```
+
 ## Next action
 
-Wave 2: publication-lint discovery independence（QD-J23）。
-flat 契約なのか recursive 契約なのかを**測定で**決める。
-recursive とするなら、実装と test は別の walker を使い、
-入れ子の合成 fixture で押さえる。
+Wave 3: mutation + differential tool reproducibility。
+P2K-F01（corpus が被検体由来）/ P2K-F02 / P2K-F03（first match）/
+P2K-F07（独立 corpus digest）、加えて P2K-F09 を
+mutate.mjs と diff-heads.mjs について調べる。
 
 ## Stop conditions status
 
@@ -133,13 +170,13 @@ repair_strategies     : 0 / 3
 ## Resume instructions
 
 ```text
-0. 現在位置: Wave 1 完了。次は Wave 2（QD-J23）
+0. 現在位置: Wave 2 完了。次は Wave 3
 1. RUN_MANIFEST.md から binding を確認
 2. TASK_PACKET_SNAPSHOT.md を再 hash し
    aa68c9c5c820419c1f4413bbb7864a2d9cf49bc7b0b18c69645174cab0c6aa96
    と一致することを確認（不一致なら BLOCKED）
 3. INSTRUMENT_INVENTORY.md を読む（Wave 0 の全成果）
-4. npm test で smoke check（**688** pass を期待）
+4. npm test で smoke check（**695** pass を期待）
 4b. tools/verification/README.md を読む（Wave 1 の入口）
 5. Next action から再開
 ```

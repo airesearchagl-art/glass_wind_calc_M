@@ -97,3 +97,51 @@ QD-J23 / QD-J24 は Wave 2、QD-J22 は Human Review 手順。
 manifest の knownLimitations にすべて機械可読形で入っている。
 ```
 
+---
+
+# Wave 2 後の状態
+
+## QD-J23 — **閉じた**（Phase 2J からの引き継ぎ）
+
+Phase 2J の QUALITY_DEBT は変更しない（§4）ので、閉じた記録はここに置く。
+
+```text
+従来 : defaultRoots() と FP-01 test が同じ flat readdirSync を使っていた
+実害 : 1 階下の config module の公開面値 3 件（うち 1 件は hard 規則）を
+       discovery が 0 件と報告し、出荷 test は 7/7 緑のまま
+修正 : discovery を再帰化（D-006）。
+       oracle を 3 機構（literal / git ls-files / その場の木）に分離
+検証 : tools/verification/experiments/lint-discovery-depth.mjsによる
+       before/after 対比。P2K-L01..L07。K2-01..K2-08
+```
+
+## 新規 P2K-F09 — 計器の読みが呼ばれ方に依存していた（本 Wave で修正済み）
+
+```text
+現象 : 同じ実験 script が
+       単体      → suite exit 1 / fail 1（気づいた）
+       test 経由 → suite exit 0 / summary 全部 null（気づかない）
+原因 : NODE_TEST_CONTEXT の漏れ。子が自分を test worker と思うと
+       summary を出さず、失敗しても exit 0 になる
+修正 : env を sanitize し、parse 不能または
+       exit code と fail 数が矛盾したら throw（D-007）
+```
+
+他の instrument が同じ env 依存を持っていないかは **未調査**。
+subprocess を起こす計器は mutate.mjs と diff-heads.mjs も該当する。
+Wave 3 で見る（そこはもともと differential の修理 Wave である）。
+
+## P2K-F08 の設問を 1 件回収した
+
+「とにかく throw した」を見る test は何も固定していない——
+本 Wave で同型のものを自分の新規 test に 1 件持ち込んでから直した。
+
+```text
+P2K-L03 初版: results.find(r => r.path.startsWith('sub/beta.'))
+        → 最初に当たるのは警告の無い caseId なので、
+          advisory を持つ値について何も検査していなかった
+修正    : 経路を完全一致で指定し、rule 名を deepEqual で押さえた
+```
+
+first-match でしか見ないのは P2K-F03（diff-heads）と同じ形である。
+**演繰返しているので Wave 3 の F03 修理は優先度を上げる**。

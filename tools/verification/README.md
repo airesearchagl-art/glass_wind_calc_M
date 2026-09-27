@@ -45,6 +45,7 @@ so the comparison is not the tree agreeing with itself.
 | `manifest.mjs` | resolves dynamic provenance (SHAs, digests) and merges it with the spec, keeping `spec` and `measured` apart. |
 | `project-state-probe.mjs` | the one stable way to read project state and protected calculations. |
 | `verifier-package.mjs` | the handoff package for an independent verifier. |
+| `experiments/lint-discovery-depth.mjs` | measures how deep publication-lint discovery reaches, by planting a synthetic config module one directory down and restoring the tree. Closes QD-J23 with numbers rather than prose. |
 
 ## Evidence class vs admissibility
 
@@ -72,6 +73,29 @@ Two separate axes. Collapsing them loses the ability to say the true thing about
 `PASS` and `FAIL` are **results**, never admissibility values. `UNVERIFIED` is
 deliberately in both vocabularies: "nothing was measured" is both a legitimate
 result and a legitimate evidence-quality state.
+
+## Recently closed
+
+**QD-J23 — publication-lint discovery was non-recursive on both sides.**
+`defaultRoots()` and its own test called the same flat `readdirSync`, so a
+config module one directory down was invisible to both. Measured before
+repair, with three publication-facing values planted one level down — one of
+them tripping a HARD rule:
+
+| | flat | recursive |
+|---|---|---|
+| discovery reached the probe | no | yes |
+| inventory | 12 (+0) | 15 (+3) |
+| advisory warnings reported | 0 | 1 |
+| hard violations reported | 0 | 1 |
+| shipped suite | 7/7 green | 6/7, exit 1 |
+
+Reproduce both columns:
+
+```
+node tools/verification/experiments/lint-discovery-depth.mjs        # after
+node tools/guard-diff/mutate.mjs                                    # K2-01 is the "before"
+```
 
 ## Currently quarantined
 
@@ -108,6 +132,17 @@ requalification.
 - **Don't infer a false-positive rate from repository prose.** Define the
   population first. The guard is enforced at construction, so committed text is
   survivor-biased by definition.
+- **A copy of the implementation's algorithm is not an oracle.** If the test
+  walks the tree the same way the code walks it, the pair is blind along that
+  axis and the suite stays green while values go unseen. That was QD-J23, and
+  QD-J20 and QD-J21 before it. Use a different mechanism: a hand-written
+  literal, a different tool (`git ls-files`), or a structure the test builds.
+- **A reading you cannot parse is not a negative result.** An instrument that
+  returns nulls has not observed "no problem"; it has failed to observe. Make
+  it throw. `NODE_TEST_CONTEXT` leaking into a spawned `node --test` made one
+  of these scripts report success for a failing suite (P2K-F09) — the same
+  distinction the admissibility model draws when it keeps `UNVERIFIED` apart
+  from `PASS`.
 
 ## Determinism
 

@@ -24,6 +24,7 @@
 import { createRequire } from 'node:module';
 import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { posix as posixPath } from 'node:path';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(import.meta.url);
@@ -43,24 +44,82 @@ export const PUBLICATION_FACING_FIELDS = [
   'caseId'                      // published identifier (UI, export package, PR body)
 ];
 
+/** The shipped configuration tree, relative to the repository root. */
+export const CONFIG_DIR_NAME = 'project-config';
+
 /**
- * Default roots are DERIVED, not listed.
+ * Discover every shipped config module under `dir`, RECURSIVELY.
  *
- * The first version named `project-config/miyoshi.js` by hand and therefore
- * missed the manual input-mode config's shipped publicDescription entirely
- * (FP-01) -- the lint claimed to inspect publicDescription and did not inspect
- * one of them. A hand-written list of what to inspect goes stale the same way
- * a hand-written list of what to detect does; this campaign has been caught by
- * that shape repeatedly (F3, F13-03, F15-E3, F16-03). Every config module is
- * scanned, and a new one is covered the day it is added.
+ * Two separate lessons are baked in here.
+ *
+ * (1) Default roots are DERIVED, not listed. The first version named
+ *     `project-config/miyoshi.js` by hand and therefore missed the manual
+ *     input-mode config's shipped publicDescription entirely (FP-01) -- the
+ *     lint claimed to inspect publicDescription and did not inspect one of
+ *     them. A hand-written list of what to inspect goes stale the same way a
+ *     hand-written list of what to detect does (F3, F13-03, F15-E3, F16-03).
+ *
+ * (2) The scan is recursive. The previous version used a single flat
+ *     readdirSync, and so did its test, so neither could see a config module
+ *     one directory down (QD-J23). That is measured, not asserted:
+ *     `tools/verification/experiments/lint-discovery-depth.mjs` plants three
+ *     publication-facing values one level down -- one of them tripping a HARD
+ *     rule -- and observes discovery finding zero of them while the suite
+ *     stays green. Flat discovery also contradicted this function's own
+ *     documented promise that "a new config module is covered the day it is
+ *     added"; a subdirectory broke that promise silently.
+ *
+ * The failure modes are not symmetric, which is what decides the contract.
+ * Scanning one module too many costs a false advisory that a human dismisses.
+ * Scanning one too few costs a value that must never be published going
+ * unseen. This lint exists to prevent the second, so it over-includes.
+ *
+ * Deliberate properties, each pinned by a test:
+ *   - recursive, unbounded depth
+ *   - symlinks are NOT followed (no cycles, no escaping the tree)
+ *   - order is sorted, so the report is deterministic
+ *   - a module that fails to load THROWS; inspecting fewer values quietly is
+ *     the exact failure this function was rewritten to remove
+ *
+ * Returned names are POSIX-relative to `dir` with `.js` stripped, so a nested
+ * module reports as `sub/probe.publicDescription` and a human can find it.
  */
-export function defaultRoots() {
-  const dir = ROOT + 'project-config';
+export function discoverConfigModules(dir) {
+  const base = dir || ROOT + CONFIG_DIR_NAME;
+  const found = [];
+  // Explicit stack descent rather than readdirSync's own `recursive` option:
+  // the independent oracle in the test uses `git ls-files`, a different
+  // mechanism entirely, so the two cannot share a walker bug.
+  const stack = [''];
+  while (stack.length > 0) {
+    const relDir = stack.pop();
+    const absDir = relDir === '' ? base : base + '/' + relDir;
+    for (const entry of readdirSync(absDir, { withFileTypes: true })) {
+      const rel = relDir === '' ? entry.name : relDir + '/' + entry.name;
+      // A symlink is not descended and not loaded: following one can loop
+      // forever or leave the configuration tree. Measured caveat -- this line
+      // is defence in depth, not the mechanism. `withFileTypes` reports a
+      // symlink with isDirectory() AND isFile() both false, so the two checks
+      // below already exclude it; removing this line produced byte-identical
+      // output on a tree holding a file symlink, a directory symlink and a
+      // cyclic one (mutant K2-03, classified EQUIVALENT by that measurement,
+      // not by inspection). Kept because the exclusion is then stated rather
+      // than relied upon as a side effect of Dirent semantics.
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) { stack.push(rel); continue; }
+      if (entry.isFile() && rel.endsWith('.js')) found.push(rel);
+    }
+  }
+  return found.sort();
+}
+
+export function defaultRoots(dir) {
+  const base = dir || ROOT + CONFIG_DIR_NAME;
   const sources = {};
-  for (const file of readdirSync(dir).filter((f) => f.endsWith('.js')).sort()) {
+  for (const rel of discoverConfigModules(base)) {
     // A module that fails to load is a tooling problem, not a clean inventory:
     // surface it rather than silently inspecting fewer values.
-    sources[file.replace(/\.js$/, '')] = require(dir + '/' + file);
+    sources[rel.replace(/\.js$/, '')] = require(posixPath.join(base, rel));
   }
   return sources;
 }

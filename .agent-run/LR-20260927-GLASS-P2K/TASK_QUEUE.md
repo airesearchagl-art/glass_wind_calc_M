@@ -3,8 +3,8 @@
 ```text
 Wave 0  instrument inventory / shared-assumption graph          DONE
 Wave 1  evidence-admissibility model + verification manifest    DONE
-Wave 2  publication-lint discovery independence（QD-J23）        NEXT
-Wave 3  mutation + differential tool reproducibility            pending
+Wave 2  publication-lint discovery independence（QD-J23）        DONE
+Wave 3  mutation + differential tool reproducibility            NEXT
 Wave 4  browser verification durability                         pending
 Wave 5  fresh independent verifier trial（committed のみ）       pending
 Wave 6  repair findings / exact-head reverify                   pending
@@ -28,3 +28,13 @@ P2K-F07 → Wave 1/3 入力 corpus digest を記録する仕組みが無い
 ```text
 P2K-F08 → Wave 5   「とにかく throw」を見る test の形が他に残っていないか未調査
 ```
+
+## Wave 2 が生んだ項目
+
+```text
+P2K-F09 → Wave 3   mutate.mjs / diff-heads.mjs も NODE_TEST_CONTEXT に
+                   依存していないか調べる
+P2K-F03 の優先度を上げる（first-match 形が Wave 2 でも再発）
+mutate.mjs の EQUIVALENT 判定は guard 以外の file に適用できない
+```
+

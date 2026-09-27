@@ -303,7 +303,8 @@ SHARED_INTENTIONALLY  : production 内部の定数共有（miyoshi ← evidence�
                         定数を読みながら**手書き期待値で閉じている** test 4 件
 UNKNOWN / 未閉        : corpus.mjs の 2 定数導出（実験 A/B で盲目確定。UNKNOWN でなく
                         **確定した盲点**へ格下げ）
-                        publication-lint の readdirSync 非再帰（QD-J23）
+                        （publication-lint の readdirSync 非再帰 = QD-J23 は
+                         Wave 2 で閉じた。下記 §41 参照）
                         protected-value probe が未 committed（I-07）
                         Independent Review 手順が未 committed（I-09）
 ```
@@ -338,7 +339,8 @@ P2K-F07  入力 corpus digest を記録する仕組みが無い（§16 provenanc
 | Instrument | Class | Admissibility | Why |
 |---|---|---|---|
 | `npm-test` | regression | **ADMISSIBLE** | 契約を固定する。うち 4 箇所は定数と独立な手書き期待列を持ち、定数の縮小を捕らえる（実験 A/B で実証） |
-| `publication-lint` | regression | **ADMISSIBLE** | 警告が描画されることを FP-01 test が positive control 付きで押さえている |
+| `publication-lint` | regression | **ADMISSIBLE** | 警告が描画されることを FP-01 test が positive control 付きで押さえている。Wave 2 で discovery を再帰化し、oracle を実装と別機構に分離（QD-J23 閉） |
+| `lint-discovery-depth-experiment` | independent | **ADMISSIBLE** | 外から shipped lint と shipped suite を見る。guard から何も import しない。before/after が両方再現可能 |
 | `guard-diff` | regression | **INADMISSIBLE** | corpus が production 定数から導出され、定数と一緒に縮む（P2K-F01、実測 2 例） |
 | `mutation` | regression | DIAGNOSTIC_ONLY | KILLED は npm test が判定するので強いが、SURVIVED/EQUIVALENT の分岐は隔離中の corpus が判定する |
 | `project-state-probe` | observational | **ADMISSIBLE** | 実 API 経由。期待値は test 側の手書き。式を転記していないことを test が検査 |
@@ -374,3 +376,44 @@ P2K-F02  未閉（Wave 3）
 P2K-F03  未閉（Wave 3）
 P2K-F06  未閉（Wave 4）。manifest に known limitation として記録済み
 
+---
+
+## §41 — Wave 2 での変更（QD-J23）
+
+### I-02 `tools/evidence-publication-lint.mjs` の分類は変わらないが、根拠が変わった
+
+```text
+従来の UNKNOWN 項 : defaultRoots() と FP-01 test が同じ flat readdirSync
+現在           : 実装 = 明示 stack 下降
+                 oracle 1 = 手書き literal（committed fixture 木）
+                 oracle 2 = git ls-files（git の index）
+                 oracle 3 = test がその場で作る木
+→ SHARED_INTENTIONALLY でも UNKNOWN でもなく **INDEPENDENT**
+```
+
+### 新規 I-10 `tools/verification/experiments/lint-discovery-depth.mjs`
+
+```text
+class        : independent
+admissibility: ADMISSIBLE
+見ているもの : shipped lint と shipped suite を**外から**
+共有依存     : なし（guard を import しない）
+positive control : discovery を flat に戻すと 0/3 と報告し、suite は緑になる
+                   （= D-006 の before 列。mutant K2-01 で再現）
+negative control : probe 無しなら inventory は不変
+証明しないこと : project-config の外の値。開集合 heuristic（homoglyph 等）
+```
+
+### 計器の限界を 1 つ追記（mutation の分類根拠を強める）
+
+mutate.mjs の SURVIVED / EQUIVALENT の分岐は **guard corpus の probe** で決まるので、
+`project-config/evidence.js` 以外の file を変異させた場合には適用できない。
+K1-xx / K2-xx の SURVIVED は厳密には「SURVIVED か EQUIVALENT か未判定」である。
+
+K2-03（symlink guard）はその未判定を**別途測定**で埋めた初例。
+Dirent が symlink を isDirectory=false / isFile=false と報告するので
+guard は冗長——file / directory / 循環 symlink を含む木で
+出力が byte-identical だった。よって EQUIVALENT。
+
+この限界を踏まえても `mutation → DIAGNOSTIC_ONLY` は変えない。
+むしろこの制約がその分類の根拠である。
