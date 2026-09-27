@@ -370,5 +370,27 @@ export const MUTANTS = [
   { id: 'K5-11', describes: 'corpus built from the head under test again (P2K-F01 entry point)',
     file: 'tools/guard-diff/diff-heads.mjs',
     find: 'const corpus = buildCorpus();',
-    replace: 'const corpus = buildCorpus(head.PRIVATE_DOCUMENT_EXTENSION_SOURCE);' }
+    replace: 'const corpus = buildCorpus(head.PRIVATE_DOCUMENT_EXTENSION_SOURCE);' },
+  // --- Phase 2K Human Gate: the mutation classification split ---
+  // K1-01 already covers the other direction: it flips the one remaining
+  // DIAGNOSTIC_ONLY entry (now mutation-equivalence-analysis) to ADMISSIBLE.
+  { id: 'K6-01', describes: 'KILLED verdict demoted to DIAGNOSTIC_ONLY (under-claiming)',
+    file: 'tools/verification/verification-spec.json',
+    find: '      "id": "mutation-kill",\n      "command": "node tools/guard-diff/mutate.mjs",\n      "evidenceClass": "regression",\n      "admissibility": "ADMISSIBLE",',
+    replace: '      "id": "mutation-kill",\n      "command": "node tools/guard-diff/mutate.mjs",\n      "evidenceClass": "regression",\n      "admissibility": "DIAGNOSTIC_ONLY",' },
+  { id: 'K6-02', describes: "the non-kill reading loses SURVIVED_OR_EQUIVALENT_UNDETERMINED",
+    file: 'tools/verification/verification-spec.json',
+    find: '"proves": "nothing on its own. A generic non-killed result means SURVIVED_OR_EQUIVALENT_UNDETERMINED unless a separate operator-specific measurement resolves it"',
+    replace: '"proves": "that a non-killed mutant is equivalent"' },
+  // --- Phase 2K P2K-F08: one focused operator per REQUIRED_FIX (Human Gate §11) ---
+  // Both existed as real defects: with a bare assert.throws(fn) the corrected
+  // tests below used to pass with the guard removed. Measured before repairing.
+  { id: 'K7-01', describes: 'registry: projectId guard removed (another guard used to cover it)',
+    file: 'project-config/registry.js',
+    find: '    if (!isPlainString(config.projectId)) {',
+    replace: '    if (false) {' },
+  { id: 'K7-02', describes: 'manual: non-object input guard removed',
+    file: 'project-config/manual.js',
+    find: "    if (!raw || typeof raw !== 'object') {",
+    replace: '    if (false) {' }
 ];

@@ -427,3 +427,71 @@ P2K-M11 が tools 全体を走査し、表にない § 参照を落とす。
 これは packet を committed にはしない——**gap を可視で有界にする**。
 この repo が正直に主張できるのはそこまでである。
 
+## D-016 — Human Gate: mutation の主張を 2 つに分けた
+
+単一の `mutation = DIAGNOSTIC_ONLY` は **両方向に同時に誤っていた**。
+
+```text
+mutation-kill                  regression / ADMISSIBLE
+mutation-equivalence-analysis  regression / DIAGNOSTIC_ONLY
+```
+
+理由:
+
+```text
+KILLED は npm test が決める。npm test は ADMISSIBLE な regression 証拠なので、
+  その上に立つ KILLED を DIAGNOSTIC_ONLY に落とすのは過小申告である。
+SURVIVED / EQUIVALENT の分岐は guard corpus の probe が決める。
+  その行動面の外にある mutant には分解能が無いので、
+  汎用の非 kill 結果は SURVIVED_OR_EQUIVALENT_UNDETERMINED である。
+```
+
+KILLED が意味するのはこれだけである——
+**この記述された変異を当てたとき、少なくとも 1 つの持続的な test が落ちた**。
+変異集合の網羅性も、実装の意味論的正しさも、
+EQUIVALENT 判定の正しさも証明しない。
+
+### K2-03 の帰属
+
+```text
+mutation harness   : 非 kill
+別途の焦点測定   : この operator / この環境について EQUIVALENT
+```
+
+harness の成果としては書かない。spec の reason がその分離を保持し、
+P2K-M12 が検査する。
+
+## D-017 — P2K-F08: 候補集団を推測せず、基準を完全適用した
+
+検証者は「18 箇所」と報告したが、**どの数え方でも 18 にならない**。
+
+```text
+単一引数の assert.throws : 49
+それを含む test block  : 25
+連続行を 1 件と数える : 31
+検証者が名指しした分   : 13
+```
+
+推測で 18 を選ぶと実在の欠陥を落としかねないので、
+**同じ基準を完全に適用した 49 件**を triage した（名指し 13 をすべて含む超集合）。
+基準を拡げたわけではないので §20 の「19 件目を探さない」には反していない。
+
+### 判定は測定で行った
+
+`assert.throws` を preload で wrap し、全 49 箇所が実際に投げている
+message を 108 回分記録した。疑わしい 2 件は guard を実際に消して測った。
+
+```text
+BENIGN 43 / AMBIGUOUS 4 / REQUIRED_FIX 2 —— untriaged 0
+```
+
+REQUIRED_FIX 2 件はどちらも **test の欠陥**であり runtime の欠陥ではない。
+どちらも不正入力は結局拒否されている（fail closed）。
+§14 に従い project-config/** は変更していない。
+
+## D-018 — §参照の錠が自分の追加を捕らえた
+
+本 step で mutants.mjs の comment に §11 を書いた瞬間、P2K-M11 が落ちた。
+意図した通りである——新しい dangling 参照は黙って増えるのではなく test を落とす。
+§11 を表へ追加し、その経緯を REQUIREMENT-REFERENCES.md に記録した。
+

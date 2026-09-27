@@ -5,112 +5,6 @@
   "note": "Declarative verification spec. Dynamic provenance (SHAs, digests, changed files) is resolved by tools/verification/manifest.mjs at run time and is NOT stored here, so this file stays reviewable and does not go stale against the tree.",
   "instruments": [
     {
-      "id": "npm-test",
-      "command": "npm test",
-      "evidenceClass": "regression",
-      "admissibility": "ADMISSIBLE",
-      "target": "every module contract pinned by the test files in tests/",
-      "oracle": "mixed: mostly the stated implementation contract (regression); four sites use hand-written expected sets independent of the constant under test (P2J-S37 dots, P2J-TB19 extensions, the advisory rule-name deepEqual, FP-01b path grammar)",
-      "sharedDependencies": [
-        "requires production modules as the subject under test (legitimate)",
-        "six test files read production constants; four of those close the hole with hand-written expected values"
-      ],
-      "positiveControl": "most tests pair a rejection case with an accepted-safe case",
-      "negativeControl": "uneven — present in some tests, absent in others",
-      "proves": "the pinned contracts still hold",
-      "doesNotProve": "absence of unknown defects; correctness of the contracts themselves",
-      "instrumentFiles": [
-        "tests/"
-      ],
-      "finding": null,
-      "reason": null
-    },
-    {
-      "id": "publication-lint",
-      "command": "npm run lint:evidence-publication",
-      "evidenceClass": "regression",
-      "admissibility": "ADMISSIBLE",
-      "target": "advisory warnings reach a human for every publication-facing value in shipped config, at any depth",
-      "oracle": "production lintPublicEvidenceText as subject; the reader is the rendered report",
-      "sharedDependencies": [
-        "PUBLICATION_FACING_FIELDS shared with its own test (closed by a hardcoded deepEqual)"
-      ],
-      "positiveControl": "restoring the pre-FP-01 hand-listed roots makes the completeness test fail, demonstrated; reverting discovery to flat makes P2K-L01/L02/L03/L05/L07 fail, demonstrated as mutant K2-01",
-      "negativeControl": "clean values produce zero warnings",
-      "proves": "every warning computed for committed config is rendered with its path, including config modules in subdirectories",
-      "doesNotProve": "runtime-input safety (QD-J22); semantic disclosure; that an empty advisory list means the prose is publishable",
-      "instrumentFiles": [
-        "tools/evidence-publication-lint.mjs",
-        "tests/lint-discovery-independence.test.js"
-      ],
-      "finding": null,
-      "reason": null
-    },
-    {
-      "id": "guard-diff",
-      "command": "node tools/guard-diff/diff-heads.mjs <base-rev>",
-      "evidenceClass": "regression",
-      "admissibility": "ADMISSIBLE",
-      "target": "no input in the corpus that the base revision rejects is accepted by the target",
-      "oracle": "the base revision's own verdicts, over a corpus independent of both revisions; attribution comes from each side's own error message",
-      "sharedDependencies": [
-        "none: the corpus owns its committed threat list and imports nothing from project-config (pinned by P2K-D01)"
-      ],
-      "positiveControl": "tools/verification/experiments/corpus-independence.mjs regenerates 26496 and 40000 and cross-checks them against a committed expectations file; mutants K3-01..K3-09 cover the corpus repair itself",
-      "negativeControl": "base and target identical produces 0 in every bucket",
-      "proves": "that no corpus input the base rejects is accepted by the target, that every hard rule and every advisory rule is exercised by at least one input, and which rule each rejection is attributed to on each side",
-      "doesNotProve": "completeness. The corpus is a finite enumerated threat list and cannot reach open-set forms — confusable homoglyphs, spelled-out separators, bracketed dots (QD-J13). A re-attribution count also does not bound how far a rule weakened, only that attribution moved.",
-      "instrumentFiles": [
-        "tools/guard-diff/corpus.mjs",
-        "tools/guard-diff/differential.mjs",
-        "tools/guard-diff/diff-heads.mjs"
-      ],
-      "finding": null,
-      "reason": "P2K-F01 repaired in Wave 3. The corpus was quarantined because it derived DOT_EQUIVALENTS from the module under test and took the extension source from the head under test, so a commit that shrank either constant shrank the corpus policing it. The corpus now owns its threat list and imports nothing from project-config (pinned structurally by P2K-D01). Re-measured on Wave 0's two experiments, exactly as Wave 0 made them: dropping one dot equivalent gives 26496 regressions, dropping five extension atoms gives 40000, both exit 1, where the derived corpus gave 0 for both. Regenerate with tools/verification/experiments/corpus-independence.mjs, which fails if the measurement disagrees with its committed expectations file. Wave 3 first published 32000 for the second figure; that came from a FOUR-atom mutation, not Wave 0's five, and the two were wrongly described as the same experiment."
-    },
-    {
-      "id": "mutation",
-      "command": "node tools/guard-diff/mutate.mjs",
-      "evidenceClass": "regression",
-      "admissibility": "DIAGNOSTIC_ONLY",
-      "target": "whether the test suite actually pins each stated contract",
-      "oracle": "the test suite (counterfactual)",
-      "sharedDependencies": [
-        "the SURVIVED/EQUIVALENT split uses the guard corpus probe, so it cannot adjudicate a mutant in any other file"
-      ],
-      "positiveControl": "anchor-exact-once check; PATCH-MISS and HARNESS ERROR reported as failures, never as kills",
-      "negativeControl": "byte-difference check rejects a no-op mutant",
-      "proves": "for each committed operator, whether some test reacts",
-      "doesNotProve": "operator-set completeness; EQUIVALENT is only as good as the probe's resolution (QD-J21: a probe recording only rule names reported a gutted warning message as equivalent)",
-      "instrumentFiles": [
-        "tools/guard-diff/mutate.mjs",
-        "tools/guard-diff/mutants.mjs",
-        "tools/guard-diff/suite-verdict.mjs"
-      ],
-      "finding": null,
-      "reason": "KILLED verdicts are decided by npm test and are strong. The SURVIVED-versus-EQUIVALENT split is decided by the guard corpus probe, which cannot adjudicate a mutant in any other file, so every SURVIVED outside project-config/evidence.js is strictly 'SURVIVED or EQUIVALENT, undetermined'. The weaker half sets the label. Wave 3 also fixed how the harness reads a suite run: a run with no TAP summary, or one whose exit code and fail count disagree, is a HARNESS ERROR rather than 'no test failed' (P2K-F09)."
-    },
-    {
-      "id": "project-state-probe",
-      "command": "node tools/verification/project-state-probe.mjs",
-      "evidenceClass": "observational",
-      "admissibility": "ADMISSIBLE",
-      "target": "the project's actual closure state, preset values and protected calculations",
-      "oracle": "the running product via its real APIs; expected values are hand-written in its test",
-      "sharedDependencies": [
-        "calls production calculation APIs deliberately — it must not reimplement a formula"
-      ],
-      "positiveControl": "renaming or mis-sourcing readySlotCount fails the test (K1-04)",
-      "negativeControl": "forbidden-key scan rejects any Evidence prose or private identifier in the output",
-      "proves": "the exact project state for the tree it ran against, in a stable versioned shape",
-      "doesNotProve": "anything about a different tree; it is a reporter, not a checker",
-      "instrumentFiles": [
-        "tools/verification/project-state-probe.mjs"
-      ],
-      "finding": null,
-      "reason": null
-    },
-    {
       "id": "browser-w4",
       "command": "node tools/browser-checks/browser-w4.mjs",
       "evidenceClass": "observational",
@@ -133,26 +27,6 @@
       "reason": "UNVERIFIED is about the TARGET, not the instrument: this repository carries no browser measurement for an arbitrary head, so a verifier must run it at theirs. Wave 4 made that possible anywhere — Playwright is discovered (PLAYWRIGHT_MODULE, bare specifier, npm root -g, interpreter-relative) instead of imported from one machine's absolute path (P2K-F06) — and made the result readable by mapping each outcome to its own exit code (PASS->0, FAIL->1, UNVERIFIED->3, ERROR->4), with zero checks and zero failures classified ERROR rather than PASS. Wave 6 extended both halves to the other four harnesses, which Wave 4 had left on the absolute path."
     },
     {
-      "id": "probe-w4",
-      "command": "node tools/browser-checks/probe-w4.mjs",
-      "evidenceClass": "observational",
-      "admissibility": "UNVERIFIED",
-      "target": "DOM injection probes against the closure UI; no page errors",
-      "oracle": "real Chromium",
-      "sharedDependencies": [
-        "Playwright absolute path (P2K-F06)"
-      ],
-      "positiveControl": "asserts the injected markup is present as text, so a silent no-op is visible",
-      "negativeControl": null,
-      "proves": "injected content does not become live DOM for the head measured",
-      "doesNotProve": "anything about an unmeasured head",
-      "instrumentFiles": [
-        "tools/browser-checks/probe-w4.mjs"
-      ],
-      "finding": null,
-      "reason": "no browser measurement exists for the current target head"
-    },
-    {
       "id": "failopen-w4",
       "command": "node tools/browser-checks/failopen-w4.mjs",
       "evidenceClass": "observational",
@@ -173,44 +47,26 @@
       "reason": "no browser measurement exists for the current target head"
     },
     {
-      "id": "stageA-regression",
-      "command": "node tools/browser-checks/stageA-regression.mjs",
-      "evidenceClass": "observational",
-      "admissibility": "UNVERIFIED",
-      "target": "Stage A exact-head regression over the protected values, read from the loaded page",
-      "oracle": "real Chromium",
+      "id": "guard-diff",
+      "command": "node tools/guard-diff/diff-heads.mjs <base-rev>",
+      "evidenceClass": "regression",
+      "admissibility": "ADMISSIBLE",
+      "target": "no input in the corpus that the base revision rejects is accepted by the target",
+      "oracle": "the base revision's own verdicts, over a corpus independent of both revisions; attribution comes from each side's own error message",
       "sharedDependencies": [
-        "Playwright absolute path (P2K-F06)"
+        "none: the corpus owns its committed threat list and imports nothing from project-config (pinned by P2K-D01)"
       ],
-      "positiveControl": "reads protected values back from the page rather than from the module",
-      "negativeControl": null,
-      "proves": "the protected values as the browser sees them for the head measured",
-      "doesNotProve": "anything about an unmeasured head",
+      "positiveControl": "tools/verification/experiments/corpus-independence.mjs regenerates 26496 and 40000 and cross-checks them against a committed expectations file; mutants K3-01..K3-09 cover the corpus repair itself",
+      "negativeControl": "base and target identical produces 0 in every bucket",
+      "proves": "that no corpus input the base rejects is accepted by the target, that every hard rule and every advisory rule is exercised by at least one input, and which rule each rejection is attributed to on each side",
+      "doesNotProve": "completeness. The corpus is a finite enumerated threat list and cannot reach open-set forms — confusable homoglyphs, spelled-out separators, bracketed dots (QD-J13). A re-attribution count also does not bound how far a rule weakened, only that attribution moved.",
       "instrumentFiles": [
-        "tools/browser-checks/stageA-regression.mjs"
+        "tools/guard-diff/corpus.mjs",
+        "tools/guard-diff/differential.mjs",
+        "tools/guard-diff/diff-heads.mjs"
       ],
       "finding": null,
-      "reason": "no browser measurement exists for the current target head"
-    },
-    {
-      "id": "parser-boundary",
-      "command": "node tools/browser-checks/parser-boundary.mjs",
-      "evidenceClass": "independent",
-      "admissibility": "UNVERIFIED",
-      "target": "the html-like-tag guard versus real Chromium element creation",
-      "oracle": "real Chromium — the expected answer comes from the browser, not from the guard, which makes this the most independent oracle in the repository",
-      "sharedDependencies": [
-        "requires production evidence.js as the SUBJECT; the expected value is the browser's"
-      ],
-      "positiveControl": "documented sabotage test reports 19 bypasses on a neutered guard",
-      "negativeControl": "parses in both div and table context, because innerHTML silently drops table-scoped tags",
-      "proves": "for the 42 generated forms, whether the guard and the browser disagree",
-      "doesNotProve": "forms outside the generated set; anything about an unmeasured head",
-      "instrumentFiles": [
-        "tools/browser-checks/parser-boundary.mjs"
-      ],
-      "finding": null,
-      "reason": "no browser measurement exists for the current target head"
+      "reason": "P2K-F01 repaired in Wave 3. The corpus was quarantined because it derived DOT_EQUIVALENTS from the module under test and took the extension source from the head under test, so a commit that shrank either constant shrank the corpus policing it. The corpus now owns its threat list and imports nothing from project-config (pinned structurally by P2K-D01). Re-measured on Wave 0's two experiments, exactly as Wave 0 made them: dropping one dot equivalent gives 26496 regressions, dropping five extension atoms gives 40000, both exit 1, where the derived corpus gave 0 for both. Regenerate with tools/verification/experiments/corpus-independence.mjs, which fails if the measurement disagrees with its committed expectations file. Wave 3 first published 32000 for the second figure; that came from a FOUR-atom mutation, not Wave 0's five, and the two were wrongly described as the same experiment."
     },
     {
       "id": "independent-review",
@@ -249,6 +105,171 @@
       ],
       "finding": null,
       "reason": null
+    },
+    {
+      "id": "mutation-equivalence-analysis",
+      "command": "node tools/guard-diff/mutate.mjs",
+      "evidenceClass": "regression",
+      "admissibility": "DIAGNOSTIC_ONLY",
+      "target": "distinguishing SURVIVED from EQUIVALENT for a mutant no test killed",
+      "oracle": "the generic equivalence probe, which observes the guard's public text API over the committed corpus",
+      "sharedDependencies": [
+        "the generic probe is guard-corpus-based, so it cannot adjudicate a mutant outside that behavioural surface"
+      ],
+      "positiveControl": "QD-J21: a probe that recorded only rule names reported a gutted advisory message as equivalent; the probe now records rule, severity and message",
+      "negativeControl": "for a mutant in a file the probe cannot observe, the harness reports non-killed rather than asserting equivalence",
+      "proves": "nothing on its own. A generic non-killed result means SURVIVED_OR_EQUIVALENT_UNDETERMINED unless a separate operator-specific measurement resolves it",
+      "doesNotProve": "that a non-killed mutant is equivalent. EQUIVALENT is only as good as the probe's resolution, and outside project-config/evidence.js the generic probe has none",
+      "instrumentFiles": [
+        "tools/guard-diff/mutate.mjs",
+        "tools/guard-diff/mutants.mjs"
+      ],
+      "finding": null,
+      "reason": "Human Gate, Phase 2K final classification: the single DIAGNOSTIC_ONLY label on 'mutation' was too coarse, because it understated the KILLED verdict (decided by npm test, admissible) in order to describe the non-kill split honestly. The two claims are now classified separately. This half stays DIAGNOSTIC_ONLY: the generic automatic equivalence probe is guard-corpus-based and cannot adjudicate arbitrary mutants outside that behavioural surface, so a generic non-killed result is SURVIVED_OR_EQUIVALENT_UNDETERMINED. K2-03 is the worked example — the battery reports it non-killed, and a SEPARATE focused measurement of Dirent behaviour established equivalence for that one operator in that one environment. That equivalence result belongs to the focused measurement, not to this instrument."
+    },
+    {
+      "id": "mutation-kill",
+      "command": "node tools/guard-diff/mutate.mjs",
+      "evidenceClass": "regression",
+      "admissibility": "ADMISSIBLE",
+      "target": "whether the committed test suite reacts to a committed mutation operator",
+      "oracle": "npm test, run against the mutated tree (counterfactual)",
+      "sharedDependencies": [
+        "none for the KILLED verdict: it is decided by npm test, which is itself admissible regression evidence"
+      ],
+      "positiveControl": "anchor-exact-once check; PATCH-MISS and HARNESS ERROR are reported as failures, never as kills; suite-verdict.mjs refuses a run with no TAP summary or with disagreeing signals (P2K-F09)",
+      "negativeControl": "a no-op mutant is rejected by the byte-difference check",
+      "proves": "that at least one durable test failed when this stated mutation was applied",
+      "doesNotProve": "mutation-set completeness; semantic correctness of the implementation; the correctness of any EQUIVALENT judgement — that is a separate claim, classified separately as mutation-equivalence-analysis",
+      "instrumentFiles": [
+        "tools/guard-diff/mutate.mjs",
+        "tools/guard-diff/mutants.mjs",
+        "tools/guard-diff/suite-verdict.mjs"
+      ],
+      "finding": null,
+      "reason": null
+    },
+    {
+      "id": "npm-test",
+      "command": "npm test",
+      "evidenceClass": "regression",
+      "admissibility": "ADMISSIBLE",
+      "target": "every module contract pinned by the test files in tests/",
+      "oracle": "mixed: mostly the stated implementation contract (regression); four sites use hand-written expected sets independent of the constant under test (P2J-S37 dots, P2J-TB19 extensions, the advisory rule-name deepEqual, FP-01b path grammar)",
+      "sharedDependencies": [
+        "requires production modules as the subject under test (legitimate)",
+        "six test files read production constants; four of those close the hole with hand-written expected values"
+      ],
+      "positiveControl": "most tests pair a rejection case with an accepted-safe case",
+      "negativeControl": "uneven — present in some tests, absent in others",
+      "proves": "the pinned contracts still hold",
+      "doesNotProve": "absence of unknown defects; correctness of the contracts themselves",
+      "instrumentFiles": [
+        "tests/"
+      ],
+      "finding": null,
+      "reason": null
+    },
+    {
+      "id": "parser-boundary",
+      "command": "node tools/browser-checks/parser-boundary.mjs",
+      "evidenceClass": "independent",
+      "admissibility": "UNVERIFIED",
+      "target": "the html-like-tag guard versus real Chromium element creation",
+      "oracle": "real Chromium — the expected answer comes from the browser, not from the guard, which makes this the most independent oracle in the repository",
+      "sharedDependencies": [
+        "requires production evidence.js as the SUBJECT; the expected value is the browser's"
+      ],
+      "positiveControl": "documented sabotage test reports 19 bypasses on a neutered guard",
+      "negativeControl": "parses in both div and table context, because innerHTML silently drops table-scoped tags",
+      "proves": "for the 42 generated forms, whether the guard and the browser disagree",
+      "doesNotProve": "forms outside the generated set; anything about an unmeasured head",
+      "instrumentFiles": [
+        "tools/browser-checks/parser-boundary.mjs"
+      ],
+      "finding": null,
+      "reason": "no browser measurement exists for the current target head"
+    },
+    {
+      "id": "probe-w4",
+      "command": "node tools/browser-checks/probe-w4.mjs",
+      "evidenceClass": "observational",
+      "admissibility": "UNVERIFIED",
+      "target": "DOM injection probes against the closure UI; no page errors",
+      "oracle": "real Chromium",
+      "sharedDependencies": [
+        "Playwright absolute path (P2K-F06)"
+      ],
+      "positiveControl": "asserts the injected markup is present as text, so a silent no-op is visible",
+      "negativeControl": null,
+      "proves": "injected content does not become live DOM for the head measured",
+      "doesNotProve": "anything about an unmeasured head",
+      "instrumentFiles": [
+        "tools/browser-checks/probe-w4.mjs"
+      ],
+      "finding": null,
+      "reason": "no browser measurement exists for the current target head"
+    },
+    {
+      "id": "project-state-probe",
+      "command": "node tools/verification/project-state-probe.mjs",
+      "evidenceClass": "observational",
+      "admissibility": "ADMISSIBLE",
+      "target": "the project's actual closure state, preset values and protected calculations",
+      "oracle": "the running product via its real APIs; expected values are hand-written in its test",
+      "sharedDependencies": [
+        "calls production calculation APIs deliberately — it must not reimplement a formula"
+      ],
+      "positiveControl": "renaming or mis-sourcing readySlotCount fails the test (K1-04)",
+      "negativeControl": "forbidden-key scan rejects any Evidence prose or private identifier in the output",
+      "proves": "the exact project state for the tree it ran against, in a stable versioned shape",
+      "doesNotProve": "anything about a different tree; it is a reporter, not a checker",
+      "instrumentFiles": [
+        "tools/verification/project-state-probe.mjs"
+      ],
+      "finding": null,
+      "reason": null
+    },
+    {
+      "id": "publication-lint",
+      "command": "npm run lint:evidence-publication",
+      "evidenceClass": "regression",
+      "admissibility": "ADMISSIBLE",
+      "target": "advisory warnings reach a human for every publication-facing value in shipped config, at any depth",
+      "oracle": "production lintPublicEvidenceText as subject; the reader is the rendered report",
+      "sharedDependencies": [
+        "PUBLICATION_FACING_FIELDS shared with its own test (closed by a hardcoded deepEqual)"
+      ],
+      "positiveControl": "restoring the pre-FP-01 hand-listed roots makes the completeness test fail, demonstrated; reverting discovery to flat makes P2K-L01/L02/L03/L05/L07 fail, demonstrated as mutant K2-01",
+      "negativeControl": "clean values produce zero warnings",
+      "proves": "every warning computed for committed config is rendered with its path, including config modules in subdirectories",
+      "doesNotProve": "runtime-input safety (QD-J22); semantic disclosure; that an empty advisory list means the prose is publishable",
+      "instrumentFiles": [
+        "tools/evidence-publication-lint.mjs",
+        "tests/lint-discovery-independence.test.js"
+      ],
+      "finding": null,
+      "reason": null
+    },
+    {
+      "id": "stageA-regression",
+      "command": "node tools/browser-checks/stageA-regression.mjs",
+      "evidenceClass": "observational",
+      "admissibility": "UNVERIFIED",
+      "target": "Stage A exact-head regression over the protected values, read from the loaded page",
+      "oracle": "real Chromium",
+      "sharedDependencies": [
+        "Playwright absolute path (P2K-F06)"
+      ],
+      "positiveControl": "reads protected values back from the page rather than from the module",
+      "negativeControl": null,
+      "proves": "the protected values as the browser sees them for the head measured",
+      "doesNotProve": "anything about an unmeasured head",
+      "instrumentFiles": [
+        "tools/browser-checks/stageA-regression.mjs"
+      ],
+      "finding": null,
+      "reason": "no browser measurement exists for the current target head"
     }
   ],
   "protectedInvariants": [
@@ -437,6 +458,12 @@
       "id": "P2K-F10",
       "statement": "the differential corpus is a finite enumerated threat list. It now exercises every hard and advisory rule and is independent of the subject, but it cannot reach open-set forms: confusable homoglyphs, spelled-out separators, bracketed dots. A REGRESSIONS: 0 is a statement about this corpus, whose digest is printed beside it, and never about the guard in general.",
       "status": "open by construction — not repairable, only stated",
+      "owner": "none"
+    },
+    {
+      "id": "P2K-F15",
+      "statement": "a generic non-killed mutation result is SURVIVED_OR_EQUIVALENT_UNDETERMINED. The automatic equivalence probe observes the guard's public text API over the committed corpus, so for a mutant in any other file it has no resolution at all. K2-03 is reported non-killed by the battery; its EQUIVALENT status comes from a separate focused measurement of readdirSync(withFileTypes) Dirent behaviour on this filesystem and Node version, and is attributed to that measurement rather than to the harness.",
+      "status": "open by construction — classified rather than repaired (Human Gate, Phase 2K)",
       "owner": "none"
     }
   ],

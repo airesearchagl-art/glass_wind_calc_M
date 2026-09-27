@@ -87,10 +87,20 @@ test('AC-04: manual inputはtrusted presetとして登録できない', () => {
 
 test('AC-04: registryは不正なconfig（非object・projectId欠落・publicLabel境界なし）を拒否する', () => {
   const reg = PresetRegistry.createRegistry();
-  assert.throws(() => reg.registerPreset(null));
-  assert.throws(() => reg.registerPreset({}));
-  assert.throws(() => reg.registerPreset({ projectId: 'x', hasFixedPreset: true })); // getPublicLabelなし
-  assert.throws(() => reg.registerPreset({ projectId: 'BAD ID', hasFixedPreset: true, getPublicLabel: () => 'x' }));
+  // P2K-F08 REQUIRED_FIX. These four used to be bare `assert.throws(fn)`, and
+  // the second one was satisfied by the wrong guard: `{}` is missing projectId
+  // AND hasFixedPreset AND getPublicLabel, so neutralising the projectId check
+  // left this whole test passing -- measured, with the guard disabled in a copy
+  // of the tree. Each assertion now names the guard it is actually about, so a
+  // later guard cannot stand in for an earlier one.
+  assert.throws(() => reg.registerPreset(null),
+    /preset config must be an object/, 'non-object の guard');
+  assert.throws(() => reg.registerPreset({}),
+    /must have a non-empty string projectId/, 'projectId 欠落の guard');
+  assert.throws(() => reg.registerPreset({ projectId: 'x', hasFixedPreset: true }),
+    /must expose getPublicLabel\(\)/, 'getPublicLabel 欠落の guard');
+  assert.throws(() => reg.registerPreset({ projectId: 'BAD ID', hasFixedPreset: true, getPublicLabel: () => 'x' }),
+    /projectId must match/, 'projectId 書式の guard');
 });
 
 /* ============================================================

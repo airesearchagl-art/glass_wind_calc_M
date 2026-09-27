@@ -166,6 +166,40 @@ node tools/verification/experiments/lint-discovery-depth.mjs        # after
 node tools/guard-diff/mutate.mjs                                    # K2-01 is the "before"
 ```
 
+## How to report these two results (Human Gate, Phase 2K final)
+
+Two instruments are easy to over-report. The approved wording is exact.
+
+**guard-diff**
+
+```
+guard-diff: ADMISSIBLE regression evidence for its committed corpus only
+```
+
+Not "independent proof of guard correctness". Not "complete privacy
+verification". The admissible claim is: *no input in the committed independent
+corpus that the base revision rejects is accepted by the target revision.* It
+does not establish corpus completeness, semantic publication safety, absence of
+open-set bypasses, or behaviour outside the enumerated corpus. P2K-F10 remains
+the explicit limitation.
+
+**mutation** — never reported as a single verdict:
+
+```
+mutation KILLED verdict                      : ADMISSIBLE regression evidence
+automatic SURVIVED/EQUIVALENT classification : DIAGNOSTIC_ONLY
+```
+
+A KILLED result means only that at least one durable test failed when the stated
+mutation was applied. A generic non-killed result is
+`SURVIVED_OR_EQUIVALENT_UNDETERMINED` unless a separate operator-specific
+measurement resolves it — the automatic probe is guard-corpus-based and has no
+resolution outside that behavioural surface (P2K-F15).
+
+K2-03 is the worked example: the battery reports it **non-killed**, and its
+EQUIVALENT status comes from a separate focused measurement of Dirent behaviour.
+That result belongs to the focused measurement, not to the harness.
+
 ## Nothing is currently quarantined
 
 `guard-diff` was INADMISSIBLE through Waves 1 and 2 and was re-admitted in Wave 3

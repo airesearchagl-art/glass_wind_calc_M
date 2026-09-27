@@ -20,7 +20,10 @@ const load = () => import(MODULE);
 // Hand-written instrument identity set. Adding or removing an instrument is a
 // deliberate act that must update this list (set identity, not a count).
 const EXPECTED_INSTRUMENT_IDS = [
-  'browser-w4', 'failopen-w4', 'guard-diff', 'independent-review', 'mutation',
+  'browser-w4', 'failopen-w4', 'guard-diff', 'independent-review',
+  // Human Gate, Phase 2K final: the single 'mutation' entry was split, because
+  // one label could not honestly carry both claims at once.
+  'mutation-kill', 'mutation-equivalence-analysis',
   'npm-test', 'parser-boundary', 'probe-w4', 'project-state-probe',
   'publication-lint', 'stageA-regression',
   // Wave 2 (QD-J23)
@@ -96,9 +99,15 @@ test('P2K-M03: every instrument declares sharedDependencies explicitly', async (
   // The mutation harness's remaining shared assumption must stay declared: its
   // SURVIVED/EQUIVALENT split is decided by the guard corpus, so it cannot
   // adjudicate a mutant in any other file.
-  const mut = manifest.spec.instruments.find((i) => i.id === 'mutation');
-  assert.equal(mut.sharedDependencies.some((d) => /corpus/i.test(d)), true,
-    'mutation の corpus 依存が宣言から消えた');
+  // The corpus dependency belongs to the EQUIVALENCE half only. The KILLED half
+  // is decided by npm test and must not claim a corpus dependency it does not
+  // have -- that was the coarseness the Human Gate split corrects.
+  const mutEq = manifest.spec.instruments.find((i) => i.id === 'mutation-equivalence-analysis');
+  assert.equal(mutEq.sharedDependencies.some((d) => /corpus/i.test(d)), true,
+    'equivalence 判定の corpus 依存が宣言から消えた');
+  const mutKill = manifest.spec.instruments.find((i) => i.id === 'mutation-kill');
+  assert.equal(mutKill.sharedDependencies.some((d) => /corpus/i.test(d)), false,
+    'KILLED 判定に corpus 依存を残している');
   // QD-J23 was publication-lint's shared assumption: the implementation and
   // its test walked the config directory with the same flat readdirSync.
   // Wave 2 closed it, so this assertion is inverted rather than deleted --
@@ -226,7 +235,8 @@ test('P2K-M09: 12 instrument 全部の class と admissibility を literal で�
     ['guard-diff', 'ADMISSIBLE', 'regression'],
     ['independent-review', 'UNVERIFIED', 'independent'],
     ['lint-discovery-depth-experiment', 'ADMISSIBLE', 'independent'],
-    ['mutation', 'DIAGNOSTIC_ONLY', 'regression'],
+    ['mutation-equivalence-analysis', 'DIAGNOSTIC_ONLY', 'regression'],
+    ['mutation-kill', 'ADMISSIBLE', 'regression'],
     ['npm-test', 'ADMISSIBLE', 'regression'],
     ['parser-boundary', 'UNVERIFIED', 'independent'],
     ['probe-w4', 'UNVERIFIED', 'observational'],
@@ -346,5 +356,48 @@ test('P2K-M11: tools が引く §NN はすべて committed な表に存在する
     'committed な packet の digest が表にない');
   assert.match(table, /not\s+in\s+this\s+repository|are \*\*not\*\*/,
     '未 commit の packet があることを表が言っていない');
+});
+
+test('P2K-M12: mutation の 2 つの主張は別々に分類されている（Human Gate）', async () => {
+  const m = await load();
+  const manifest = m.buildManifest();
+
+  // Parsed from the model, not matched as a string. A single DIAGNOSTIC_ONLY on
+  // "mutation" was too coarse in both directions at once: it understated the
+  // KILLED verdict, which npm test decides and which is admissible regression
+  // evidence, in order to describe the non-kill split honestly.
+  const kill = manifest.spec.instruments.find((i) => i.id === 'mutation-kill');
+  const equiv = manifest.spec.instruments.find((i) => i.id === 'mutation-equivalence-analysis');
+  assert.ok(kill, 'mutation-kill が無い');
+  assert.ok(equiv, 'mutation-equivalence-analysis が無い');
+
+  assert.equal(kill.admissibility, 'ADMISSIBLE',
+    'KILLED 判定は npm test が決める。DIAGNOSTIC_ONLY に落とすのは過小申告: ' +
+    kill.admissibility);
+  assert.equal(equiv.admissibility, 'DIAGNOSTIC_ONLY',
+    '汎用の equivalence probe を ADMISSIBLE にしてはならない: ' + equiv.admissibility);
+  assert.equal(kill.evidenceClass, 'regression');
+  assert.equal(equiv.evidenceClass, 'regression');
+
+  // The claims must stay distinct in substance, not only in label.
+  assert.match(kill.proves, /at least one durable test failed/i,
+    'KILLED が何を意味するかが書かれていない');
+  assert.match(kill.doesNotProve, /completeness/i);
+  assert.match(kill.doesNotProve, /EQUIVALENT/,
+    'KILLED 側が equivalence を証明しないことを言っていない');
+  assert.match(equiv.proves, /nothing on its own/i,
+    '汎用 equivalence 判定が何かを証明するかのように書かれている');
+  assert.match(equiv.proves, /SURVIVED_OR_EQUIVALENT_UNDETERMINED/,
+    '非 kill 結果の正しい読みが書かれていない');
+
+  // K2-03's equivalence belongs to a separate focused measurement, not to the
+  // harness. The spec must keep that attribution.
+  assert.match(equiv.reason, /K2-03/, 'K2-03 の帰属が記録されていない');
+  assert.match(equiv.reason, /separate focused measurement/i,
+    'K2-03 の EQUIVALENT を harness の成果にしている');
+
+  const f15 = manifest.spec.knownLimitations.find((k) => k.id === 'P2K-F15');
+  assert.ok(f15, 'P2K-F15 が knownLimitations に無い');
+  assert.match(f15.statement, /SURVIVED_OR_EQUIVALENT_UNDETERMINED/);
 });
 

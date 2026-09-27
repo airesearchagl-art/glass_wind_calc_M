@@ -167,7 +167,20 @@ test('RF-03: 正圧=0・負圧=0は例外で拒否する（designP=0は実設計
 });
 
 test('manual-config: inputがobjectでない場合は例外を投げる', () => {
-  for (const bad of [null, undefined, 'string', 123, []]) {
-    assert.throws(() => ManualProjectConfig.buildManualDesignInput(bad));
+  // P2K-F08 REQUIRED_FIX. Measured: with a bare `assert.throws(fn)` this loop
+  // passed for `[]` via a DIFFERENT guard entirely -- `typeof [] === 'object'`,
+  // so the object check admits an array and the failure actually came from
+  // `W must be a positive finite number`. The test claimed the object guard
+  // rejects `[]`; it does not. The failure modes are separated, and each names
+  // the guard it is about.
+  for (const bad of [null, undefined, 'string', 123]) {
+    assert.throws(() => ManualProjectConfig.buildManualDesignInput(bad),
+      /input must be an object/, 'non-object は object guard で落ちる: ' + JSON.stringify(bad));
   }
+  // An array reaches the field validation instead. Still rejected -- fail
+  // closed, no invalid input is accepted -- but by a different guard, so it is
+  // asserted as the different guard rather than folded in with the others.
+  assert.throws(() => ManualProjectConfig.buildManualDesignInput([]),
+    /W must be a positive finite number/,
+    '配列は object guard を通って field validation で落ちる');
 });

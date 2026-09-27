@@ -309,3 +309,35 @@ P2K-M11 が表に無い § 参照を落とす。
    実商品も [] を渡すので現状一致。browser B10b が別経路で読む
 ```
 
+---
+
+# Human Gate 最終分類調整後の状態
+
+```text
+P2K-F08  **閉じた（有界 triage 完了）**。
+         49 件全件 disposition 済み。BENIGN 43 / AMBIGUOUS 4 / REQUIRED_FIX 2。
+         REQUIRED_FIX 2 件は修理し、K7-01 / K7-02 で固定した。
+         全件表: F08_TRIAGE.md
+P2K-F10  維持。corpus は有限の列挙——修理不可。corpus 拡張はしない（§12）
+P2K-F14  維持。bounded, not closed のまま（§13）。
+         packet の provenance が完全に再現可能とは主張しない
+P2K-F15  新規。汎用の非 kill 結果は SURVIVED_OR_EQUIVALENT_UNDETERMINED。
+         分類しただけで修理していない（構造上の制約）
+```
+
+## P2K-F08 の候補数についての申し送り
+
+検証者の「18」は **どの数え方でも再現できなかった**。
+
+```text
+単一引数の assert.throws : 49
+それを含む test block  : 25
+連続行を 1 件と数える : 31
+名指しで挙げられた分   : 13
+```
+
+推測で 18 を選ばなかった。実在の欠陥を落とす危険があるためである。
+代わりに同じ基準を完全適用した 49 件を triage した。
+これは基準の拡大ではないので §20 には反していないが、
+**依頼された件数と違うことは明記しておく**。
+

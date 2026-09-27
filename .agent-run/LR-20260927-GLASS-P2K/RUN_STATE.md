@@ -301,6 +301,43 @@ guard-diff の ADMISSIBLE への再認定も自分の判断（戻すのは 2 行
    根拠は実測だが分類は判断である
 ```
 
+## Human Gate 最終分類調整 / P2K-F08 有界 triage
+
+```text
+Fresh Gate : PASS（HEAD 603a376 / remote 同じ / tree clean /
+             PR #12 OPEN draft merged=false / base 7bef307）
+npm test   : 730 / 730 / 0
+mutation   : 89 operator / KILLED 88 / SURVIVED 1 / PATCH-MISS 0 / HARNESS ERROR 0
+browser    : 未実行（§16。harness / UI / runtime を変えていない）
+```
+
+### 分類
+
+```text
+guard-diff                     regression / ADMISSIBLE（committed corpus に限る）
+mutation-kill                  regression / ADMISSIBLE
+mutation-equivalence-analysis  regression / DIAGNOSTIC_ONLY
+```
+
+### P2K-F08
+
+```text
+49 件全件 disposition。BENIGN 43 / AMBIGUOUS 4 / REQUIRED_FIX 2。untriaged 0
+REQUIRED_FIX 2 件は修理し K7-01 / K7-02 で固定。いずれも test の欠陥
+全件表: F08_TRIAGE.md
+```
+
+依頼は「18 件」だったが、どの数え方でも 18 にならなかった。
+推測せず同じ基準を完全適用した 49 件を triage した（D-017）。
+
+### runtime は一切変えていない（§14）
+
+```text
+project-config/**  変更 0
+計算・ClosureヾEvidence 規則・Promotion GateヾUI  変更 0
+project Evidence state  変更 0（§15 の値と完全一致）
+```
+
 ## Next action
 
 **Draft PR で止まる。**

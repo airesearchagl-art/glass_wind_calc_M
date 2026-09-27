@@ -579,3 +579,117 @@ spec の browser 系 4 件が UNVERIFIED のままなのはこのためであり
 Wave 4 時点では browser-w4 の 34 項目だけだった。
 他 4 harness はこの環境に playwright があったから動いていただけで、
 **別のマシンでは UNVERIFIED を名乗れず FAIL と見分けがつかなかった**。
+
+## §11 — Human Gate 最終分類調整と P2K-F08 の有界 triage
+
+### Fresh Gate
+
+```text
+HEAD   : 603a3767f548555d7cbb1145a1654f4d9a7dcac2（期待値と一致）
+remote : 同じ SHA
+tree   : clean
+PR #12 : OPEN / draft=true / merged=false / mergeable_state clean
+base   : 7bef30751ebaa2aa0f306f3bd584c4e025be77a1（期待値と一致）
+```
+
+### 分類の分割（§3）
+
+```text
+mutation-kill                  regression / ADMISSIBLE
+mutation-equivalence-analysis  regression / DIAGNOSTIC_ONLY
+```
+
+schema churn を減らすため option A（instrument 2 件）を選んだ。
+`mutate.mjs` の振る舞いは変えていない——証拠モデルの訂正である。
+
+test は spec を **parse して** 固定している（文字列存在ではない）:
+
+```text
+P2K-M12  kill → ADMISSIBLE / equivalence → DIAGNOSTIC_ONLY を直接 assert
+         加えて proves / doesNotProve の中身と K2-03 の帰属を検査
+P2K-M09  12 → 13 instrument の literal 表
+P2K-M03  corpus 依存は equivalence 側のみ。kill 側にあってはならない
+```
+
+変更が落とされることを mutation で実演した:
+
+```text
+K6-01  kill を DIAGNOSTIC_ONLY へ（過小申告）  KILLED（19 test）
+K6-02  非 kill の読みを「equivalent」へ        KILLED  by P2K-M12
+K1-01  非 admissible を黙って再認定（逆向き）  KILLED  by P2K-M09, P2K-M12
+```
+
+### P2K-F08 の triage（§7–§11）
+
+全件表は `F08_TRIAGE.md`。
+
+```text
+候補集団 : 単一引数の assert.throws = **49 箇所** / 5 file / 25 test block
+検証者の数 : 18（どの数え方でも再現できなかった。名指し分は 13）
+取った方針 : 同じ基準を完全適用した 49 件全部を triage（名指し 13 の超集合）
+
+BENIGN 43 / AMBIGUOUS 4 / REQUIRED_FIX 2 —— untriaged 0
+```
+
+判定は測定で行った。`assert.throws` を preload で wrap し、
+全 49 箇所が実際に投げている message を 108 回分記録した。
+
+**REQUIRED_FIX 1: tests/manual-config.test.js:171**
+
+```text
+入力 : [null, undefined, 'string', 123, []]
+実測 : 4 件 → input must be an object
+       [] のみ → W must be a positive finite number, got: undefined
+理由 : typeof [] === 'object' なので object guard は配列を通す
+```
+
+**REQUIRED_FIX 2: tests/project-input.test.js:91**
+
+```text
+入力 : registerPreset({})
+実測 : projectId guard を if (false) へ消しても AC-04 は ok のまま通った
+理由 : {} は hasFixedPreset も getPublicLabel も欠くので後続 guard が代わりに発火
+```
+
+どちらも **test の欠陥**であり runtime の欠陥ではない——
+不正入力は結局拒否されている（fail closed）。
+§14 に従い `project-config/**` は変更していない。
+
+修正が有効であることを mutation で実演（§11）:
+
+```text
+K7-01  registry.js の projectId guard を消す  KILLED  by AC-04, AC-05
+K7-02  manual.js の object guard を消す     KILLED  by manual-config
+```
+
+BENIGN / AMBIGUOUS には mutation を作っていない。
+
+### §参照の錠が自分の追加を捕らえた
+
+mutants.mjs の comment に §11 を書いた瞬間に P2K-M11 が落ちた。
+意図した通りである。§11 を表へ追加し、その経緯を表自体に記録した。
+
+### 測定値
+
+```text
+npm test  : tests 730 / pass 730 / fail 0
+            （§16 の「=729」より 1 件多い。§6 が要求する分類固定 test
+              P2K-M12 を追加したためである。fail 0 は満たしている）
+mutation  : 89 operator / KILLED 88 / SURVIVED 1 / EQUIVALENT 0 /
+            PATCH-MISS 0 / HARNESS ERROR 0
+            SURVIVED 1 = K2-03。D-016 の通り harness は非 kill と報告し、
+            EQUIVALENT は別途の焦点測定に帰属する
+manifest  : exit 0
+package   : command 12 / browserInstruments 5 /
+            guard-diff ADMISSIBLE / mutation-kill ADMISSIBLE /
+            mutation-equivalence-analysis DIAGNOSTIC_ONLY
+probe     : closure BLOCKED / obs 0 / 0-of-12 / 0-of-4 / 0-of-8 /
+            candidate none / verifiedCases 0 /
+            1250x2050 sample_default unverified / V0 34 / III
+lint      : inspected 12 / advisory 0 / hard 0 / exit 0
+guard-diff: REGRESSIONS 0 / rule coverage gap 0 / advisory gap 0 /
+            unexpected errors 0
+browser   : 未実行。§16 に従い、harness も UI も runtime も変えていないので
+            証拠件数を水増ししない
+```
+

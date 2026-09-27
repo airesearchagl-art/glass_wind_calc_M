@@ -35,6 +35,7 @@ can judge whether the code meets it without needing the original document.
 | §8 | `guard-diff/mutants.mjs` | An independent verifier or test must not import a private production helper and use its result as the expected value. Calling a public API as the *subject* is fine. |
 | §9 | `verification/manifest.mjs` | A `CASE_ID` contract must not depend on a rule that was demoted to advisory. |
 | §10 | `guard-diff/mutants.mjs`, `evidence-publication-lint.mjs` | Publication-facing identifiers, not only prose, are in scope for the lint — because a provider-like `caseId` no longer throws. |
+| §11 | `guard-diff/mutants.mjs` | Add a mutation operator for an actual verification gap only when it materially demonstrates "remove the intended guard → the corrected test fails". Do not create operators mechanically, one per candidate. |
 | §13 | `evidence-publication-lint.mjs` | An empty advisory list is not proof the prose is publishable. The rules are open-set heuristics; Human Review is required regardless. |
 | §17 | `project-state-probe.mjs`, `experiments/lint-discovery-depth.mjs` | No load-bearing number in a README or Run Artifact unless a generator is committed, the command is recorded, and the number can be regenerated. |
 | §18 | `verification-spec.json`, `browser-outcome.mjs`, `harness.mjs`, `browser-checks/README.md`, `evidence-publication-lint.mjs` | Never record "browser VERIFIED" without an exact-head browser measurement. `UNVERIFIED` is an acceptable thing to report. |
@@ -47,6 +48,13 @@ can judge whether the code meets it without needing the original document.
 | §34 | `browser-checks/stageA-regression.mjs` | Protected calculation values must be observable as the browser renders them, not only through Node. |
 | §35 | `browser-checks/probe-w4.mjs` | Injected content must not become live DOM. |
 | §38 | `browser-checks/failopen-w4.mjs` | When evidence is insufficient the UI must fail closed, with wording that says so. |
+
+## This table is enforced, and it has already bitten
+
+`§11` was added to it because P2K-M11 failed the suite the moment a new `§11`
+citation appeared in a comment in `guard-diff/mutants.mjs` during the Phase 2K
+Human Gate step. That is the intended behaviour: a new dangling reference is a
+test failure, not a silent addition to an untracked pile.
 
 ## Keeping this honest
 
