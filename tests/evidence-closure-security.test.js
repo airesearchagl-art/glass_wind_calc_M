@@ -1,0 +1,1775 @@
+'use strict';
+
+/**
+ * Phase 2J Wave 5: security / privacy / trust spoof / prototype 閉じ込め。
+ *
+ * ── 何を重点にしたか ─────────────────────────────────────────
+ *
+ * 既存の攻撃を機械的に全部並べ直さない。Phase 2J で**新しくできた4つの境界**
+ * だけを狙う:
+ *
+ *   A. 生のObservation → canonical Evidence Observation
+ *   B. Observation集合 → Closure Evaluation / 一時Ledger
+ *   C. Closure Evaluation → Promotion Candidate → Candidate JSON
+ *   D. Closure model → Evidence Request Matrix DOM（UI側テストに分離）
+ *
+ * Wave 3 で既に固定済みのもの（値一致でも不十分なら BLOCKED / MISMATCH /
+ * evaluation_height の非突き合わせ / scope取り違え）はここで複製しない。
+ *
+ * ── fixtureはすべて合成である ────────────────────────────────
+ */
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+
+const Evidence = require('../project-config/evidence.js');
+const Closure = require('../project-config/evidence-closure.js');
+
+/**
+ * 規則が**発火したこと**を押さえる。どの channel で発火するかは問わない。
+ *
+ * Human Gate §3 で www / known-private-provider / opaque-long-token が
+ * advisory へ降格された。normalizer 集合は assert と lint で**共有**なので、
+ * 「この normalizer が無いと規則に届かない」という検査は
+ * advisory 経由でも同じだけ有効。降格を理由に正規化の被覆を落とさないための helper。
+ */
+function assertRuleFired(text, rulePattern, message) {
+  let hardMessage = null;
+  try { Evidence.assertPublicSafeEvidenceText(text, 'prose'); }
+  catch (e) { hardMessage = e.message; }
+  if (hardMessage && rulePattern.test(hardMessage)) return 'hard';
+  const warnings = Evidence.lintPublicEvidenceText(text, 'prose').warnings;
+  const hit = warnings.some((w) => rulePattern.test(w.rule));
+  assert.equal(hit, true,
+    (message || '') + ' 規則がどちらの channel でも発火しなかった: ' +
+    JSON.stringify(text) + ' hard=' + JSON.stringify(hardMessage) +
+    ' warnings=' + JSON.stringify(warnings.map((w) => w.rule)));
+  return 'advisory';
+}
+const ProjectInput = require('../project-config/project-input.js');
+const WorkspaceCore = require('../workspace.js');
+const ProjectProfile = require('../project-profile.js');
+const MiyoshiProjectConfig = require('../project-config/miyoshi.js');
+
+const CLOSURE_SRC = fs.readFileSync(
+  path.join(__dirname, '..', 'project-config', 'evidence-closure.js'), 'utf8');
+
+const SYN_PROJECT = 'synthetic_closure_test';
+const P = 'N/m²';
+
+function syntheticPreset() {
+  return {
+    projectId: SYN_PROJECT, hasFixedPreset: true,
+    getPublicLabel: function () { return 'synthetic closure test fixture'; },
+    dimensions: { mode: 'synthetic_fixture',
+      defaultW: { value: 777, unit: 'mm' }, defaultH: { value: 1888, unit: 'mm' } },
+    wind: {
+      positivePressureByFloor: { A: { value: 3111, unit: P }, B: { value: 3222, unit: P } },
+      negativePressureByZone: { inner: { value: 4111, unit: P }, outer: { value: 4222, unit: P } }
+    }
+  };
+}
+
+function withSyntheticRegistry(fn) {
+  const preset = syntheticPreset();
+  const registry = {
+    getPreset: function (id) {
+      if (id !== preset.projectId) {
+        throw new Error('getPreset(): unknown projectId: ' + JSON.stringify(id));
+      }
+      return preset;
+    },
+    hasPreset: function (id) { return id === preset.projectId; },
+    listPresets: function () { return []; }
+  };
+  const p = require.resolve('../project-config/evidence-closure.js');
+  const savedCache = require.cache[p];
+  const savedRegistry = globalThis.PresetRegistry;
+  const savedClosure = globalThis.EvidenceClosure;
+  delete require.cache[p];
+  globalThis.PresetRegistry = registry;
+  try {
+    return fn(require(p), preset);
+  } finally {
+    delete require.cache[p];
+    if (savedCache) { require.cache[p] = savedCache; }
+    globalThis.PresetRegistry = savedRegistry;
+    globalThis.EvidenceClosure = savedClosure;
+  }
+}
+
+function ev(overrides) {
+  return Object.assign({
+    level: 'primary', checkedAt: '2026-09-20',
+    publicDescription: '合成テストfixture（査読済み案件Evidenceではない）',
+    privateReferenceAvailable: true
+  }, overrides || {});
+}
+
+function obsOf(factKey, scope, observedValue, unit, overrides) {
+  return Object.assign({
+    schemaVersion: 1, observationType: 'evidence_closure_observation',
+    factKey: factKey, scope: scope, observedValue: observedValue, unit: unit,
+    evidence: ev(), sourceReference: null
+  }, overrides || {});
+}
+
+/** 合成presetの全slotを満たす観測集合。 */
+function fullSet(overrides) {
+  const set = [
+    obsOf('pane_width_mm', null, 777, 'mm'),
+    obsOf('pane_height_mm', null, 1888, 'mm'),
+    obsOf('positive_pressure', { floor: 'A' }, 3111, P),
+    obsOf('positive_pressure', { floor: 'B' }, 3222, P),
+    obsOf('negative_pressure', { zone: 'inner' }, 4111, P),
+    obsOf('negative_pressure', { zone: 'outer' }, 4222, P),
+    obsOf('evaluation_height', { floor: 'A' }, 12.345, 'm'),
+    obsOf('evaluation_height', { floor: 'B' }, 18.75, 'm')
+  ];
+  if (overrides) overrides(set);
+  return set;
+}
+
+// ============================================================
+// §3〜§9 public-safe prose boundary（Wave 5で実測して塞いだ4クラス）
+// ============================================================
+
+test('P2J-S01: email / 私的文書ファイル名 / タグ / 制御文字を拒否する', () => {
+  // 4クラスとも Wave 5 の probe で実際に通り抜け、合成READY contextでは
+  // Candidate JSON まで到達した。canonical な関門で塞ぐ（§5）。
+  const attacks = [
+    ['email-like', 'PRIVATEEMAILMARKER991@example.com で確認'],
+    ['pdf filename', 'PRIVATEFILEMARKER992.pdf により確認'],
+    ['dwg filename', 'PRIVATEFILEMARKER992b.dwg により確認'],
+    ['xlsx filename', 'PRIVATEFILEMARKER992c.xlsx により確認'],
+    ['html tag', '<b>PRIVATEHTMLMARKER993</b> により確認'],
+    ['script tag', '<script>PRIVATEHTMLMARKER993b</script> により確認'],
+    ['control char', 'CONTROL\u0001MARKER994 により確認'],
+    ['NUL', 'CONTROL\u0000MARKER994b により確認'],
+    ['DEL', 'CONTROL\u007fMARKER994c により確認']
+  ];
+  attacks.forEach(([label, text]) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, label),
+      /must not contain private URLs\/paths\/identifiers/, label + ' must be rejected');
+    assert.throws(() => Evidence.makeEvidence('primary', '2026-09-20', text, true),
+      /must not contain/, label + ' must be rejected by makeEvidence');
+  });
+});
+
+test('P2J-S02: 正当な技術散文を巻き込まない（過剰拒否していない）', () => {
+  // positive control を兼ねる: これらが通らなければ上のテストは
+  // 「何でも拒否する検証器」を確かめているだけになる。
+  const valid = [
+    '評価高さは 5<Z<40 の範囲で確認した',
+    'index.html の初期値として導入された値',
+    '一次資料で直接確認（合成fixture）',
+    'W と H は別物であり、H > W の場合もある',
+    '改行を含む説明\n2行目',
+    'タブを含む説明\t続き'
+  ];
+  valid.forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'valid'), true, text);
+  });
+});
+
+test('P2J-S03: 現行の案件Evidenceは強化後の検証器を通る（書き換えていない）', () => {
+  // validator hardening であって Evidence mutation ではない。
+  const seen = [];
+  (function walk(o) {
+    if (!o || typeof o !== 'object') return;
+    if (typeof o.publicDescription === 'string') seen.push(o.publicDescription);
+    Object.keys(o).forEach((k) => { try { walk(o[k]); } catch (e) { /* getter */ } });
+  })(MiyoshiProjectConfig);
+  assert.equal(seen.length > 0, true, '前提: 現行configにpublicDescriptionがある');
+  seen.forEach((d) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(d, 'current'), true, d.slice(0, 40));
+  });
+  // 値そのものは不変
+  assert.equal(MiyoshiProjectConfig.wind.V0.value, 34);
+  assert.equal(MiyoshiProjectConfig.wind.roughnessCategory.value, 'III');
+  assert.equal(MiyoshiProjectConfig.dimensions.defaultW.evidence.level, 'none');
+  assert.equal(MiyoshiProjectConfig.dimensions.defaultH.evidence.checkedAt, '2026-09-17');
+  assert.deepEqual(MiyoshiProjectConfig.verifiedCases, []);
+});
+
+// ============================================================
+// §11 / §26 Candidate の private reference sweep
+// ============================================================
+
+test('P2J-S04: private Evidence は boolean だけが残り、所在は一切出ない', () => {
+  withSyntheticRegistry((C) => {
+    const r = C.evaluateClosure(SYN_PROJECT, fullSet());
+    assert.notEqual(r.promotionCandidate, null, '前提: READYでcandidateが出ている');
+    const json = C.serializePromotionCandidate(r.promotionCandidate);
+    const parsed = JSON.parse(json);
+
+    parsed.proposedFacts.forEach((f) => {
+      assert.deepEqual(Object.keys(f.evidence).sort(),
+        ['checkedAt', 'level', 'privateReferenceAvailable', 'publicDescription']);
+      assert.equal(f.evidence.privateReferenceAvailable, true);
+      assert.equal(f.sourceReference, null, 'private Evidenceの所在は保持しない');
+    });
+    // 評価結果側（candidate以前）にも出ない
+    const evalJson = JSON.stringify(r);
+    ['url', 'href', 'filename', 'fileName', 'filePath', 'documentId', 'fileId']
+      .forEach((k) => {
+        assert.equal(evalJson.includes('"' + k + '"'), false, k + ' を評価結果に持たない');
+      });
+  });
+});
+
+test('P2J-S05: 公開一次資料の正しい経路は通り、正規形だけが残る', () => {
+  // 拒否側だけを見ると「常に拒否する実装」でもテストが通ってしまう。
+  withSyntheticRegistry((C) => {
+    const url = 'https://www.mlit.go.jp/notice/example.html';
+    const r = C.evaluateClosure(SYN_PROJECT, fullSet((set) => {
+      set[0].evidence = ev({ privateReferenceAvailable: false });
+      set[0].sourceReference = { kind: 'public_primary', url: url };
+    }));
+    assert.notEqual(r.promotionCandidate, null);
+    const parsed = JSON.parse(C.serializePromotionCandidate(r.promotionCandidate));
+    const f = parsed.proposedFacts.filter((x) => x.slotKey === 'pane_width_mm')[0];
+    assert.deepEqual(f.sourceReference, { kind: 'public_primary', url: url });
+    assert.equal(f.evidence.privateReferenceAvailable, false);
+
+    // **構造がpublic-safeであること ≠ 人が一次資料だと確認したこと。**
+    // このテストが証明しているのは前者だけである。
+    assert.equal(f.proposedVerificationStatus, 'verified',
+      'gateを通った提案であることを示すだけで、原典性の証明ではない');
+  });
+});
+
+test('P2J-S06: private provider / 私設network / 資格情報URLは既存contractで落ちる', () => {
+  // URLパーサをClosure側に複製していないことの確認も兼ねる。
+  const bad = [
+    'https://drive.google.com/file/d/x/view',
+    'https://www.notion.so/page',
+    'https://example.sharepoint.com/doc',
+    'https://www.dropbox.com/s/x/doc',
+    'https://onedrive.live.com/x',
+    'https://localhost/doc.html',
+    'https://127.0.0.1/doc.html',
+    'https://192.168.1.5/doc.html',
+    'https://100.64.0.1/doc.html',
+    'https://[::1]/doc.html',
+    'https://intranet.local/doc.html',
+    'https://10.0.0.1.nip.io/doc.html',
+    'https://user:pass@www.example.jp/doc.html',
+    'https://www.example.jp/doc?access_token=abcdefghijklmnopqrstuvwxyz01',
+    'https://www.example.jp/doc?%74oken=abcdefghijklmnopqrstuvwxyz01'
+  ];
+  withSyntheticRegistry((C) => {
+    bad.forEach((url) => {
+      assert.throws(() => C.evaluateClosure(SYN_PROJECT, fullSet((set) => {
+        set[0].sourceReference = { kind: 'public_primary', url: url };
+      })), (e) => e instanceof Error, 'must reject: ' + url);
+    });
+  });
+  assert.equal(/new URL\(/.test(CLOSURE_SRC), false, 'URL解析をClosureに複製しない');
+});
+
+// ============================================================
+// §14 trust spoof（Wave 2の一覧に candidate側のfieldを追加）
+// ============================================================
+
+test('P2J-S07: Observation は candidate側のtrust fieldも名乗れない', () => {
+  const spoofs = ['candidateStatus', 'notApplied', 'currentConfigMutated', 'gateSummary',
+    'proposedFacts', 'closureStatus', 'evidenceGateStatus', 'reconciliationStatus',
+    'blockerKinds', 'readinessStatus'];
+  spoofs.forEach((key) => {
+    const attack = obsOf('pane_width_mm', null, 987, 'mm');
+    attack[key] = true;
+    assert.throws(() => Closure.normalizeObservation(attack, 'miyoshi'),
+      new RegExp('unexpected field: "' + key + '"'), key);
+  });
+});
+
+// ============================================================
+// §18 他機能の入力が Evidence にならない（core側のsource contract）
+// ============================================================
+
+test('P2J-S08: closure core は他機能の状態を一切読まない', () => {
+  ['scenario', 'Scenario', 'activeProfile', 'batchWorkspace', 'ReviewPackage',
+    'WorkspaceCore', 'ProjectProfile', 'buildingHeight', 'eavesHeight', 'windTrace']
+    .forEach((token) => {
+      assert.equal(CLOSURE_SRC.includes(token), false,
+        'closure core が ' + token + ' を参照しない');
+    });
+  // 依存は3つだけ
+  assert.match(CLOSURE_SRC, /resolveDependency\(\s*\n?\s*'ProjectEvidence'/);
+  assert.match(CLOSURE_SRC, /resolveDependency\(\s*\n?\s*'EvidenceLedger'/);
+  assert.match(CLOSURE_SRC, /resolveDependency\(\s*\n?\s*'PresetRegistry'/);
+});
+
+// ============================================================
+// §20 / §21 prototype boundary と laundering
+// ============================================================
+
+test('P2J-S09: Phase 2J の全入口で custom prototype / own __proto__ を拒否する', () => {
+  const ordinary = obsOf('pane_width_mm', null, 987, 'mm');
+  // positive control: 素のobjectは通る
+  assert.equal(Closure.normalizeObservation(ordinary, 'miyoshi').factKey, 'pane_width_mm');
+
+  const cases = [
+    ['observation (custom proto)', () => Closure.normalizeObservation(
+      Object.create(obsOf('pane_width_mm', null, 987, 'mm')), 'miyoshi')],
+    ['observation (literal __proto__)', () => Closure.normalizeObservation(
+      { __proto__: obsOf('pane_width_mm', null, 987, 'mm') }, 'miyoshi')],
+    ['scope (custom proto)', () => Closure.normalizeObservation(
+      obsOf('positive_pressure', Object.create({ floor: '1' }), 987, P), 'miyoshi')],
+    ['evidence (custom proto)', () => Closure.normalizeObservation(
+      obsOf('pane_width_mm', null, 987, 'mm', { evidence: Object.create(ev()) }), 'miyoshi')],
+    ['sourceReference (custom proto)', () => Closure.normalizeObservation(
+      obsOf('pane_width_mm', null, 987, 'mm', {
+        sourceReference: Object.create({ kind: 'public_primary', url: 'https://www.example.jp/a' })
+      }), 'miyoshi')],
+    ['observation set (custom proto items)', () => Closure.normalizeObservationSet(
+      [Object.create(obsOf('pane_width_mm', null, 987, 'mm'))], 'miyoshi')],
+    ['class instance', () => {
+      function Fake() {} Fake.prototype = obsOf('pane_width_mm', null, 987, 'mm');
+      return Closure.normalizeObservation(new Fake(), 'miyoshi');
+    }]
+  ];
+  cases.forEach(([label, fn]) => {
+    assert.throws(fn, /no inherited properties|own "__proto__"/, label);
+  });
+
+  // §20: Object.prototype は一切変更されていない（＝prototype pollutionではない）
+  assert.deepEqual(Object.keys(Object.prototype), []);
+  assert.equal({}.factKey, undefined);
+  assert.equal({}.proposedVerificationStatus, undefined);
+});
+
+test('P2J-S10: laundering は両方向とも入口で止まる', () => {
+  // A: custom prototype → field単位のsnapshotで素のliteralへ漂白される経路。
+  //    snapshotを取る**前**に落ちなければならない。
+  const A = obsOf('pane_width_mm', null, 987, 'mm', { evidence: Object.create(ev()) });
+  assert.throws(() => Closure.normalizeObservation(A, 'miyoshi'), /no inherited properties/);
+
+  // B: own "__proto__" → 下流の [[Set]] copy で custom prototype として再生する経路。
+  //    値自体は無害でも、運搬体として入口で落とす。
+  const rawB = JSON.parse('{"__proto__":{"privateReferenceAvailable":true},' +
+    '"level":"primary","checkedAt":"2026-09-20","publicDescription":"合成fixture",' +
+    '"privateReferenceAvailable":false}');
+  assert.equal(Object.prototype.hasOwnProperty.call(rawB, '__proto__'), true, '前提: own key');
+  assert.equal(Object.getPrototypeOf(rawB), Object.prototype, '前提: prototypeは未変更');
+  assert.notEqual(Object.getPrototypeOf(Object.assign({}, rawB)), Object.prototype,
+    '前提: copyでprototypeが差し替わる（これが塞ぐ理由）');
+  assert.throws(
+    () => Closure.normalizeObservation(obsOf('pane_width_mm', null, 987, 'mm', { evidence: rawB }),
+      'miyoshi'),
+    /own "__proto__"/);
+});
+
+// ============================================================
+// §22 Candidate authenticity
+// ============================================================
+
+test('P2J-S11: exporter は builder が作った candidate 以外を全て拒否する', () => {
+  withSyntheticRegistry((C) => {
+    const r = C.evaluateClosure(SYN_PROJECT, fullSet());
+    const real = r.promotionCandidate;
+    // positive control: 本物は通る
+    assert.equal(typeof C.serializePromotionCandidate(real), 'string');
+
+    const forgeries = {
+      'handwritten lookalike': {
+        schemaVersion: 1, candidateType: 'project_evidence_promotion_candidate',
+        projectId: SYN_PROJECT, candidateStatus: 'READY_CANDIDATE', proposedFacts: [],
+        gateSummary: {}, notApplied: true, currentConfigMutated: false, warning: 'x'
+      },
+      'Object.assign clone': Object.assign({}, real),
+      'structuredClone equivalent': JSON.parse(JSON.stringify(real)),
+      'JSON.parse(serialized)': JSON.parse(C.serializePromotionCandidate(real)),
+      'custom prototype wrapper': Object.create(real)
+    };
+    Object.keys(forgeries).forEach((label) => {
+      assert.throws(() => C.serializePromotionCandidate(forgeries[label]),
+        /requires a candidate created by evaluateClosure/, label);
+    });
+  });
+});
+
+// ============================================================
+// §23 Candidate one-way boundary（実行コードを見る）
+// ============================================================
+
+test('P2J-S12: Phase 2J の実行コードに import / apply 経路が存在しない', () => {
+  const forbidden = ['deserializePromotionCandidate', 'parsePromotionCandidate',
+    'importPromotionCandidate', 'applyPromotionCandidate', 'promoteConfig',
+    'setVerified', 'updateVerifiedCases', 'candidateToPreset', 'candidateToConfig',
+    'candidateToWorkspace'];
+  // 実行コードのみを見る（コメント・テストでの言及は許される）
+  const executable = CLOSURE_SRC
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n');
+  forbidden.forEach((name) => {
+    assert.equal(executable.includes(name), false, name + ' は実行コードに存在しない');
+    assert.equal(typeof Closure[name], 'undefined', name + ' は export されない');
+  });
+  assert.equal(/JSON\.parse/.test(executable), false, 'candidate JSON を読み戻さない');
+});
+
+// ============================================================
+// §24 Candidate JSON を既存importerへ通す
+// ============================================================
+
+test('P2J-S13: Candidate JSON は既存のimport経路で trust にならない', () => {
+  const json = withSyntheticRegistry((C) => {
+    const r = C.evaluateClosure(SYN_PROJECT, fullSet());
+    return C.serializePromotionCandidate(r.promotionCandidate);
+  });
+
+  const importers = [
+    ['ProjectInput.deserialize', () => ProjectInput.deserialize(json)],
+    ['WorkspaceCore.deserializeWorkspace', () => WorkspaceCore.deserializeWorkspace(json)],
+    ['ProjectProfile.deserializeProfile', () => ProjectProfile.deserializeProfile(json)]
+  ];
+  importers.forEach(([label, fn]) => {
+    let result = null, threw = false;
+    try { result = fn(); } catch (e) { threw = true; }
+    if (!threw) {
+      // 受理された場合でも、既存のdowngrade契約により trust は上がらない
+      const s = JSON.stringify(result);
+      assert.equal(/"verificationStatus"\s*:\s*"verified"/.test(s), false,
+        label + ': verified にならない');
+      assert.equal(/"sourceKind"\s*:\s*"registered_preset"/.test(s), false,
+        label + ': registered preset にならない');
+    }
+    // どちらでもよい（拒否 or 非trust）。trust になることだけが許されない。
+    assert.equal(true, true, label + ': ' + (threw ? 'rejected' : 'accepted as untrusted'));
+  });
+
+  // 現案件の状態は何も変わらない
+  assert.deepEqual(MiyoshiProjectConfig.verifiedCases, []);
+  assert.equal(MiyoshiProjectConfig.dimensions.mode, 'sample_default');
+});
+
+// ============================================================
+// §25 / §26 Candidate export inventory
+// ============================================================
+
+test('P2J-S14: Candidate JSON の top-level key は許可集合に一致する', () => {
+  withSyntheticRegistry((C) => {
+    const r = C.evaluateClosure(SYN_PROJECT, fullSet());
+    const json = C.serializePromotionCandidate(r.promotionCandidate);
+    const parsed = JSON.parse(json);
+    assert.deepEqual(Object.keys(parsed).sort(), [
+      'candidateStatus', 'candidateType', 'currentConfigMutated', 'gateSummary',
+      'notApplied', 'projectId', 'proposedFacts', 'schemaVersion', 'warning'
+    ]);
+    ['currentConfig', 'verifiedCases', 'privateReference', 'rawObservation',
+      'registry', 'preset', 'profile', 'workspace', 'review', 'dimensions', 'wind',
+      'generatedAt', 'timestamp']
+      .forEach((k) => {
+        assert.equal(json.includes('"' + k + '"'), false, k + ' を出力しない');
+      });
+
+    parsed.proposedFacts.forEach((f) => {
+      assert.deepEqual(Object.keys(f).sort(), [
+        'evidence', 'factKey', 'observedValue', 'proposedVerificationStatus',
+        'reconciliationApplicable', 'reconciliationStatus', 'scope', 'slotKey',
+        'sourceReference', 'unit'
+      ]);
+      if (f.scope !== null) {
+        assert.equal(Object.keys(f.scope).length, 1, 'scopeは1 fieldのみ');
+      }
+    });
+  });
+});
+
+test('P2J-S15: 呼び出し側の余計なfieldはcandidateへ運ばれない', () => {
+  // Observation段階で弾かれるので、そもそもcandidateまで到達しない。
+  withSyntheticRegistry((C) => {
+    assert.throws(() => C.evaluateClosure(SYN_PROJECT, fullSet((set) => {
+      set[0].internalNote = 'PRIVATENOTEMARKER997';
+    })), /unexpected field: "internalNote"/);
+    // 正常系にmarkerが無いこと（上の拒否が効いている裏取り）
+    const r = C.evaluateClosure(SYN_PROJECT, fullSet());
+    assert.equal(C.serializePromotionCandidate(r.promotionCandidate)
+      .includes('PRIVATENOTEMARKER997'), false);
+  });
+});
+
+// ============================================================
+// §28 現案件の empty-set Hard Gate
+// ============================================================
+
+test('P2J-S16: 実案件の空集合closureは BLOCKED のまま動かない', () => {
+  const r = Closure.evaluateClosure('miyoshi', []);
+  assert.equal(r.status, 'BLOCKED');
+  assert.equal(r.readySlotCount, 0);
+  assert.equal(r.requiredSlotCount, 12);
+  assert.equal(r.readyCategoryCount, 0);
+  assert.equal(r.categoryCount, 4);
+  assert.equal(r.readyCaseScopeCount, 0);
+  assert.equal(r.caseScopeCount, 8);
+  assert.equal(r.promotionCandidate, null);
+  assert.deepEqual(MiyoshiProjectConfig.verifiedCases, []);
+  // candidate が無いので serialize もできない（空candidateを作らない）
+  assert.throws(() => Closure.serializePromotionCandidate(r.promotionCandidate),
+    /requires a candidate created by evaluateClosure/);
+});
+
+// ============================================================
+// Wave 6: 独立検証の指摘 A1 に対する回帰
+// ============================================================
+
+test('P2J-S17: 比較の散文は「空白を置く」書き方で通る（誤検知の受け入れ方）', () => {
+  // ここは3度間違えた箇所である。経緯:
+  //   (1) 一律拒否 → `W<H かつ P>Q である。` を巻き込む（A1指摘）
+  //   (2) 属性の形だけ拒否 → 崩れたタグが素通り（F1指摘）
+  //   (3) 本体に日本語が無い場合だけ拒否 → 1文字混ぜると全タグ素通り（実測114/114）
+  //
+  // `A<B C>D`（散文）と `<td nowrap>`（タグ）は文字構成が同一であり、
+  // `<…>` の中だけを見る規則では**原理的に分離できない**。
+  // そこで誤検知(fail closed)を選び、素通りを無くした。
+  // 誤検知は書き方で回避できる。ここではその回避方法が
+  // 実際に機能することを固定する（「書けなくなる」のではない）。
+  const spacedFormsAccepted = [
+    'W < H かつ P > Q',
+    '5 < Z < 40',
+    'P < Q かつ R > S のとき',
+    '評価高さは 5 < Z < 40 の範囲で確認した',
+    '条件 W < H and P > Q を確認した'
+  ];
+  spacedFormsAccepted.forEach((s) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(s, 'prose'), true, s);
+  });
+
+  // `>` で閉じない形、および `<` の直後が非英字の形は、空白無しでも通る
+  const alsoAccepted = [
+    '5<Z<40', 'A<B<C<D', 'x>y', '1<2',
+    '見付幅W<見付高さH となる場合>注意',
+    'index.html の初期値として導入された値',
+    'A --> B の順で確認した', 'P -> Q と表記する'
+  ];
+  alsoAccepted.forEach((s) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(s, 'prose'), true, s);
+  });
+
+  // 受け入れたコスト: 空白の無い比較は拒否される。隠さず固定する。
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('W<H かつ P>Q である。', 'prose'),
+    /matched known-unsafe pattern: html-like-tag/,
+    '空白無しの比較は拒否される（既知・文書化済みのコスト）');
+});
+
+/**
+ * 網羅corpus は**実装からではなくHTML側の語彙から**組み立てる。
+ *
+ * 独立検証4 Finding 4 の指摘: 旧corpus（未commit・508形）は正規表現と
+ * 同じ思考から作られていたため 508/508 「拒否」と報告しながら、
+ * 独立に組んだcorpusでは 710/710 が素通りしていた。
+ * corpus が実装の盲点を相続していた。
+ *
+ * そこで (a) corpus を commit して反証可能にし、
+ * (b) 本体形に「`<` を含む形」を必ず入れる。
+ *
+ * 独立検証5 Finding 6 の指摘: その (b) のうち「`[\s/]` で始まらない形」は
+ * **書いただけで実装されていなかった**（24形中 0 形）。
+ * そして 5 度目の欠陥（tag name 継続文字）はまさにその軸にあった。
+ * 同時に「本体長」の軸が corpus に存在せず、6 度目の欠陥（`{0,300}`）も
+ * 検出できなかった。よって軸を 3 つにし、いずれも
+ * **実装ではなく HTML5 仕様の語彙から**導出する:
+ *   軸1 本体形（TAG_BODY_FORMS）
+ *   軸2 名前継続文字（TAG_NAME_CONTINUATIONS）← Finding 2 の軸
+ *   軸3 本体長（LONG_BODY_LENGTHS）← Finding 1 の軸
+ *
+ * さらに「拒否しすぎない」側（P2J-S27）も固定する。
+ * 片側だけ固定すると「`<` を含むなら全拒否」への行き過ぎを
+ * 検出できず、不等式の日本語散文が書けなくなる。
+ */
+const HTML_TAG_NAMES = (
+  'a abbr address area article aside audio b base bdi bdo blockquote body br ' +
+  'button canvas caption cite code col colgroup data datalist dd del details ' +
+  'dfn dialog div dl dt em embed fieldset figcaption figure footer form h1 h2 ' +
+  'h3 h4 h5 h6 head header hgroup hr html i iframe img input ins kbd label ' +
+  'legend li link main map mark menu meta meter nav noscript object ol optgroup ' +
+  'option output p param picture pre progress q rp rt ruby s samp script section ' +
+  'select slot small source span strong style sub summary sup table tbody td ' +
+  'template textarea tfoot th thead time title tr track u ul var video wbr ' +
+  'marquee applet frame frameset basefont big blink center font strike tt ' +
+  'acronym dir isindex keygen listing plaintext spacer xmp noframes nobr'
+).split(' ');
+
+/** 本体形。`<` を含む形と `[\s/]` で始まらない形を必ず含める。 */
+const TAG_BODY_FORMS = [
+  '',                               // 裸タグ
+  ' src=x onerror=alert(1)',        // 通常の属性
+  ' onerror=alert(1<2)',            // ← 本体に `<`（Finding 1 の本体）
+  ' onerror="a<b"',                 // ← 引用値の中に `<`
+  ' x="<"',                         // ← 属性値が `<` のみ
+  ' a<b<c',                         // ← `<` 複数
+  ' onload=alert(1<2) あ',          // `<` + CJK（過去2欠陥の合わせ技）
+  ' alt="図面" onerror=1',          // 属性値にCJK（自然な日本語HTML）
+  ' src=x onerror=alert(1) Ａ',     // 全角Latin
+  ' src=x onerror=alert(1)\u3000',  // 全角スペース
+  ' src=x onerror=alert`1`',        // バッククォート値
+  ' "q"', ' =v', ' 1=2', ' -x=1', ' .x=1', " x=a'b", ' x=a"b',
+  ' disabled', ' 日本語',
+  '/', '/onload=1',                 // `/` 区切り
+  ' \n href=x', ' \t id=y', '  ',   // 空白類
+  ' \r href=x'                      // CR（HTMLの入力前処理で LF になる）
+];
+
+/**
+ * HTML5 の tag name state を**終わらせる**文字はこの 5 つだけ
+ * （tab / LF / FF / space / `/`）。`>` はタグ自体を閉じる。
+ * つまり**それ以外のすべての文字は名前の一部**であり、
+ * `<img:` は「壊れた img」ではなく `img:` という名の要素になる。
+ * 実装の文字クラスを見ず、この**定義の裏側**から作る。
+ */
+const TAG_NAME_TERMINATORS = ['\t', '\n', '\f', ' ', '/'];
+
+const TAG_NAME_CONTINUATIONS = [
+  ':', '_', '.', '!', '=', '+', '$', '%', '&', '*', ',', ';', '?', '@',
+  '^', '`', '|', '~', '(', ')', '[', ']', '{', '}', "'", '"', '\\', '#',
+  '0', '9', '-',
+  '\u200b',   // ZWSP（人間には見えない）
+  '\u00a0',   // NBSP（space ではない）
+  '\u3000',   // 全角スペース
+  '\u0130',   // 非ASCII英字
+  'あ', 'Ａ'    // CJK / 全角Latin
+];
+
+/** 名前継続文字は `[\s/]` で始まらない——header の約束の実装。 */
+const NAME_CONTINUATION_FORMS = [];
+TAG_NAME_CONTINUATIONS.forEach((ch) => {
+  NAME_CONTINUATION_FORMS.push(ch);
+  NAME_CONTINUATION_FORMS.push(ch + ' onclick=alert(1)');
+});
+
+/**
+ * 本体長の軸。実装内のどんな定数よりも十分長い値を含める。
+ * 埋め文字に長い英数字連続を使わない（opaque-long-token が
+ * 先にマッチしてしまい、何を試したのかがぶれる）。
+ */
+const LONG_BODY_LENGTHS = [32, 128, 299, 300, 301, 512, 2048, 8192];
+
+test('P2J-S18: タグ形は本体の書式・言語・`<`の有無によらず拒否される', () => {
+  // 4回の独立検証で見つかった回帰をまとめて固定する:
+  //   F1   崩れた属性（バッククォート値・数字始まりの属性名 等）
+  //   3rd  本体に日本語/全角を1文字 → 素通り（114/114）
+  //   4th  本体に `<` を1つ → 素通り（710/710）
+  //        `<img onerror=alert(1)>` は拒否、`<img onerror=alert(1<2)>` は素通り、
+  //        という逆転が**元の規則から**存在していた
+  let checked = 0;
+  HTML_TAG_NAMES.forEach((tag) => {
+    TAG_BODY_FORMS.forEach((body) => {
+      [`<${tag}${body}>`, `</${tag}${body}>`].forEach((s) => {
+        checked++;
+        assert.throws(() => Evidence.assertPublicSafeEvidenceText(s, 'prose'),
+          /matched known-unsafe pattern: html-like-tag/, s);
+      });
+    });
+  });
+  // 実数で固定する。以前は `>= 3000` と書き、artifact には
+  // 別の概算値（3458）を書いていたが、どちらも実数ではなかった
+  // （独立検証5 Finding 6）。検証できない数字は書かない。
+  assert.equal(checked, HTML_TAG_NAMES.length * TAG_BODY_FORMS.length * 2);
+});
+
+test('P2J-S23: 本体に `<` を入れてもタグ判定は回避できない', () => {
+  // 4度目の欠陥の核心を単体で読めるよう独立させる。
+  // 「拒否される形」と「1文字だけ違う形」を並べて固定する。
+  const pairs = [
+    ['<img src=x onerror=alert(1)>', '<img onerror=alert(1<2)>'],
+    ['<img src=x onerror="alert(1)">', '<img src=x onerror="alert(1);a<b">'],
+    ['<img src=x onerror=alert(1)>', '<img src=x onerror=alert(1) alt="<">'],
+    ['<svg onload=alert(1)>', '<svg onload=alert(1<2)>']
+  ];
+  pairs.forEach(([control, bypass]) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(control, 'prose'),
+      /html-like-tag/, 'control: ' + control);
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(bypass, 'prose'),
+      /html-like-tag/, 'bypass: ' + bypass);
+  });
+});
+
+test('P2J-S24: 私的文書のファイル名判定は幹がASCIIであることを前提にしない', () => {
+  // 独立検証4 Finding 2。本案件のEvidence散文は日本語であり、
+  // 私的文書の名前も日本語である。旧実装は幹を `[A-Za-z0-9_-]+` に限っており、
+  // **現実にありそうな日本語ファイル名だけが素通り**していた
+  // （`plan.pdf` は落ちるのに `構造計算書.pdf` は通る）。
+  // publicDescription は公開repositoryにもCandidate JSONにも出る。
+  const STEMS = ['構造計算書', '図面', '意匠図一式', '伏図', '詳細図', '計算書',
+    '案件資料', '外装材検討', '施工図', '仕様書', '見積書', '議事録',
+    '検討書', '平面図', '立面図'];
+  // 独立検証5 Finding 3: 旧 EXTS は**実装の一覧を写しただけ**だったので、
+  // 実装が欧米ソフトの形式しか知らないことを検出できなかった。
+  // ここでは実装を見ず、**日本の外装・ガラス案件が実際に生む形式**から列挙する:
+  //   JW_CAD(.jww/.jwc) / DocuWorks(.xdw) / SXF(.sfc/.p21) / IFC / DWF /
+  //   ArchiCAD(.pln) / Revit / SketchUp / Office / LibreOffice /
+  //   現地写真(iPhone は .heic) / メール控え(.msg/.eml) /
+  //   納品一式の圧縮(.zip/.rar/.7z/.lzh)
+  // 実装がこのうち 1 つでも落とせなければこのテストが失敗する。
+  const EXTS = ['pdf', 'dwg', 'dxf', 'xls', 'xlsx', 'xlsm', 'doc', 'docx', 'docm',
+    'ppt', 'pptx', 'pptm', 'jpg', 'jpeg', 'png', 'zip', 'rvt', 'skp',
+    'jww', 'jwc', 'xdw', 'sfc', 'p21', 'ifc', 'dwf', 'pln',
+    'odt', 'ods', 'odp', 'gif', 'bmp', 'tif', 'tiff', 'heic', 'heif', 'webp',
+    'rar', '7z', 'lzh', 'tar', 'gz', 'msg', 'eml', 'txt', 'csv', 'bak'];
+  let checked = 0;
+  STEMS.forEach((stem) => {
+    EXTS.forEach((ext) => {
+      checked++;
+      const text = '社内の ' + stem + '.' + ext + ' により確認';
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+        /matched known-unsafe pattern: private-document-filename/, text);
+    });
+  });
+  assert.equal(checked, STEMS.length * EXTS.length);
+
+  // ASCII の幹も引き続き落ちる（片方だけ直していないこと）
+  ['plan.pdf', 'plan_A.pdf', 'A-102.dwg'].forEach((s) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(s, 'prose'),
+      /private-document-filename/, s);
+  });
+  // 全角句読点・括弧を含む幹（独立検証6 F1）。
+  // 全角対応の最初の実装は U+FF01..U+FF5E を一括で畳んでおり、
+  // `（ ） ＂ ＇ ， ；` が幹の区切り文字に化けて**拒否が壊れていた**。
+  // 全角括弧は日本語ファイル名で最もよく使われる装飾であり、
+  // 旧 corpus は 15 幹のすべてが装飾無しだったため 1 件も検出できなかった。
+  const DECORATED_STEMS = ['構造計算書（最新）', '図面（改訂版）', '見積書（税込）',
+    '意匠図（A棟）', '計算書（第2版）', '仕様書（案）', '伏図（確定）',
+    '見積書＂', '図面，', '資料；', '図面＇', '計算書＜旧＞'];
+  let decorated = 0;
+  DECORATED_STEMS.forEach((stem) => {
+    ['pdf', 'xlsx', 'dwg', 'png'].forEach((ext) => {
+      decorated++;
+      const text = '社内の ' + stem + '.' + ext + ' による';
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+        /private-document-filename/, text);
+    });
+  });
+  assert.equal(decorated, DECORATED_STEMS.length * 4);
+
+  // 全角形（独立検証5 Finding 4）。日本語 IME は `．` や `ｐｄｆ` を
+  // 容易に生むが、旧規則は半角しか見ていなかった。
+  // 畳みは 4 つの範囲を列挙する（． / 全角小文字 / 全角大文字 / 全角数字）。
+  // 独立検証7 F7-01: 旧 corpus は小文字と ． しか含まず、
+  // 大文字範囲と数字範囲を**削除する変異が 629/0 で生き残っていた**。
+  // ＰＤＦ も ｐ２１ も普通の IME 出力である（ｐ２１ は SXF）。
+  ['構造計算書．ｐｄｆ', '構造計算書.ｐｄｆ', '構造計算書．pdf',
+   'ｐｌａｎ．ｐｄｆ', '図面．ｊｗｗ', '見積書．ｘｌｓｘ',
+   '構造計算書．ＰＤＦ', '図面．ＤＷＧ', '見積書．ＸＬＳＸ',
+   '構造計算書.ＰＤＦ', '図面．ｐ２１', '納品．７ｚ',
+   '納品.７ｚ', '図面.ｐ２１'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /private-document-filename/, text);
+  });
+
+  // 拡張子が対象外のリポジトリ内ファイルは通る（過剰拒否していない）。
+  // これらは本ツール自身の公開ファイル名であり、既存の
+  // publicDescription に実際に現れるので意図的に対象外とする。
+  // 幹を捨てたコスト（独立検証10 / D-043）: 文中の裸の `.zip` も落ちるようになった。
+  // 以前は幹が空なので通っていた。回避は「ZIP形式」のように dot を置かないこと。
+  // 出荷済みの publicDescription 9 件は 1 件も影響を受けない（実測）。
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('形式は .zip とする', 'prose'),
+    /private-document-filename/, '幹を捨てたコストを固定する');
+
+  ['index.html の初期値として導入された値', 'calc.js を参照', 'README.md に記載',
+   'data.json 形式']
+    .forEach((s) => {
+      assert.equal(Evidence.assertPublicSafeEvidenceText(s, 'prose'), true, s);
+    });
+});
+
+test('P2J-S33: `.ext` を含む文字列は**前が何であれ**拒否される', () => {
+  // 独立検証10 F10-02。旧版は「幹 + 装飾」の直積を列挙していたが、
+  // 装飾集合は**前回の欠陥の軸**（畳むと区切りになる文字）だけでできており、
+  // **もともと区切りだった ASCII 文字**（space / `(` / `)` / `"` / `,`）を含んでいなかった。
+  // 結果 `plan (1).pdf`——Explorer が重複ファイルに自分で付ける名前——が
+  // 10304/10304 素通りしていた。
+  //
+  // corpus を増やすのをやめ、**不変式**として書く:
+  //   dot 形 + 拡張子 を含み、直後が ASCII 英字でなければ、前が何であれ拒否。
+  // 幹を捨てたのでこれが言えるようになった（D-043）。
+  function expandExt(alt) {
+    let out = ['']; let i = 0;
+    while (i < alt.length) {
+      let tok;
+      if (alt.charAt(i) === '[') { const j = alt.indexOf(']', i); tok = alt.slice(i + 1, j).split(''); i = j + 1; }
+      else { tok = [alt.charAt(i)]; i += 1; }
+      const opt = alt.charAt(i) === '?'; if (opt) i += 1;
+      const nx = []; out.forEach((p) => { if (opt) nx.push(p); tok.forEach((c) => nx.push(p + c)); });
+      out = nx;
+    }
+    return Array.from(new Set(out));
+  }
+  const toFull = (t) => t.replace(/[!-~]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0));
+  const exts = Evidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE.split('|')
+    .reduce((a, alt) => a.concat(expandExt(alt)), []);
+
+  // 拡張子の大文字形も回す。旧版は `toFull(ext)` を小文字定数から作っており、
+  // 全角**大文字**拡張子を一度も生成していなかった（検証10 F10-05）。
+  const extForms = [];
+  exts.forEach((e) => { extForms.push(e, e.toUpperCase(), toFull(e), toFull(e.toUpperCase())); });
+
+  // 前置きは「何であれ」を代表する: 旧幹の区切り文字をすべて含める。
+  const PREFIXES = ['', '図面', 'plan', '構造計算書 (1)', '図面(最新)', '見積書（最新）',
+    '図面「最新」', 'a b', 'x,y', 'p;q', 'r:s', "t'u", 'v"w', '図面、', '図面。', '図面　', ' '];
+  const DOTS = ['.', '．', '。', '｡'];
+
+  const leaked = [];
+  let checked = 0;
+  PREFIXES.forEach((pre) => {
+    extForms.forEach((ef) => {
+      DOTS.forEach((dot) => {
+        checked++;
+        const text = pre + dot + ef;
+        try { Evidence.assertPublicSafeEvidenceText(text, 'prose'); leaked.push(text); }
+        catch (e) { if (!/private-document-filename/.test(e.message)) leaked.push(text + ' (wrong rule)'); }
+      });
+    });
+  });
+  assert.deepEqual(leaked.slice(0, 8), [], '素通り (全' + leaked.length + '件 / ' + checked + '中)');
+  assert.equal(checked, PREFIXES.length * extForms.length * DOTS.length);
+  assert.equal(checked > 10000, true, '検査数: ' + checked);
+});
+
+test('P2J-S36: control-character 規則は宣言した範囲を全数覆う', () => {
+  // 独立検証10 F10-05。`\\u007F-\\u009F` の上端を 1 つずらす変異が生き残っていた。
+  // 本Phase で何度も出た通り、**範囲を持つ実装は代表文字では押さえられない**。
+  // （この規則は本Phase で触っていないが、同じ形の未固定であることに変わりは無い。）
+  const CONTROL_RANGES = [[0x00, 0x08], [0x0b, 0x0c], [0x0e, 0x1f], [0x7f, 0x9f]];
+  let checked = 0;
+  CONTROL_RANGES.forEach(([lo, hi]) => {
+    for (let c = lo; c <= hi; c++) {
+      checked++;
+      const text = '検討' + String.fromCharCode(c) + '結果';
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+        /control-character/, 'U+' + c.toString(16).toUpperCase().padStart(4, '0'));
+    }
+  });
+  assert.equal(checked, 9 + 2 + 18 + 33);
+
+  // 範囲外は通る（改行・タブは意図的に許容）。
+  ['検討\n結果', '検討\t結果', '検討\r結果', '検討\u00a0結果'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, JSON.stringify(text));
+  });
+});
+
+test('P2J-S38: 規則は**左に何があっても**発火する', () => {
+  // 独立検証12 F12-01。`url-scheme` / `www` / `unix-home-or-absolute-path` は
+  // 左文脈アンカー（`\\b` / `(^|\\s)`）を持っており、
+  // 日本語の散文が URL / path の前に空白を置かないため実質発火しなかった。
+  //
+  // test も corpus もこの軸を**アンカーに都合のよい値に固定**していた——
+  // 先頭 / 空白の後 / 全角の後。単語文字を直前に置いた形が 1 つも無かった。
+  // 集合の中身ではなく**規則を試す文脈**が射影されていた。
+  const PAYLOADS = [
+    ['https://internal.example.jp/docs/plan', /url-scheme/],
+    ['http://internal.example.jp/p', /url-scheme/],
+    ['www.internal.example.jp/docs', /www/],   // advisory へ降格済み（Human Gate §3）
+    ['/home/user/案件/最新版', /unix-home-or-absolute-path/],
+    ['/Users/tanaka/Documents/案件', /unix-home-or-absolute-path/],
+    ['/mnt/share/案件', /unix-home-or-absolute-path/],
+    ['~/Documents/案件', /unix-home-or-absolute-path/]
+  ];
+  // 左に置くものを網羅する: 無 / 空白 / 単語文字 / 記号 / 和文 / 全角。
+  const PREFIXES = ['', ' ', '資料_', '検討2', 'a', 'Z', '_', '9', '図面は', '原本は',
+    '参考:', '（', '「', '資料＿', '一次資料-', '添付.', 'x/'];
+  let checked = 0;
+  const leaked = [];
+  PREFIXES.forEach((pre) => {
+    PAYLOADS.forEach(([core, rule]) => {
+      checked++;
+      const text = pre + core;
+      // advisory へ降格された規則は throw しない。発火していればよい。
+      if (Evidence.ADVISORY_LINT_RULES.some((r) => rule.test(r.name))) {
+        try { assertRuleFired(text, rule, 'S38'); } catch (e) { leaked.push(text + ' (advisory miss)'); }
+        return;
+      }
+      try { Evidence.assertPublicSafeEvidenceText(text, 'prose'); leaked.push(text); }
+      catch (e) {
+        // `x/` + `/home/...` = `x//home/...` は構造的に UNC でもある。
+        // どちらの規則で落ちても fail-closed であることに変わりはない（F16-05 の副作用）。
+        const alsoUnc = /\/$/.test(pre) && /^\//.test(core) && /unc-path/.test(e.message);
+        if (!rule.test(e.message) && !alsoUnc) {
+          leaked.push(text + ' (wrong rule: ' + e.message.slice(-32) + ')');
+        }
+      }
+    });
+  });
+  assert.deepEqual(leaked.slice(0, 8), [], '左に何か置くと通った (全' + leaked.length + '件 / ' + checked + '中)');
+  assert.equal(checked, PREFIXES.length * PAYLOADS.length);
+});
+
+test('P2J-S39: normalizer 集合は**種類**を網羅する（置換・削除・正規化）', () => {
+  // 独立検証12 F12-06——「集合の全員を押さえたか」では見つからない欠陥。
+  // 集合は完全に押さえられていた（S34 が名前で、S37 が全員を）が、
+  // 全員が**置換写像**だったので、文字を**挿入**する回避には届かなかった。
+  // メンバシップのテストは「集合が正しい種類か」を検査できない。
+
+  // 削除対象は**導出されたクラス**であることを検査する。
+  //
+  // 旧版は手書き 24 文字を列挙していたので、実装をその 24 文字へ
+  // **戻す変異が 643/0 で生き残っていた**（独立検証14 F14-01）。
+  // つまり前 commit の看板変更を守る test が 1 つも無かった。
+  // 列挙を検査すると列挙だけが固定される——本Campaign が何度も見た形。
+  //
+  // 導出されていること自体を測る: BMP を走査して削除対象数を数える。
+  let strippedBMP = 0;
+  for (let c = 0; c < 0x10000; c++) {
+    const ch = String.fromCharCode(c);
+    if (ch !== 'a' && ch !== 'b' && Evidence.stripFormatChars('a' + ch + 'b') === 'ab') strippedBMP++;
+  }
+  // 実測: BMP 80 / astral 4126 / 計 4206。手書き列挙は 24（うち BMP 24）だった。
+  // しきい値は列挙版の 3 倍超に置く——戻せば必ず落ちる。
+  assert.equal(strippedBMP > 70, true,
+    '削除対象が少なすぎる（手書き列挙に戻っていないか）: BMP ' + strippedBMP);
+  // astral 側も見る。TAG ブロックと variation selector supplement はこちらにある。
+  let strippedAstral = 0;
+  for (let c = 0xe0000; c <= 0xe01ef; c++) {
+    if (Evidence.stripFormatChars('a' + String.fromCodePoint(c) + 'b') === 'ab') strippedAstral++;
+  }
+  assert.equal(strippedAstral > 300, true,
+    'astral の削除対象が少なすぎる: ' + strippedAstral);
+
+  // 各性質から「旧 24 には無かった代表」を回す。これらは列挙版では全部素通りした。
+  const BEYOND_THE_OLD_LIST = [
+    '\ufe0f',        // VARIATION SELECTOR-16（絵文字対応エディタが日常的に出す）
+    '\ufe00',        // VARIATION SELECTOR-1
+    '\u{e0041}',     // TAG LATIN CAPITAL A
+    '\u{e0001}',     // LANGUAGE TAG
+    '\ufff9',        // INTERLINEAR ANNOTATION ANCHOR
+    '\u0600',        // ARABIC NUMBER SIGN
+    '\u3164',        // HANGUL FILLER（Cf では無い。幅 0px）
+    '\u115f',        // HANGUL CHOSEONG FILLER
+    '\u1160',        // HANGUL JUNGSEONG FILLER
+    '\u17b4'         // KHMER VOWEL INHERENT AQ
+  ];
+  BEYOND_THE_OLD_LIST.forEach((ch) => {
+    assert.equal(Evidence.stripFormatChars('a' + ch + 'b'), 'ab',
+      '導出クラスから漏れている: ' + JSON.stringify(ch));
+    assertRuleFired('www' + ch + '.example.com', /www/, 'S39 ' + JSON.stringify(ch));
+  });
+
+  // 列挙版でも通っていた形（旧 24）も引き続き回す。
+  const FORMAT_CHARS = ['\u00ad', '\u034f', '\u061c', '\u180e', '\u200b', '\u200c', '\u200d',
+    '\u200e', '\u200f', '\u202a', '\u202b', '\u202c', '\u202d', '\u202e',
+    '\u2060', '\u2061', '\u2062', '\u2063', '\u2064', '\u2066', '\u2067', '\u2068', '\u2069', '\ufeff'];
+  FORMAT_CHARS.forEach((ch) => {
+    assert.equal(Evidence.stripFormatChars('a' + ch + 'b'), 'ab',
+      'U+' + ch.charCodeAt(0).toString(16).toUpperCase() + ' が削除されていない');
+    // 行動でも固定する（写像だけでは規則へ繋がっている保証が無い）。
+    assertRuleFired('www' + ch + '.example.com', /www/, 'S39 ' + JSON.stringify(ch));
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText('tanaka' + ch + '@example.co.jp', 'prose'),
+      /email-like/, 'email' + JSON.stringify(ch));
+  });
+
+  // 正規化: astral lookalike。手書きの畳みでは追えない範囲。
+  assert.equal(Evidence.foldCompatibility('\u{1D5D0}\u{1D5D0}\u{1D5D0}.example.com'), 'www.example.com');
+  assertRuleFired('\u{1D5D0}\u{1D5D0}\u{1D5D0}.example.com', /www/, 'S39 astral lookalike');
+  // ただし別の字は別の字のまま（過剰拒否しない）。
+  assert.equal(Evidence.assertPublicSafeEvidenceText('\u{1D5C0}\u{1D5C0}\u{1D5C0}.example.com', 'prose'), true);
+
+  // 種類が 3 つ居ることを名前で固定する。
+  ['foldFullwidthAscii', 'stripFormatChars', 'foldCompatibility'].forEach((fn) => {
+    assert.equal(typeof Evidence[fn], 'function', fn + ' が無い');
+  });
+});
+
+test('P2J-S40: ファイル名用畳みの 4 範囲を全数写像する', () => {
+  // 独立検証12 F12-05。新しく戻した狭い畳みを代表文字 2 つで押さえていたため、
+  // 4 範囲の端点をずらす変異が 5 件生き残っていた（S32 で広い畳みにやったのと同じ処置を
+  // 新しい定数にしていなかった）。
+  const fold = Evidence.foldFullwidthFilenameChars;
+  const RANGES = [[0xff10, 0xff19], [0xff21, 0xff3a], [0xff41, 0xff5a], [0xff0e, 0xff0e]];
+  let checked = 0;
+  RANGES.forEach(([lo, hi]) => {
+    for (let c = lo; c <= hi; c++) {
+      assert.equal(fold(String.fromCharCode(c)), String.fromCharCode(c - 0xfee0),
+        'U+' + c.toString(16).toUpperCase() + ' が畳まれていない');
+      checked++;
+    }
+  });
+  assert.equal(checked, 10 + 26 + 26 + 1);
+  // 範囲外は触らない（特に `＿` ——これを畳むと www 規則の境界が壊れる）。
+  ['＿', '（', '）', '＠', '：', '。', '～'].forEach((ch) => {
+    assert.equal(fold(ch), ch, JSON.stringify(ch) + ' を畳んではならない');
+  });
+});
+
+test('P2J-S41: 検証13 が見つけた未固定の座標を押さえる', () => {
+  // 独立検証13 F13-08。いずれも行動を変える変異が 642/0 で生存していた。
+
+  // (1) 多重度。S39 は不可視文字を**1 文字だけ**挿入していたので、
+  //     `FORMAT_CHARS` から /g を外す変異が生き残っていた。
+  [['構造計算書.p\u200bd\u200bf', /private-document-filename/],
+   ['w\u200bw\u200bw.example.com', /www/],            // advisory へ降格済み
+   ['tanaka\u200b@ex\u200bample.co.jp', /email-like/]].forEach(([text, rule]) => {
+    assertRuleFired(text, rule, '複数挿入');
+  });
+
+  // (2) scheme は http/https だけではない。
+  ['smb://fileserver/案件/図面', 'ftp://ftp.example.jp/x', 'sftp://h/x',
+   'file:///home/user/x', 'smb://h/x'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /url-scheme|unix-home/, text);
+  });
+
+  // (3) private provider は一つずつ意味がある。
+  ['docs.google.com/document/d/1AbC の資料', 'drive.google.com/file/d/1AbC',
+   'notion.so/案件メモ', 'dropbox.com/s/abc'].forEach((text) => {
+    assertRuleFired(text, /known-private-provider|url-scheme|www/, 'S41 provider');
+  });
+
+  // (4) Windows のドライブ文字は小文字でも書かれる。
+  ['原本は c:\\案件\\図面 にある', 'd:\\share\\x', 'C:\\Users\\x'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /windows-absolute-path/, text);
+  });
+
+  // (5)(6) opaque token のしきい値と文字クラス。
+  //       Drive の file ID は `-` と `_` を含む。
+  // advisory へ降格済み。しきい値自体は変わっていないので、警告側で押さえる。
+  assert.equal(Evidence.lintPublicEvidenceText('a'.repeat(28), 'prose')
+    .warnings.some((w) => w.rule === 'opaque-long-token'), true, 'ちょうど 28 文字');
+  assert.equal(Evidence.lintPublicEvidenceText('a'.repeat(27), 'prose')
+    .warnings.length, 0, '27 文字はしきい値未満');
+
+  // (7) 日本語 Windows の path 区切りは `\u00a5`。この形は全部素通りしていた。
+  ['C:\u00a5Users\u00a5tanaka\u00a5案件', '原本は C:\u00a5案件\u00a5検討 に置いてある',
+   '\uffe5\uffe5fileserver\uffe5案件', 'd:\u00a5share\u00a5x'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /windows-absolute-path|unc-path/, text);
+  });
+  // 通貨表記は巻き込まない（規則が英字+コロンか重複区切りを要求する）。
+  ['価格は\u00a51,500,000とする', '費用は\uffe5300万', '\u00a5 の記号を使う'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+
+  // (7b) 多重度は**閉包の上限を超えて**押さえる。
+  //      `/g` を外す変異は 1 回に 1 文字しか削らないので、N 文字に N 周かかり、
+  //      16 以上で閉包が収束せず throw する——つまり等価ではない。
+  //      前回「等価」と判定したのは証人を 2〜3 文字しか試さなかったからである
+  //      （独立検証14 F14-02）。Word 貼り付けや絵文字列で実際に起きる。
+  ['\u200b', '\u00ad', '\ufe0f'].forEach((ch) => {
+    const many = '一次資料で直接確認' + ch.repeat(24);
+    assert.equal(Evidence.assertPublicSafeEvidenceText(many, 'prose'), true,
+      '多数の不可視文字で throw してはならない: ' + JSON.stringify(ch));
+  });
+  assert.equal(Evidence.assertPublicSafeEvidenceText('価格は' + '\u00a5'.repeat(24) + '1', 'prose'), true);
+
+  // (7c) 「ラベル:\u00a5金額」は **落ちる**。fail-closed 側を取った結果であって
+  // 事故ではない（QD-J19）。`B:\u00a52024` と `C:\u00a52024` は文字列として同一で、
+  // 通貨か path かは機械的に決定できない。
+  ['Price:\u00a5500', 'Total:\u00a51,500,000', 'JPY:\u00a51,500', 'Type B:\u00a53,000',
+   'budget:\u00a52,000,000 で確定'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /windows-absolute-path/, '開示済みの過剰 reject: ' + text);
+  });
+  // コロンを伴わない円表記は影響を受けない——こちらが多数派。
+  ['\u00a5500', '単価は\u00a53,000/m2', '金額 \u00a51,500,000', '予算 \u00a52,000,000 で確定',
+   '単価\u00a55000', '概算\u00a5250万'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+
+  // (7d) scheme 名は英字だけではないし、www は大文字でも書かれる。
+  ['s3://bucket/案件/plan', 'ms-appx://x/y', 'a1://h/x'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), /url-scheme/, text);
+  });
+  ['WWW.EXAMPLE.COM', 'Www.Example.Com'].forEach((text) => {
+    assertRuleFired(text, /www/, 'S41 (7d)');
+  });
+
+  // (8) U+2028 / U+2029 は非印字で、Promotion Candidate JSON まで到達する。
+  ['検討\u2028結果', '検討\u2029結果'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /control-character/, JSON.stringify(text));
+  });
+  assert.equal(Evidence.assertPublicSafeEvidenceText('a'.repeat(27), 'prose'), true, '27 文字は通る');
+  // 合成の不透明 ID。advisory へ降格されたので throw せず警告を出す。
+  ['1BxiMVs0XRA5nFMd-KvBdBZjgmUUqptlbs', 'AKfycbx-9_kQz3LmNoPqRsTuVwXyZaBcDe'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true,
+      'advisory 規則で throw している: ' + text);
+    assert.equal(Evidence.lintPublicEvidenceText(text, 'prose')
+      .warnings.some((w) => w.rule === 'opaque-long-token'), true, text);
+  });
+});
+
+test('P2J-S34: normalizer は**名前で**固定する（個数ではなく）', () => {
+  // 独立検証11 F11-01。旧版は `TEXT_NORMALIZER_COUNT === 2` だけを見ていた。
+  // 前回の diff は normalizer を 1 つ**削除して 1 つ追加**したので、
+  // 個数が変わらず **guard が黙って通した**——そして回帰が出た。
+  // 個数は集合の**射影**であり、捨てた座標から欠陥が入る。
+  //
+  // よって各 normalizer を「それだけが捕まえられる証人」で名指しする。
+  const WITNESSES = [
+    // 狭い畳みだけ: U+FF3F は広い畳みだと `_`（単語文字）になり、
+    // `www` 規則の `\\b` が消える。狭い畳みは `＿` を触らないので境界が残る。
+    ['foldFullwidthFilenameChars', '資料＿ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ', /www/],   // advisory channel
+    // 広い畳みだけ: 英数字以外の全角記号（＠ ： ＼）
+    ['foldFullwidthAscii', 'ａｂｃ＠ｅｘａｍｐｌｅ．ｃｏｍ', /email-like/],
+    ['foldFullwidthAscii', 'Ｃ：＼Ｕｓｅｒｓ＼ｘ', /windows-absolute-path/],
+    // dot 写像だけ: U+3002 は全角 ASCII 範囲の外
+    ['foldDotEquivalents', '構造計算書。pdf', /private-document-filename/]
+  ];
+  WITNESSES.forEach(([owner, text, rule]) => {
+    assert.equal(typeof Evidence[owner], 'function', owner + ' が export されていない');
+    // normalizer 集合は hard / advisory の両方が共有するので、
+    // どちらの channel で発火しても normalizer が生きている証拠になる。
+    assertRuleFired(text, rule, owner + ' だけが捕まえられる形');
+  });
+
+  // 合成が必要な形（閉包を取っていること）
+  ['構造計算書。ｐｄｆ', '図面｡ｄｗｇ'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /private-document-filename/, '合成が必要な形: ' + text);
+  });
+
+  // 役割分担を直接固定する。
+  assert.equal(Evidence.foldFullwidthFilenameChars('＿'), '＿', '狭い畳みは ＿ を触らない');
+  assert.equal(Evidence.foldFullwidthAscii('＿'), '_', '広い畳みは ＿ を _ にする');
+  assert.equal(Evidence.foldFullwidthAscii('。'), '。', '広い畳みは U+3002 を触らない');
+  assert.equal(Evidence.foldDotEquivalents('。'), '.', 'dot 写像は U+3002 を写す');
+  assert.equal(Evidence.foldDotEquivalents('・'), '・', '中黒は写さない');
+});
+
+test('P2J-S37: dot 写像集合は**全員を個別に**押さえる', () => {
+  // 独立検証11 F11-02。前回導入した 12 メンバのうち押さえていたのは 2 だけで、
+  // 残り 10 を削除する変異がすべて生き残っていた——
+  // 検証8 F8-03（fold 範囲）、検証10 F10-05（control 範囲）と**同じ形**を
+  // それらの修理と同じ commit で新しく作っていた。
+  //
+  // 定数を読んで回すと定数を縮める変更に気づけないので、
+  // P2J-TB19 と同じく**定数とは独立に**列挙する。
+  // この集合に**導出原理は無い**（独立検証13 F13-04）。
+  // 3 度基準を言い直し、そのたびに例外が見つかった。
+  // 列挙された脅威リストとして扱い、増減は Human Gate（QD-J13）。
+  // 12 → 8 へ縮めたのは回帰だったので戻してある（F13-03）。
+  const EXPECTED_DOTS = ['。', '｡', '︒', '․', '﹒', '‧',
+                         '⸳', '·', '۔', '܁', 'ꓸ', '˙'];
+  EXPECTED_DOTS.forEach((ch) => {
+    assert.equal(Evidence.DOT_EQUIVALENTS.indexOf(ch) !== -1, true,
+      'dot 写像集合から U+' + ch.charCodeAt(0).toString(16).toUpperCase() + ' が消えている');
+    assert.equal(Evidence.foldDotEquivalents(ch), '.',
+      'U+' + ch.charCodeAt(0).toString(16).toUpperCase() + ' が `.` へ写されていない');
+    // 行動でも固定する（写像だけでは規則へ繋がっている保証が無い）。
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText('構造計算書' + ch + 'pdf', 'prose'),
+      /private-document-filename/, '構造計算書' + ch + 'pdf');
+  });
+  assert.equal(Evidence.DOT_EQUIVALENTS.length, EXPECTED_DOTS.length,
+    '定数側にここで列挙していないメンバがある');
+
+  // 除外しているものも固定する（行き過ぎの検出）。
+  // 除外側も全部固定する。U+00B7 と U+0387 は字形がほぼ同じなので、
+  // 片方だけ入れるのは基準が無いことの証拠だった（検証12 F12-04）。
+  // U+00B7 は除外のまま: ヨーロッパ諸語の散文で普通に使われる。
+  // 字形が同じ U+0387 を入れているのは一貫していないが、
+  // これを「基準」で説明しようとして 3 度失敗しているので、
+  // 列挙として固定し Human Gate へ送る（QD-J13）。
+  ['・', '･', '·'].forEach((ch) => {
+    assert.equal(Evidence.DOT_EQUIVALENTS.indexOf(ch), -1,
+      '中黒・高さ付きドットを写像に入れてはならない: U+' + ch.charCodeAt(0).toString(16));
+    assert.equal(Evidence.assertPublicSafeEvidenceText('PDF' + ch + 'doc形式で提出', 'prose'), true);
+  });
+});
+
+test('P2J-S35: 語境界を見るのは raw 側だけ（過剰拒否のコストを固定）', () => {
+  // 独立検証9 F9-03。`(?![A-Za-z])` を外すと `.doc` が `document` の中でマッチし、
+  // **この repository に実在する識別子**（`Workspace.csvEscape`）が落ちる。
+  // 一度外してしまったので、こちら側もテストで押さえる。
+  ['window.document を直接触らない', 'e.target.value を読む', 'event.target を参照する',
+   'node.documentElement を見る', 'config.documentation を参照', 'obj.docs を参照',
+   'Workspace.csvEscape を使う', 'x.gzip で圧縮', 'y.tarball を展開'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+  // しかし数字や全角が続く形は単語の続きでは無いので拒否する。
+  ['構造計算書.pdf2', '図面.dwg1', '図面．ｄｗｇ１', '構造計算書。ｐｄｆ'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /private-document-filename/, text);
+  });
+
+  // 語境界は raw と正規化形で**同じ**になった（独立検証10 F10-01/F10-03）。
+  // 以前は正規化形だけ境界無しにしており、
+  //   (a) 全角が**どこかに**あるだけで無関係な ASCII 識別子まで巻き込み
+  //   (b) `構造計算書.pdfA` は通るのに `構造計算書．ｐｄｆＡ` は落ちる、という不整合
+  // を同時に生んでいた。現在はどちらも受理で一貫する。
+  ['構造計算書.pdfA', '構造計算書．ｐｄｆＡ', '図面.dwgZ'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+});
+
+test('P2J-S29: 全角畳みは拒否を**増やすだけ**であり減らさない', () => {
+  // 独立検証7 F7-03 で導入し、検証8 F8-01 で**このテスト自体が
+  // 不変式ではなく標本を押さえていた**ことが分かった。
+  // 旧版の REJECTED_BASES はすべて半角拡張子だった——つまり
+  // 不変式が成立する側の半分だけを手で選んでいた。
+  // 全角拡張子（`図面．ｄｗｇ`）を入れると落ちていた。
+  //
+  // よって base を**手で選ばずに生成する**。拡張子は実装が持つ
+  // 唯一の定義から引き、半角・全角の両方の dot と拡張子形を網羅する。
+  function expandExt(alt) {
+    let out = [''];
+    let i = 0;
+    while (i < alt.length) {
+      let tok;
+      if (alt.charAt(i) === '[') {
+        const j = alt.indexOf(']', i);
+        tok = alt.slice(i + 1, j).split('');
+        i = j + 1;
+      } else { tok = [alt.charAt(i)]; i += 1; }
+      const opt = alt.charAt(i) === '?';
+      if (opt) i += 1;
+      const nx = [];
+      out.forEach((p) => { if (opt) nx.push(p); tok.forEach((c) => nx.push(p + c)); });
+      out = nx;
+    }
+    return Array.from(new Set(out));
+  }
+  const toFullwidth = (t) => t.replace(/[!-~]/g, (c) =>
+    String.fromCharCode(c.charCodeAt(0) + 0xfee0));
+
+  const exts = Evidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE.split('|')
+    .reduce((a, alt) => a.concat(expandExt(alt)), []);
+  const bases = [];
+  ['図面', '構造計算書', 'plan'].forEach((stem) => {
+    exts.forEach((ext) => {
+      ['.', '．'].forEach((dot) => {
+        bases.push(stem + dot + ext);
+        bases.push(stem + dot + toFullwidth(ext));
+      });
+    });
+  });
+
+  const rejects = (t) => {
+    try { Evidence.assertPublicSafeEvidenceText(t, 'prose'); return false; }
+    catch (e) { return /private-document-filename/.test(e.message); }
+  };
+
+  // positive control: 生成した base が実際に拒否されていなければ
+  // 下の不変式は空を回すだけになる。全部拒否されることを先に要求する。
+  const notRejected = bases.filter((b) => !rejects(b));
+  assert.deepEqual(notRejected, [],
+    '拡張子を持つファイル名が拒否されていない: ' + notRejected.slice(0, 8).join(' / '));
+  assert.equal(bases.length > 500, true, 'base 数: ' + bases.length);
+
+  // 不変式本体: 末尾に全角英数字を 1 文字足しても受理に転じてはならない。
+  // 末尾に足すのは**ASCII 英字に写らない**文字に限る。
+  // 全角英字（Ａ ａ）は畳むと ASCII 英字になり、語境界 `(?![A-Za-z])` にかかる——
+  // つまり `構造計算書．ｐｄｆＡ` は `構造計算書.pdfA` と**同じ扱いになる**。
+  // 以前は正規化形専用の境界無し変種で前者だけ拒否していたが、
+  // それが普通の散文を巻き込んでいた（検証10 F10-01）ので取りやめた。
+  // 両者の扱いが揃ったことは P2J-S35 で固定する。
+  const TRAILING = ['０', '９', '１', '５', '。', '）', '、'];
+  const leaked = [];
+  bases.forEach((b) => {
+    TRAILING.forEach((ch) => { if (!rejects(b + ch)) leaked.push(b + ch); });
+  });
+  assert.deepEqual(leaked, [],
+    '末尾に全角英数字を足すと通った: ' + leaked.slice(0, 8).join(' / '));
+});
+
+test('P2J-S25: tag name の継続文字は `[A-Za-z0-9-]` に限られない', () => {
+  // 独立検証5 Finding 2。HTML5 の tag name state は
+  // tab/LF/FF/space/`/`/`>` 以外では終わらないので、`<img:` は
+  // 「壊れた img」ではなく `img:` という名の**実在する要素**になり、
+  // onclick は live handler として発火する（Chromium実測）。
+  // この欠陥は元の規則から存在し、5度の修復と4度の独立検証を通り抜けた。
+  let checked = 0;
+  HTML_TAG_NAMES.forEach((tag) => {
+    NAME_CONTINUATION_FORMS.forEach((form) => {
+      [`<${tag}${form}>`, `</${tag}${form}>`].forEach((text) => {
+        checked++;
+        assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+          /matched known-unsafe pattern: html-like-tag/, text);
+      });
+    });
+  });
+  assert.equal(checked, HTML_TAG_NAMES.length * NAME_CONTINUATION_FORMS.length * 2);
+
+  // corpus の前提そのものを固定する: 終端文字を継続文字に
+  // 混ぜていたら、このテストは何も証明していない。
+  assert.equal(TAG_NAME_TERMINATORS.length, 5);
+  TAG_NAME_CONTINUATIONS.forEach((ch) => {
+    assert.equal(TAG_NAME_TERMINATORS.indexOf(ch), -1,
+      '終端文字を継続文字に混ぜている: ' + JSON.stringify(ch));
+  });
+  assert.equal(NAME_CONTINUATION_FORMS.every((f) => TAG_NAME_TERMINATORS.indexOf(f.charAt(0)) === -1), true,
+    'header の約束（HTML5終端文字で始まらない形）を再び破っている');
+  // なお NBSP と U+3000 は JS の `\\s` には含まれるが HTML5 の終端文字ではない。
+  // この非対称こそが誘因だったので、両方を corpus に残す。
+  assert.equal(NAME_CONTINUATION_FORMS.filter((f) => !/^[\s\/]/.test(f)).length, 70);
+  assert.equal(NAME_CONTINUATION_FORMS.length, 74);
+});
+
+test('P2J-S28: 名前の前に `<` や他の文字があってもタグ判定は回避できない', () => {
+  // 独立検証6 F2。旧 corpus は 26680 形ありながら、**名前を始める `<` より
+  // 前に `<` を置いた形を 1 つも含んでいなかった**。検証4 Finding 1 は名前の
+  // **後ろ**の `<` を扱ったが、**前**は誰も扱っていなかった。
+  // その結果「最初の `<` だけ見る」変異が suite を無傷で通過していた。
+  // Chromium 実測: '<1<img src=x onerror=alert(1)>' は img 要素を生む。
+  const PREFIXES = ['<1', '<<', '<@', '<あ', '< ', '</ ', '</1', '3 < 5 なので ', '<!x ', '<'];
+  const TAGS = ['img src=x onerror=alert(1)', 'svg onload=alert(1)', 'a href=x', 'script'];
+  let checked = 0;
+  PREFIXES.forEach((prefix) => {
+    TAGS.forEach((tag) => {
+      [`${prefix}<${tag}>`, `${prefix}</${tag}>`].forEach((text) => {
+        checked++;
+        assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+          /matched known-unsafe pattern: html-like-tag/, text);
+      });
+    });
+  });
+  assert.equal(checked, PREFIXES.length * TAGS.length * 2);
+  // 前置きを実際に持っていること自体を固定する（再び欠けたら落ちる）。
+  assert.equal(PREFIXES.filter((p) => p.indexOf('<') !== -1).length >= 7, true);
+});
+
+test('P2J-S32: 全角畳みは U+FF01..U+FF5E の**全数**を写像する', () => {
+  // 独立検証8 F8-03。範囲を持つ実装を「代表的な文字」で押さえると、
+  // 端点を 1 つずらす変異が必ず生き残る。実際 `FF5E→FF5D` は
+  // `～/Users/x`（全角チルダ + unix home path）を漏らすまま生き残っていた。
+  //
+  // 文字を選んでは同じことが繰り返されるので、**範囲全体を写像として**検査する。
+  const fold = Evidence.foldFullwidthAscii;
+  assert.equal(typeof fold, 'function');
+  let checked = 0;
+  for (let code = 0xff01; code <= 0xff5e; code++) {
+    const full = String.fromCharCode(code);
+    const half = String.fromCharCode(code - 0xfee0);
+    assert.equal(fold(full), half, 'U+' + code.toString(16) + ' が畳まれていない');
+    checked++;
+  }
+  assert.equal(checked, 0xff5e - 0xff01 + 1);
+  assert.equal(fold('\u3000'), ' ', '全角スペース');
+  // 範囲外は触らない（半角カナ・漢字・既存 ASCII）
+  ['ｱ', 'ﾟ', '図面', 'plan.pdf', 'あ'].forEach((t) => assert.equal(fold(t), t, t));
+  assert.equal(fold('\uff00'), '\uff00');
+  assert.equal(fold('\uff5f'), '\uff5f');
+
+  // 畳みが実際に全規則へ効いていること（端点を含む証人）。
+  // hard / advisory の両方を含める——畳みは両方が共有するので、
+  // 降格を理由に端点の被覆を落とさない。
+  [['～/Users/x', /unix-home-or-absolute-path/],
+   ['～／Ｕｓｅｒｓ／ｘ', /unix-home-or-absolute-path/],
+   ['＜！－－x－－＞', /markup-construct|html-like-tag/],
+   ['ｗｗｗ．ｅｘａｍｐｌｅ．ｃｏｍ', /www/],
+   ['ａｂｃ＠ｅｘａｍｐｌｅ．ｃｏｍ', /email-like/]].forEach(([text, rule]) => {
+    assertRuleFired(text, rule, 'S32 端点証人');
+  });
+});
+
+test('P2J-S30: tag name の頭文字は ASCII 英字 52 文字全部が対象', () => {
+  // 独立検証8 F8-03。scanner は `a-z` / `A-Z` の 2 範囲で判定するが、
+  // corpus は `a` しか押さえていなかった——範囲の端点を 1 つずらす変異
+  // （`z→y` / `A→B` / `Z→Y`）が 630/0 で生き残り、Chromium 実測で
+  // `<zz onclick=alert(1)>` が実要素になる素通りを作っていた。
+  // 範囲を持つ実装は**両端を押さえる**こと。
+  let checked = 0;
+  for (let c = 0; c < 26; c++) {
+    [String.fromCharCode(97 + c), String.fromCharCode(65 + c)].forEach((letter) => {
+      [letter, letter + letter, letter + '1'].forEach((name) => {
+        [`<${name} onclick=alert(1)>`, `</${name}>`].forEach((text) => {
+          checked++;
+          assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+            /matched known-unsafe pattern: html-like-tag/, text);
+        });
+      });
+    });
+  }
+  assert.equal(checked, 26 * 2 * 3 * 2);
+});
+
+test('P2J-S31: `>` は**名前の後ろ**に無ければタグではない', () => {
+  // 独立検証8 F8-03。scanner は `indexOf('>', j)`（名前開始以降）を見る。
+  // これを `indexOf('>', 0)` にする変異が生き残っていた。
+  // Chromium 実測: `a>b <img src=x` は要素を生まない（`>` が前にしか無い）。
+  ['a>b <img src=x', '結果>基準 なので <img src=x', '> <a href=x'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+  // 対照: 名前の後ろに `>` があればタグ。
+  ['a>b <img src=x>', '> <a href=x>'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /html-like-tag/, text);
+  });
+});
+
+test('P2J-S26: 本体が長くてもタグ判定は回避できない', () => {
+  // 独立検証5 Finding 1。Review 4 の修復で本体に `{0,300}` の上限を
+  // 置いたため、301文字以上の本体が**丸ごと素通り**していた。
+  // 長さの軸が corpus に無かったので 624 件の suite は無反応だった。
+  const NAMES = ['img', 'svg', 'iframe', 'script', 'a'];
+  let checked = 0;
+  NAMES.forEach((tag) => {
+    LONG_BODY_LENGTHS.forEach((n) => {
+      // 埋め方を2通り（空白のみ / 属性の反復）用意する。
+      [' '.repeat(n), ' data-a=1'.repeat(Math.ceil(n / 9)).slice(0, n)].forEach((pad) => {
+        const text = `<${tag}${pad} onerror=alert(1)>`;
+        checked++;
+        assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+          /matched known-unsafe pattern: html-like-tag/, `${tag} len=${n}`);
+      });
+    });
+  });
+  assert.equal(checked, NAMES.length * LONG_BODY_LENGTHS.length * 2);
+  // 境界が corpus に入っていること自体を固定する。
+  [299, 300, 301].forEach((n) => assert.equal(LONG_BODY_LENGTHS.includes(n), true, String(n)));
+  assert.equal(Math.max(...LONG_BODY_LENGTHS) >= 8192, true);
+});
+
+test('P2J-S27: パーサが要素を作らない形は拒否しない（行き過ぎの検出）', () => {
+  // 5度の修復はすべて「もっと拒否する」方向だった。片側だけ固定すると
+  // 「`<` を含むなら全拒否」へ行き過ぎても suite が気づかない。
+  // Chromium実測で**生成要素 0 個**だった形を受理側として固定する。
+  [
+    '<img src=x onerror=alert(1)',   // `>` が無い＝閉じられない
+    '< img src=x>',                  // `<` の直後が space
+    '</ img>',                       // bogus comment
+    '</1img>',                       // bogus comment
+    '＜img onerror=alert(1)＞',      // 全角・テキストになる
+    '<//a>', '</ >', '<!>',          // bogus comment系（検証6 F2: 行き過ぎ検出用）
+    '<@foo>', 'P<@Q>R', '<1abc>',    // `<` + 非英字（検証9 F9-06: 頭文字クラスの広げすぎ検出）
+    '<', '<<<', '>>>'
+  ].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+
+  // 本規則の目的は散文の制約ではない。不等式を含む技術文は書ける。
+  [
+    '3 < 5 である', '5<Z<40 の範囲', 'A<B<C<D の順',
+    '見付幅W<見付高さH となる場合>注意',
+    'x >= 3 かつ y <= 9', 'A --> B の順で確認した'
+  ].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+});
+
+test('P2J-S22: 1文字混ぜてもタグ判定は回避できない', () => {
+  // 3度目の欠陥の核心を、単体で読めるように独立して固定する。
+  const base = '<img src=x onerror=alert(1)';
+  ['あ', 'ア', '図', '中', '「', '\u3000', 'Ａ', '｡', '\uD842\uDFB7', '…']
+    .forEach((ch) => {
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(base + ' ' + ch + '>', 'prose'),
+        /matched known-unsafe pattern: html-like-tag/, 'char: ' + JSON.stringify(ch));
+    });
+  // 属性値の中に入れても同じ
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('<img alt="図面" onerror=1>', 'prose'),
+    /matched known-unsafe pattern: html-like-tag/);
+});
+
+test('P2J-S20: タグ以外のmarkup構文も拒否される', () => {
+  ['<!--comment-->', '<!DOCTYPE html>', '<?xml version="1" ?>', '<![CDATA[x]]>']
+    .forEach((s) => {
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(s, 'prose'),
+        /matched known-unsafe pattern: markup-construct/, s);
+    });
+  // `-->` 単体は技術散文の矢印と衝突するため対象にしない
+  assert.equal(Evidence.assertPublicSafeEvidenceText('A --> B の順で確認した', 'prose'), true);
+  assert.equal(Evidence.assertPublicSafeEvidenceText('P -> Q と表記する', 'prose'), true);
+});
+
+test('P2J-S21: タグ判定は病的入力でも線形時間で走る', () => {
+  // 現在の形は入れ子の量指定子を持たない（否定文字クラス1つ）。
+  // 他パターン（email-like / url-scheme / private-document-filename）には
+  // 二次的なコストが測定されている（QD-J04）。ここで固定するのはタグ判定のみ。
+  const shapes = [
+    '<a ' + 'b='.repeat(20000) + '!',
+    '<a' + ' b=c'.repeat(20000) + '!',
+    '<a' + ' '.repeat(50000),
+    '<a b=c '.repeat(20000)
+  ];
+  shapes.forEach((s) => {
+    const t0 = Date.now();
+    try { Evidence.assertPublicSafeEvidenceText(s, 'prose'); } catch (e) { /* どちらでもよい */ }
+    const ms = Date.now() - t0;
+    assert.equal(ms < 1000, true, 'len=' + s.length + ' took ' + ms + 'ms');
+  });
+});
+
+test('P2J-S19: A1修正後も現行configとObservation経路は通る', () => {
+  // 修正がEvidence側へ波及していないことの確認。
+  const seen = [];
+  (function walk(o) {
+    if (!o || typeof o !== 'object') return;
+    if (typeof o.publicDescription === 'string') seen.push(o.publicDescription);
+    Object.keys(o).forEach((k) => { try { walk(o[k]); } catch (e) { /* getter */ } });
+  })(MiyoshiProjectConfig);
+  assert.equal(seen.length, 11, '前提: 現行configのpublicDescriptionは11件');
+  seen.forEach((d) => assert.equal(Evidence.assertPublicSafeEvidenceText(d, 'c'), true));
+
+  // 不等式を含む説明でもObservationは成立する
+  const o = Closure.normalizeObservation(
+    obsOf('pane_width_mm', null, 987, 'mm', {
+      evidence: ev({ publicDescription: '合成fixture: W < H かつ P > Q の条件で確認' })
+    }), 'miyoshi');
+  assert.match(o.evidence.publicDescription, /W < H/);
+});
+
+// ---------------------------------------------------------------------------
+// 独立検証15 が見つけた 9 つの構造規則の欠陥（F15-A1..A6 / E1 / E2）。
+// 手書きの例示リストではなく直積で作る——検証11 の教訓（TB19 が唯一
+// 漏れなかったのは、定数と独立に列挙していたから）。
+// ---------------------------------------------------------------------------
+
+test('P2J-S42: \u00a5 区切りの直後が数字でも path は path（F15-A1）', () => {
+  const YEN = ['\u00a5', '\uffe5'];
+  // 数字で始まる segment。IPv4 の file server は区切り直後が必ず数字になる。
+  const DIGIT_SEGMENTS = ['2024年度', '1458号', '192.168.10.5', '010fileserver',
+                          '3階', '01', '2026-09-23'];
+  const TAIL = ['案件', '検討書', '共有', 'kouji', 'x'];
+
+  let checked = 0;
+  YEN.forEach((y) => {
+    DIGIT_SEGMENTS.forEach((seg) => {
+      TAIL.forEach((tail) => {
+        // drive 形と UNC 形の両方
+        const drive = 'C:' + y + seg + y + tail;
+        const unc = y + y + seg + y + tail;
+        [drive, unc, '図面は ' + drive + ' に保管', '原本は ' + unc + ' にある'].forEach((text) => {
+          checked++;
+          assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+            /windows-absolute-path|unc-path/, text);
+        });
+      });
+    });
+  });
+  assert.equal(checked, YEN.length * DIGIT_SEGMENTS.length * TAIL.length * 4);
+  assert.equal(checked > 250, true, '直積が縮んでいる: ' + checked);
+
+  // 単一 segment の drive path も落ちること（区切りが 1 つしかない形）
+  ['C:' + '\u00a5' + 'temp', 'D:' + '\u00a5' + 'share', 'Z:' + '\uffe5' + '2024'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), /windows-absolute-path/, text);
+  });
+});
+
+test('P2J-S43: \u00a5 の通貨/path 曖昧は fail-closed で切る（F16-01）', () => {
+  // 3 round この境界をいじった記録:
+  //   F14-03  Price:\u00a5500 が落ちる      → fold に (?!\\d)
+  //   F15-A1  C:\u00a52024年度 が素通り     → 規則側に通貨例外
+  //   F16-01  C:\\500 が素通り（ASCII） → 例外を削除してここへ
+  // `B:\u00a52024`（2024円）と `C:\u00a52024`（drive C の 2024 folder）は
+  // 文字列として完全に同一であり、機械的には決定不能。
+  // security guard なので過剰 reject を取る。
+
+  // path 側: 区切りの直後が何であれ落ちる。ASCII も \u00a5 も同じ扱い。
+  const B = String.fromCharCode(92);
+  const SEPS = [B, '\u00a5', '\uffe5', '/'];
+  const TAILS = ['500', '7', '0', '1,000', '2024', '01', '1458号', '2024年度', '3階',
+                 'temp', '案件', '192.168.10.5', '10-2'];
+  let checked = 0;
+  SEPS.forEach((sep) => {
+    TAILS.forEach((tail) => {
+      ['C', 'D', 'Z', 'a', 'B'].forEach((drive) => {
+        const text = drive + ':' + sep + tail;
+        checked++;
+        assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+          /windows-absolute-path/, 'drive path を通した: ' + JSON.stringify(text));
+      });
+    });
+  });
+  assert.equal(checked, SEPS.length * TAILS.length * 5);
+  assert.equal(checked > 250, true, '直積が縮んでいる: ' + checked);
+
+  // 開示されたコスト（QD-J19）: コロン付きラベルの円表記も落ちる。
+  ['Price:\u00a5500', 'Type B:\u00a53,000', '単価 B:\u00a55000', '概算 JPY:\u00a5250万'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /windows-absolute-path/, '開示済みの過剰 reject: ' + text);
+  });
+
+  // コロンを伴わない円表記は通る。実際の文章はほぼこちら。
+  ['\u00a5500', '\u00a51,500,000', '単価は\u00a53,000/m2', '工費 \u00a5250万円',
+   '合計\u00a548000円', 'ガラス単価 \u00a512000'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+});
+
+test('P2J-S44: 区切りは / でも path（F15-A2 / F15-A3）', () => {
+  // git-bash・JSON config・tooling 出力では forward slash が通常の綴り。
+  const DRIVES = ['C', 'D', 'Z', 'c', 'z'];
+  const SEGS = ['2024', '案件', 'kouji', 'temp', 'Users'];
+  DRIVES.forEach((d) => {
+    SEGS.forEach((seg) => {
+      const text = d + ':/' + seg + '/x';
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+        /windows-absolute-path/, text);
+    });
+  });
+  // forward-slash UNC（Windows API / PowerShell が受ける形）
+  ['//srv/share', '//192.168.1.1/共有', '//fileserver/案件/図面'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), /unc-path/, text);
+  });
+  // `https://` は url-scheme の担当であって unc-path ではない（二重計上しない）
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('https://x.example.com', 'prose'),
+    /url-scheme/, 'scheme は scheme として落ちる');
+});
+
+test('P2J-S45: path 接頭辞は大小を問わない（F15-A4）', () => {
+  // macOS / Windows では同じ path を指す。全ケース変種を列挙して作る。
+  const PREFIXES = ['/Users/', '/home/', '/mnt/'];
+  let checked = 0;
+  PREFIXES.forEach((prefix) => {
+    const body = prefix.slice(1, -1);
+    // 各文字の大小を総当たりすると 2^n。長さが短いので全列挙できる。
+    const n = body.length;
+    for (let mask = 0; mask < (1 << n); mask++) {
+      let v = '';
+      for (let i = 0; i < n; i++) {
+        v += (mask & (1 << i)) ? body[i].toUpperCase() : body[i].toLowerCase();
+      }
+      const text = '/' + v + '/tanaka';
+      checked++;
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+        /unix-home-or-absolute-path/, text);
+    }
+  });
+  assert.equal(checked, 32 + 16 + 8, '全ケース変種を見ていない: ' + checked);
+});
+
+test('P2J-S46: 構造的なアドレス形式（F15-A5）', () => {
+  // RFC 6531 の非ASCII local part / RFC 5322 の引用 local part /
+  // RFC 5321 の address literal / IDN domain。いずれも「開いた集合」ではなく
+  // 規格が定めた有限の構文枝。
+  const FORMS = [
+    '田中@example.co.jp', '山田太郎@example.com',
+    '"a b"@example.com', '"tanaka san"@example.co.jp',
+    'u@[192.168.1.1]', 'u@[2001:db8::1]',
+    'u@例え.jp', 'u@日本.co.jp',
+    'u@example.com', 'u.v+tag@sub.example.co.jp', 'u\uff20example.com'
+  ];
+  FORMS.forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'), /email-like/, text);
+  });
+  // 単位表記を巻き込まない
+  ['重量@10.5kg', '@ は区切り文字', '単価@3000'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+});
+
+test('P2J-S47: SGML/XML 宣言は族ごと落とす（F15-A6）', () => {
+  // DOCTYPE だけを列挙して兄弟を落としていた。族として押さえる。
+  const DECLS = ['DOCTYPE', 'ENTITY', 'ATTLIST', 'ELEMENT', 'NOTATION'];
+  DECLS.forEach((d) => {
+    ['<!' + d + ' x>', '<!' + d.toLowerCase() + ' x>'].forEach((text) => {
+      assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+        /markup-construct/, text);
+    });
+  });
+  ['<!--x-->', '<![CDATA[x]]>', ']]>', '<?xml version="1.0"?>', '<?= $x ?>'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /markup-construct|html-like-tag/, text);
+  });
+  // 不等号を含む技術文は巻き込まない
+  ['W < H かつ P > Q', '5<Z<40 の範囲', 'a<b かつ b<c'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+});
+
+test('P2J-S48: 公開した契約は呼び出し側から緩められない（F15-E1 / F15-E2）', () => {
+  // Object.freeze は配列だけを凍らせ、中の規則オブジェクトは可変のままだった。
+  // 規則名を名指しせず、全エントリを列挙して押さえる。
+  const table = Evidence.PUBLIC_UNSAFE_TEXT_PATTERNS;
+  assert.equal(Object.isFrozen(table), true, '配列が凍っていない');
+  assert.equal(table.length >= 12, true, '規則が減っている: ' + table.length);
+
+  table.forEach((entry) => {
+    assert.equal(Object.isFrozen(entry), true, '規則が凍っていない: ' + entry.name);
+    // strict mode では代入が TypeError になること
+    assert.throws(() => { 'use strict'; entry.pattern = /$^/; }, TypeError, entry.name + '.pattern');
+    assert.throws(() => { 'use strict'; entry.detect = () => false; }, TypeError, entry.name + '.detect');
+    assert.throws(() => { 'use strict'; entry.name = 'x'; }, TypeError, entry.name + '.name');
+    if (entry.pattern) {
+      assert.equal(Object.isFrozen(entry.pattern), true, 'pattern が凍っていない: ' + entry.name);
+    }
+  });
+
+  // 攻撃を試みたあとも挙動が変わらないこと（凍結が実効であることの証明）
+  try { table.find((e) => e.name === 'www').pattern = /$^/; } catch (e) { /* sloppy は黙殺 */ }
+  try { table.find((e) => e.name === 'html-like-tag').detect = () => false; } catch (e) { /* 同上 */ }
+  // advisory 規則は throw しないが、攻撃後も**警告を出し続ける**ことを見る。
+  assert.equal(
+    Evidence.lintPublicEvidenceText('www.example.com', 'prose').warnings.some((w) => w.rule === 'www'),
+    true, 'freeze を攻撃したあと advisory が死んだ');
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('C:\\\\Users\\\\x', 'prose'),
+    /windows-absolute-path/, 'hard 規則が攻撃後に死んだ');
+  assert.throws(() => Evidence.assertPublicSafeEvidenceText('<img src=x onerror=alert(1)>', 'prose'),
+    /html-like-tag/);
+
+  // CHECKED_AT_PATTERN も同じクラス
+  assert.equal(Object.isFrozen(Evidence.CHECKED_AT_PATTERN), true, 'CHECKED_AT_PATTERN が凍っていない');
+  assert.throws(() => { 'use strict'; Evidence.CHECKED_AT_PATTERN.test = () => true; }, TypeError);
+  assert.equal(Evidence.isValidCheckedAt('nope'), false, '日付契約が無効化された');
+  assert.equal(Evidence.isValidCheckedAt('2026-09-23'), true);
+});
+
+test('P2J-S49: 変異が生き残っていた 3 座標（F15-E4 / F15-E5 / R15-01）', () => {
+  // (a) R15-08 / F15-E4: fold は \u00a5 と \uffe5 の両方を畳む。
+  // closure 越しの witness（`\uff10b:\uffe5`）ではなく normalizer の契約を直接押さえる。
+  // NFKC が \uffe5 -> \u00a5 を与えるので「冗長では」と読みたくなるが、
+  // 差分探索で 400k 中 183 件の挙動差が出る（mutant が head の reject を通す向きを含む）。
+  assert.equal(Evidence.foldYenToBackslash('\u00a5'), '\\', 'ASCII yen');
+  assert.equal(Evidence.foldYenToBackslash('\uffe5'), '\\', 'fullwidth yen');
+  assert.equal(Evidence.foldYenToBackslash('a\uffe5b\u00a5c'), 'a\\b\\c', '混在');
+  ['\uff10b:\uffe5', '\uff21b:\uffe5\u00a5', '\uff21a:\uffe5\uff100\u0031'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /windows-absolute-path|unc-path/, '差分探索の witness: ' + JSON.stringify(text));
+  });
+
+  // (b) R15-09 / F15-E5: closure の収束深さ。
+  // コードの隣のコメントは「高々 3」と書いていたが、実測の最大は 5（28 形）。
+  // guard = 16 の根拠がどこにも無かったので、深い入力が throw しないことを押さえる。
+  const DEEP = ['\u200b\u3002\uff3f\uffe5\uff21\uff10', '\u3002\uffe5\uff21\uff10\u200b\uff3f',
+                '\uff0e\uff61\u00b7\uffe5\uff21\uff10\u200b', '\u2024\u3002\uff3f\uffe5\uff10\uff21\ufe0f'];
+  DEEP.forEach((text) => {
+    assert.doesNotThrow(() => {
+      try { Evidence.assertPublicSafeEvidenceText(text, 'prose'); } catch (e) {
+        if (/did not converge/.test(e.message)) throw e;   // 収束失敗だけを失敗とみなす
+      }
+    }, '収束しなかった: ' + JSON.stringify(text));
+  });
+  // 独立に生成した多文字入力でも収束すること（guard の余裕を測る）
+  const CHARS = ['\u00a5', '\uffe5', '\uff3f', '\u3002', '\uff0e', '\u200b', '\ufe0f', '\uff21', '\uff10', '\u2024'];
+  for (let i = 0; i < 2000; i++) {
+    let text = '';
+    for (let j = 0; j < 1 + (i % 10); j++) text += CHARS[(i * 7 + j * 3) % CHARS.length];
+    try { Evidence.assertPublicSafeEvidenceText(text, 'prose'); } catch (e) {
+      assert.equal(/did not converge/.test(e.message), false, '収束失敗: ' + JSON.stringify(text));
+    }
+  }
+
+  // (c) R15-01: drive letter に前置き制限を付けると隣接文字の陰に隠れる。
+  // `(^|[^A-Za-z0-9])` を付けた版は guard-diff corpus で 136 件の regression を出した。
+  // 過剰 reject（`ab:/x/y` が落ちる）は fail-closed 側なので受け入れる。
+  ['aC:\\\\Users', '検討2C:\\\\Users', 'ZC:\\\\Users', 'a:/x/y', ' b:/x/y', 'C:/x/y',
+   'ab:/x/y'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /windows-absolute-path/, '隣接文字の陰に隠れた drive: ' + text);
+  });
+  // (d) 通貨例外は削除された（F16-01）。drive path は区切りの直後が
+  // 何であれ落ちる。詳細な直積は P2J-S43。
+  ['C:\\\\3,000\\\\x', 'C:\u00a53,000\u00a5x', 'C:\\\\3階', 'C:\u00a53階',
+   'C:\\\\500', 'C:\\\\7', 'D:\\\\10-2', 'Price:\u00a5500'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /windows-absolute-path/, JSON.stringify(text));
+  });
+});
+
+test('P2J-S50: email の境界——label 数と address literal（F16-02 / F16-06）', () => {
+  // F16-02: label 上限を {0,8} にしたせいで 11 label のアドレスが素通りだった。
+  // 上限は ReDoS 対策で必要だが、実在する domain を超える位置に置く。
+  // 固定の例ではなく label 数を増やしながら列挙し、どこから漏れるかを直接見る。
+  for (let labels = 2; labels <= 40; labels++) {
+    const parts = [];
+    for (let i = 0; i < labels - 1; i++) parts.push(String.fromCharCode(97 + (i % 26)));
+    const addr = 'u@' + parts.join('.') + '.com';
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(addr, 'prose'),
+      /email-like/, labels + ' label のアドレスを通した: ' + addr);
+  }
+
+  // F16-06: RFC 5321 は IPv6 の address literal に `IPv6:` タグを要求する。
+  ['u@[IPv6:2001:db8::1]', 'u@[ipv6:2001:db8::1]', 'u@[IPV6:::1]',
+   'u@[2001:db8::1]', 'u@[192.168.1.1]'].forEach((text) => {
+    assert.throws(() => Evidence.assertPublicSafeEvidenceText(text, 'prose'),
+      /email-like/, text);
+  });
+
+  // 巻き込まないもの
+  ['寸法は [1250, 2050] mm', '範囲 [0, 1] で正規化',
+   '許容応力度は [N/mm2] で表す'].forEach((text) => {
+    assert.equal(Evidence.assertPublicSafeEvidenceText(text, 'prose'), true, text);
+  });
+});
+

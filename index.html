@@ -594,6 +594,7 @@
         </div>
         <div id="verified-case-selector-area"></div>
         <div id="reconciliation-area"></div>
+        <div id="evidence-closure-area"></div>
       </div>
 
       <div class="mode-field mode-field-manual form-group" style="margin-bottom:16px;">
@@ -1213,6 +1214,7 @@
 <script src="project-config/miyoshi.js"></script>
 <script src="project-config/manual.js"></script>
 <script src="project-config/registry.js"></script>
+<script src="project-config/evidence-closure.js"></script>
 <script src="project-config/project-input.js"></script>
 <script src="workspace.js"></script>
 <script src="project-profile.js"></script>
@@ -1378,7 +1380,278 @@ function renderReconciliation(config) {
     '本表示はread-onlyで、presetを書き換えることはありません。</div>';
 }
 
+
+/* ============================================================
+   Phase 2J Wave 4: Evidence Request Matrix（read-only）
+
+   この panel が答えるのは「何を確認すればよいか」だけである。
+   「ここで verified にする」経路は**構造的に存在しない**:
+   Observation入力欄・Evidence level選択・checkedAt入力・
+   sourceReference入力・Verify/Promote/Apply ボタンのいずれも作らない。
+
+   状態は必ず EvidenceClosure.evaluateClosure() から取る。
+   12 slot / 4 category / case scope数 / BLOCKED を UI 側で数え直さない。
+   数え直すと、core と UI で判定が2つになり、片方だけ壊れても気付けない。
+   ============================================================ */
+
+/* 表示用の翻訳だけを持つ。trust logic はここに無い。 */
+var CLOSURE_FACT_LABELS = {
+  pane_width_mm: 'ガラス見付幅 W',
+  pane_height_mm: 'ガラス見付高さ H',
+  positive_pressure: '階別正圧',
+  negative_pressure: '部位別負圧',
+  evaluation_height: '評価高さ Z'
+};
+
+/* 何を集めればよいかの静的な説明。private資料名・ファイル名・IDは書かない。 */
+var CLOSURE_REQUEST_TEXT = {
+  pane_width_mm: 'ガラス1枚の見付幅を直接確認できる一次資料',
+  pane_height_mm: 'ガラス1枚の見付高さを直接確認できる一次資料',
+  positive_pressure: 'このfloorの正圧値と算定根拠を直接確認できる一次資料',
+  negative_pressure: 'このzoneの負圧値と算定根拠を直接確認できる一次資料',
+  evaluation_height: 'このfloorに対応する評価高さ Z を直接確認できる一次資料'
+};
+
+var CLOSURE_CATEGORY_LABELS = {
+  pane_visible_dimensions: 'ガラス見付寸法',
+  positive_pressure_source: '階別正圧の原根拠',
+  negative_pressure_source: '部位別負圧の原根拠',
+  floor_evaluation_height_mapping: '階 ↔ 評価高さ Z の対応'
+};
+
+var CLOSURE_GATE_LABELS = {
+  PASS: 'Promotion Gate 条件を満たす',
+  FAIL: 'Evidence不足'
+};
+
+var CLOSURE_RECONCILIATION_LABELS = {
+  MATCH: '現在のpreset主張と一致',
+  MISMATCH: '現在のpreset主張と不一致',
+  INSUFFICIENT_EVIDENCE: 'Evidenceが不十分'
+};
+
+var CLOSURE_STATUS_LABELS = {
+  READY_CANDIDATE: '昇格候補条件を満たす',
+  BLOCKED: '未充足'
+};
+
+function closureScopeLabel(scope) {
+  if (scope === null || scope === undefined) return '共通';
+  if (Object.prototype.hasOwnProperty.call(scope, 'floor')) return 'floor ' + scope.floor;
+  if (Object.prototype.hasOwnProperty.call(scope, 'zone')) return 'zone ' + scope.zone;
+  return '—';
+}
+
+function closureCell(row, text, opts) {
+  var td = document.createElement('td');
+  // model由来の値は必ず textContent。innerHTML経路を新たに作らない。
+  td.textContent = text;
+  if (opts && opts.muted) td.style.color = 'var(--text3)';
+  if (opts && opts.nowrap) td.style.whiteSpace = 'nowrap';
+  row.appendChild(td);
+  return td;
+}
+
+function renderEvidenceClosureMatrix() {
+  var host = document.getElementById('evidence-closure-area');
+  if (!host) return;
+  host.textContent = '';
+
+  var evaluation;
+  try {
+    if (typeof EvidenceClosure === 'undefined' || !EvidenceClosure ||
+        typeof EvidenceClosure.evaluateClosure !== 'function') {
+      throw new Error('EvidenceClosure module is not available');
+    }
+    if (typeof MiyoshiProjectConfig === 'undefined' || !MiyoshiProjectConfig) {
+      throw new Error('project preset is not available');
+    }
+    // 実案件のObservationは0件である（Production UIに投入経路は無い）。
+    evaluation = EvidenceClosure.evaluateClosure(MiyoshiProjectConfig.projectId, []);
+    if (!evaluation || !Array.isArray(evaluation.factResults)) {
+      throw new Error('unexpected closure evaluation shape');
+    }
+  } catch (e) {
+    // 黙って消さない。表示できないことを「検証済み」と読ませない（F10と同じ理由）。
+    var warn = document.createElement('div');
+    warn.className = 'notice';
+    warn.style.borderColor = 'rgba(245,158,11,0.4)';
+    warn.textContent =
+      'Evidence Closure Statusを表示できませんでした。' +
+      '表示できないことを「検証済み」と解釈しないでください: ' +
+      (e && e.message ? e.message : String(e));
+    host.appendChild(warn);
+    return;
+  }
+
+  var wrap = document.createElement('div');
+  wrap.style.marginTop = '14px';
+
+  var title = document.createElement('label');
+  title.textContent = 'Evidence Closure Status（案件closureに必要な確認項目）';
+  wrap.appendChild(title);
+
+  // ── 集計（すべて評価結果から。UI側で数え直さない）──────────
+  var summary = document.createElement('div');
+  summary.style.cssText = 'font-size:12px;margin-top:6px;line-height:1.9;';
+  [
+    ['現在のclosure状態', CLOSURE_STATUS_LABELS[evaluation.status] || evaluation.status],
+    ['必要な確認項目', evaluation.readySlotCount + ' / ' + evaluation.requiredSlotCount + ' 充足'],
+    ['closureカテゴリ', evaluation.readyCategoryCount + ' / ' + evaluation.categoryCount + ' 充足'],
+    ['想定case scope', evaluation.readyCaseScopeCount + ' / ' + evaluation.caseScopeCount + ' 充足'],
+    ['提出済みEvidence Observation',
+      evaluation.factResults.filter(function (f) { return f.observationPresent; }).length + ' 件'],
+    ['Promotion Candidate', evaluation.promotionCandidate ? '生成済み（提案であり現在の真実ではない）' : 'なし']
+  ].forEach(function (pair) {
+    var line = document.createElement('div');
+    var k = document.createElement('span');
+    k.style.color = 'var(--text3)';
+    k.textContent = pair[0] + ': ';
+    var v = document.createElement('strong');
+    v.textContent = pair[1];
+    line.appendChild(k);
+    line.appendChild(v);
+    summary.appendChild(line);
+  });
+  wrap.appendChild(summary);
+
+  // ── 件数の意味の違いを明示する（4カテゴリ vs 12項目）────────
+  var counts = document.createElement('div');
+  counts.style.cssText = 'font-size:11px;color:var(--text3);margin-top:4px;';
+  counts.textContent =
+    '未解決カテゴリ: ' + evaluation.categoryCount +
+    ' / 必要な確認項目: ' + evaluation.requiredSlotCount +
+    '（確認項目は階・部位ごとに分かれるため、カテゴリ数より多くなります）';
+  wrap.appendChild(counts);
+
+  // ── 解釈の固定注意（runtime値で置き換えない）────────────────
+  var notice = document.createElement('div');
+  notice.className = 'notice';
+  notice.style.cssText = 'margin-top:10px;font-size:11px;line-height:1.8;';
+  [
+    'この表示は案件Evidenceの不足状況を示すものです。',
+    '数値が現在のpreset主張と一致しても、それだけではverifiedになりません。',
+    '一次Evidenceの確認と Promotion Gate の通過が必要です。',
+    'この画面からverifiedへ変更することはできません。',
+    'Promotion Candidateが生成されても、それはcurrent truthではありません。'
+  ].forEach(function (text) {
+    var li = document.createElement('div');
+    li.textContent = '・' + text;
+    notice.appendChild(li);
+  });
+  wrap.appendChild(notice);
+
+  // ── 4カテゴリ（membershipは評価結果から）────────────────────
+  var catTitle = document.createElement('div');
+  catTitle.style.cssText = 'font-size:12px;color:var(--text3);margin-top:12px;margin-bottom:4px;';
+  catTitle.textContent = '未解決カテゴリ';
+  wrap.appendChild(catTitle);
+
+  var catTable = document.createElement('table');
+  catTable.className = 'result-table';
+  catTable.style.fontSize = '12px';
+  var catHead = document.createElement('tr');
+  ['カテゴリ', '状態', '充足', '未充足項目'].forEach(function (h) {
+    var th = document.createElement('th');
+    th.textContent = h;
+    catHead.appendChild(th);
+  });
+  catTable.appendChild(catHead);
+  evaluation.categoryResults.forEach(function (cat) {
+    var tr = document.createElement('tr');
+    closureCell(tr, CLOSURE_CATEGORY_LABELS[cat.categoryId] || cat.categoryId);
+    closureCell(tr, CLOSURE_STATUS_LABELS[cat.status] || cat.status, { nowrap: true });
+    closureCell(tr,
+      (cat.requiredSlotKeys.length - cat.blockedSlotKeys.length) + ' / ' + cat.requiredSlotKeys.length,
+      { nowrap: true });
+    closureCell(tr, String(cat.blockedSlotKeys.length) + ' 件', { muted: true, nowrap: true });
+    catTable.appendChild(tr);
+  });
+  wrap.appendChild(catTable);
+
+  // ── Request Matrix 本体 ─────────────────────────────────────
+  var matTitle = document.createElement('div');
+  matTitle.style.cssText = 'font-size:12px;color:var(--text3);margin-top:14px;margin-bottom:4px;';
+  matTitle.textContent = '必要な確認項目（Evidence Request Matrix）';
+  wrap.appendChild(matTitle);
+
+  var table = document.createElement('table');
+  table.className = 'result-table';
+  table.id = 'evidence-closure-matrix';
+  table.style.fontSize = '12px';
+  var head = document.createElement('tr');
+  ['必要Evidence', '対象', '単位', '現在のpreset主張', 'Evidence Observation',
+    'Evidence Gate', '照合', 'Closure'].forEach(function (h) {
+    var th = document.createElement('th');
+    th.textContent = h;
+    head.appendChild(th);
+  });
+  table.appendChild(head);
+
+  evaluation.factResults.forEach(function (fact) {
+    var tr = document.createElement('tr');
+
+    // 必要Evidence: ラベル + 何を集めればよいかの説明
+    var labelCell = document.createElement('td');
+    var labelMain = document.createElement('div');
+    labelMain.textContent = CLOSURE_FACT_LABELS[fact.factKey] || fact.factKey;
+    labelCell.appendChild(labelMain);
+    var req = document.createElement('div');
+    req.style.cssText = 'font-size:10px;color:var(--text3);margin-top:2px;';
+    req.textContent = CLOSURE_REQUEST_TEXT[fact.factKey] || '';
+    labelCell.appendChild(req);
+    tr.appendChild(labelCell);
+
+    closureCell(tr, closureScopeLabel(fact.scope), { nowrap: true });
+    closureCell(tr, fact.unit, { nowrap: true });
+
+    // 現在のpreset主張。評価高さZのように「突き合わせる正が無い」場合は
+    // 一致/不一致ではなく**不在**として見せる。
+    closureCell(tr,
+      fact.currentValue === null ? '— 現在の正なし' : String(fact.currentValue),
+      { nowrap: true, muted: fact.currentValue === null });
+
+    // Observationが無いことを 0 や現在値で埋めない
+    closureCell(tr,
+      fact.observationPresent ? String(fact.candidateValue) : '未提出',
+      { nowrap: true, muted: !fact.observationPresent });
+
+    closureCell(tr,
+      fact.evidenceGateStatus === null
+        ? '未評価'
+        : (CLOSURE_GATE_LABELS[fact.evidenceGateStatus] || fact.evidenceGateStatus));
+
+    closureCell(tr,
+      fact.reconciliationApplicable === false
+        ? '比較対象なし'
+        : (CLOSURE_RECONCILIATION_LABELS[fact.reconciliationStatus] ||
+            (fact.reconciliationStatus === null ? '未評価' : fact.reconciliationStatus)));
+
+    closureCell(tr, CLOSURE_STATUS_LABELS[fact.closureStatus] || fact.closureStatus,
+      { nowrap: true });
+
+    table.appendChild(tr);
+  });
+  wrap.appendChild(table);
+
+  var foot = document.createElement('div');
+  foot.style.cssText = 'font-size:11px;color:var(--text3);margin-top:6px;line-height:1.7;';
+  foot.textContent =
+    'この表の状態は project-config のEvidence contractとPromotion Gateから算出しています' +
+    '（UI側の固定値ではありません）。公開リポジトリのため、社内資料の名称・URL・IDは表示しません。';
+  wrap.appendChild(foot);
+
+  host.appendChild(wrap);
+}
+
 function renderProjectEvidencePanels() {
+  // Phase 2F パネルと Phase 2J Closure Matrix は**別々にguardする**。
+  // 片方の失敗でもう片方が消えると、消えたこと自体が「問題なし」と読まれる。
+  renderPhase2FEvidencePanels();
+  renderEvidenceClosureMatrix();
+}
+
+function renderPhase2FEvidencePanels() {
   if (typeof MiyoshiProjectConfig === 'undefined' || typeof EvidenceLedger === 'undefined') return;
   try {
     renderEvidenceStatus(MiyoshiProjectConfig);

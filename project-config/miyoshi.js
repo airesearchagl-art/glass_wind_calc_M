@@ -187,6 +187,7 @@
   var verifiedValue = ProjectEvidence.verifiedValue;
   var assertPromotionGate = ProjectEvidence.assertPromotionGate;
   var deepFreeze = ProjectEvidence.deepFreeze;
+  var assertOrdinaryObject = ProjectEvidence.assertOrdinaryObject;
 
   // 案件識別情報そのものは社内基本設計資料で確認済み（verificationStatus:
   // 'verified'）。ただし本リポジトリは public であるため、施主名・建物名称・
@@ -455,20 +456,59 @@
   // 返さない）。呼び出し側は try/catch するか、事前に妥当性が既知の
   // ケースにのみ使うこと。
   // F9: caseIdはUI・export package・PR本文に**そのまま出る公開identifier**である。
+  // ただし注意（独立検証7 F7-04）: **この validator が守っているのは
+  // verifiedCases の経路だけ**であり、それは現在空配列である。
+  // 実際に export package へ到達する caseId は workspace.js / project-profile.js 経由で、
+  // そちらには filename-like の検査が無い（QD-J10）。
+  // このコメントを「だからここで塞げている」と読まないこと。
   // D-012が factKey に allowlist を課したのと同じ理由（key自体が公開情報になる）が
   // ここにも等しく当てはまる。図面番号やファイル名をそのままcaseIdに持ち込む経路を
   // 構造的に塞ぐため、公開して差し支えない短い記号IDだけを許す（fail closed）。
-  var CASE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,47}$/;
-  var FILENAME_LIKE_CASE_ID_PATTERN =
-    /[._-](pdf|dwg|dxf|xls[xm]?|doc[xm]?|ppt[xm]?|jpe?g|png|zip|csv|rvt|skp)$/i;
+  // 長さの上限は **opaque-long-token が throw することに依存しない**。
+  // Human Gate §9 / QD-J16: 以前は最大 48 文字を許しており、28 文字以上の
+  // 不透明 ID は guard 側の opaque-long-token だけが止めていた。
+  // その規則が advisory へ降格されるので、暗黙の依存を残さない。
+  // 27 文字は opaque-long-token のしきい値（28）を下回るので、
+  // この規則だけで閉じている（閉じた構造契約）。
+  //
+  // provider 名のような**意味的**な類似はここでは扱わない。
+  // CASE_ID_PATTERN に provider 名を編み込むのは開いた集合を
+  // 閉じた規則で追うことになる——それは advisory lint + Human Review の仕事。
+  var CASE_ID_MAX_LENGTH = 27;
+  var CASE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,26}$/;
+  // 拡張子集合は evidence.js が唯一の定義を持つ（独立検証6 F3）。
+  // 以前はここに同じ一覧を**手で写して**おり、evidence.js 側だけを
+  // 日本の実務形式へ拡張した結果 2 つがさし、caseId だけ `plan_jww` が
+  // 通る状態になっていた。caseId は UI・export package・PR本文にそのまま出る。
+  // 存在を確かめてから使う。undefined のまま連結すると
+  // `/[._-](undefined)$/i` という**有効だが何も防がない正規表現**になり、
+  // guard が黙って無効化する（独立検証7 F7-05）。
+  // 他の輸入は関数・配列なので使用時に必ず例外になるが、
+  // これだけは文字列なので気づかれずに通ってしまう。
+  // （古い evidence.js がキャッシュされているブラウザで実際に起きうる）
+  if (typeof ProjectEvidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE !== 'string' ||
+      !ProjectEvidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE) {
+    throw new Error(
+      'MiyoshiProjectConfig: ProjectEvidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE is required but not available'
+    );
+  }
+  var FILENAME_LIKE_CASE_ID_PATTERN = new RegExp(
+    '[._-](' + ProjectEvidence.PRIVATE_DOCUMENT_EXTENSION_SOURCE + ')$', 'i');
 
   function validateVerifiedCase(caseObj) {
     if (!caseObj || typeof caseObj !== 'object') {
       throw new Error('verified case must be an object');
     }
+    // Phase 2J Wave 1: caseObj のfieldはすべて素のproperty readで消費される。
+    // custom prototype に必須fieldを載せれば、下の必須field検査も
+    // caseId / floor / zone / 寸法 / designPressure の検査も、
+    // 「呼び出し側が実際には持っていない値」で通過してしまう。
+    assertOrdinaryObject(caseObj, 'verified case');
     for (var i = 0; i < VERIFIED_CASE_REQUIRED_FIELDS.length; i++) {
       var field = VERIFIED_CASE_REQUIRED_FIELDS[i];
-      if (!(field in caseObj)) {
+      // `field in caseObj` は prototype chain まで見るため、必須field検査として
+      // 弱い。own propertyであることを要求する（構造ガードとの二重防御）。
+      if (!Object.prototype.hasOwnProperty.call(caseObj, field)) {
         throw new Error('verified case is missing required field: ' + field);
       }
     }
@@ -478,7 +518,8 @@
     if (!CASE_ID_PATTERN.test(caseObj.caseId)) {
       throw new Error(
         'verified case caseId must be a public-safe short identifier ' +
-          '(letter, then letters/digits/_/-, max 48 chars): ' + JSON.stringify(caseObj.caseId)
+          '(letter, then letters/digits/_/-, max ' + CASE_ID_MAX_LENGTH + ' chars): ' +
+          JSON.stringify(caseObj.caseId)
       );
     }
     if (FILENAME_LIKE_CASE_ID_PATTERN.test(caseObj.caseId)) {
@@ -487,7 +528,10 @@
           JSON.stringify(caseObj.caseId)
       );
     }
-    // URL・パス・長い不透明トークンも共通ガードで塞ぐ（defense in depth）
+    // URL ・ path は共通 guard の**構造規則**で塞ぐ。
+    // 長い不透明トークンはここではもう止まらない（advisory へ降格された）。
+    // 長さは上の CASE_ID_PATTERN が閉じているので、ここは defense in depth ではなく
+    // URL / path / 制御文字のための構造検査。
     assertPublicSafeEvidenceText(caseObj.caseId, 'verified case caseId');
     if (VERIFIED_CASE_VALID_FLOORS.indexOf(caseObj.floor) === -1) {
       throw new Error('verified case floor must be one of ' + VERIFIED_CASE_VALID_FLOORS.join(', '));
@@ -515,6 +559,9 @@
     if (!evidence || typeof evidence !== 'object') {
       throw new Error('verified case evidence must be an object with widthEvidence/heightEvidence/pressureEvidence');
     }
+    // top-levelを閉じてもnestedは閉じない。widthEvidence/heightEvidence/
+    // pressureEvidence を継承で供給する経路が別に残るため、ここでも閉じる。
+    assertOrdinaryObject(evidence, 'verified case evidence');
     // pane W / pane H / pressure のそれぞれについて、
     // 「primary evidence かつ妥当なcheckedAt」というhard conditionを、
     // Phase 2Fの強化後gate assertPromotionGate('verified', ...) を再利用して強制する
@@ -525,6 +572,9 @@
     // であればここでの再検証は冗長になるが、caseObjのevidenceがmakeEvidence()
     // を経由せず直接組み立てられる可能性を考慮し、validateVerifiedCase()側
     // でも独立して強制する（defense in depth）。
+    if (evidence.sourceReferences !== null && evidence.sourceReferences !== undefined) {
+      assertOrdinaryObject(evidence.sourceReferences, 'verified case evidence.sourceReferences');
+    }
     ['widthEvidence', 'heightEvidence', 'pressureEvidence'].forEach(function (key) {
       var entryEvidence = evidence[key];
       // Phase 2F §3-C: case-level検証も強化後のgateを通す。

@@ -1006,6 +1006,79 @@ Phase 2B（案件入力値とその根拠を安全にbindingできる構造の�
 - 条件を満たさない値を `"verified"` にしようとすると、**モジュールの読み込み自体が例外で失敗します**（後から `validateAllEvidence()` を呼んで検出する方式ではありません）。
 - `config.validateAllEvidence()` を呼ぶと、config全体を走査してこの整合性を回帰確認できます（`tests/project-config.test.js` でテスト済み）。
 
+### 公開安全guard（Phase 2J: hard 9 規則 + advisory 3 規則）
+
+`assertPublicSafeEvidenceText()` は、公開リポジトリへ出る文字列
+（`publicDescription` / `publicEvidenceDescription` / `caseId`）を検査します。
+
+> **この関数を通ったことは、文章に機密情報が含まれないことの証明にはなりません。**
+> 証明するのは「機械的に強制されている構造拒否規則のどれにも一致しなかった」ことだけです。
+> 正式案件名、担当者名、言い換えた provider 参照などの意味的な開示は検出しません。
+> **最終的な公開可否は Human Review が決めます。**
+
+#### hard reject（9 規則 / 例外を投げる）
+
+構造として判定できる形だけを強制します。
+
+| 規則 | 落ちる形の例（合成） |
+|---|---|
+| `url-scheme` | `https://x.example.com/y` / `s3://bucket/x` |
+| `windows-absolute-path` | `C:\\Users\\x` / `C:/2024/x` / `C:\u00a52024年度\u00a5案件` |
+| `unc-path` | `\\\\srv\\share` / `//srv/share` / `\u00a5\u00a5192.168.10.5\u00a5共有` |
+| `unix-home-or-absolute-path` | `/Users/x` / `/home/x` / `/mnt/x` / `~/x`（大小区別なし） |
+| `email-like` | `u@example.com` / `田中@example.co.jp` / `u@[IPv6:2001:db8::1]` |
+| `private-document-filename` | `構造計算書.pdf` / `意匠図.dwg` 他 46 拡張子 |
+| `html-like-tag` | Chromium が実際に要素を生む形のみ |
+| `markup-construct` | `<!--` / `<![CDATA[` / `<!ENTITY` / `<?xml` / `]]>` |
+| `control-character` | C0 / C1 / U+2028 / U+2029 |
+
+検査は生の文字列だけでなく、**正規化の閉包**（全角畳み・ドット同等類・
+不可視文字の除去・NFKC・\u00a5→`\`）を取った全形に対して行われます。
+
+#### advisory lint（3 規則 / 例外を投げない）
+
+`www` / `known-private-provider` / `opaque-long-token` は **開いた集合に対する
+メンバシップ検査**であり、有限の正規化で閉じません。
+
+```text
+drive.g<キリル文字 o>ogle.com   通る
+drive[.]google[.]com            通る
+drive dot google dot com        通る
+```
+
+NFKC は互換性関係であって confusable 関係（UTS #39）ではないため、
+これらへは届きません。よってこの 3 つは throw せず、
+`lintPublicEvidenceText()` が警告データを返します。
+
+```js
+lintPublicEvidenceText('www.example.com を参照')
+// { warnings: [ { rule: 'www', severity: 'advisory', message: '…human review required…' } ] }
+```
+
+安定した契約は **rule 名**です（message は人間向けで文面は変わりうる）。
+
+#### 警告の読み手
+
+```bash
+npm run lint:evidence-publication
+```
+
+出荷する config の公開面値を走査し、advisory 警告を経路付きで出力します。
+**gate ではありません**——advisory があるだけでは失敗しません。
+失敗するのは hard 規則違反が公開面の文字列にある場合だけです。
+
+> **警告が空であることは公開安全の証明ではありません。**
+> 上記のとおり confusable や言い換えは見逃します。Human Review は常に必要です。
+
+#### caseId の契約
+
+`caseId` の長さ制限は **advisory 規則に依存しません**。
+最大 27 文字（`opaque-long-token` のしきい値 28 を下回る）という
+閉じた構造契約で定まります。
+
+provider 名に似た caseId（例: `sharepoint_case_01`）は**構造的には有効**で、
+publication lint が警告を出します。閉じた規則で開いた集合を追わないためです。
+
 ### 現時点のEvidence状況
 
 | 項目 | verificationStatus | evidence.level | evidence.checkedAt | 説明 |
@@ -1290,6 +1363,7 @@ better / worse / safer / winner のような優劣判定は出さない。
 
 | バージョン | 日付 | 内容 |
 |-----------|------|------|
+| v1.11.0-phase2j | 2026-09-24 | **Phase 2J：公開安全guard の強制境界を分けた。**（1）guard の 12 規則を **hard 9 / advisory 3** へ分割。`url-scheme` / `windows-absolute-path` / `unc-path` / `unix-home-or-absolute-path` / `email-like` / `private-document-filename` / `html-like-tag` / `markup-construct` / `control-character` は引き続き例外を投げる。`www` / `known-private-provider` / `opaque-long-token` は **開いた集合に対するメンバシップ検査**であり、`drive.g<キリル文字>ogle.com` / `drive[.]google[.]com` / `drive dot google dot com` のいずれにも届かない（NFKC は互換性関係であって confusable 関係ではない）ため、throw せず警告を返す advisory へ降格した。（2）`assertPublicSafeEvidenceText()` の doc に限界を明記——**これを通っても機密情報が無い証明にはならない**。（3）`lintPublicEvidenceText()` を新設し、`{rule, severity, message}` を返す。（4）警告の**読み手**として `npm run lint:evidence-publication` を新設。この repository には既に `blockerKinds` が計算・集計・deep-freeze されながらどこにも描画されない例があり、**3 つの throw を 3 つの沈黙にしない**ことを実測で確かめた——corpus 643,284 入力のうち throw をやめた 126 値の全部が警告され、沈黙は 0 件。（5）`CASE_ID_PATTERN` を最大 48 → **27 文字**へ。長さの保護が `opaque-long-token` の throw に依存していたのを、閉じた構造契約へ移した。provider 名を pattern へ編み込む道は採らない。（6）hard 9 規則の構造欠陥を Phase 内で修理: \u00a5 区切りの直後が数字の path（IPv4 の file server が無条件に素通りだった）、forward slash の drive / UNC、path 接頭辞の大小区別、RFC 6531/5322/5321 のアドレス形式、SGML 宣言の兄弟、規則表が浅い freeze で 1 行の代入で規則を殺せた点。（7）通貨と path の曖昧は 3 round いじった末に**機械的には決定不能**と結論し、fail-closed を取った（`Price:\u00a5500` は落ちる。QD-J19 に開示）。（8）変異演算子 30 件を repo へ commitし、KILLED / SURVIVED / EQUIVALENT / PATCH-MISS / HARNESS ERROR の 5 分類で報告する（非ゼロ終了の略記をやめた）。**30/30 KILLED**。（9）独立検証を Phase 内で 18 回実施。最終の 3 回（focused policy review / FP-01 delta / test-only delta）はいずれも Human Gate が scope を事前に固定した。Evidence は一切変更していない（`verifiedCases: []`、昇格なし、1250×2050 は `sample_default` / `unverified`、V0=34、粗度区分 III、observations 0、closure BLOCKED）。テストは baseline から **659**、browser 62 checks、parser bypass 0。 |
 | v1.10.0-phase2i | 2026-09-21 | **Phase 2I：設計レビュー資料（Design Review Package）。**（1）`review-package.js` を新設。現在のWorkspaceから、レビューで読める資料を1つ作る。**derived snapshot であって計算入力の正本ではない**——PIPでもWorkspace Packageでも Evidence でも承認記録でもない。（2）**入力へ戻す経路を持たない**。`deserializeReviewPackage` の類を作らず、Review JSON は Workspace / PIP のどちらのimportでも失敗する。（3）**計算しない**。集計は `WorkspaceCore.summarize()`、構成別件数は `groupByRecommended()`、行は `evaluateWorkspace()` を呼ぶ。ソース契約テストが `k1` / `k2` / `Er` / `qBar` / `Cpe` / `Gpe` の再実装と `calc.js` / `wind-pressure.js` への直接依存を禁じる（trace由来の**読み出し**と見出し文字列は対象外にして、広すぎる誤検出を避けている）。（4）**値が食い違わない**ことをテストで固定。行・詳細の各値が評価結果および authoritative な入力packageと一致することを確かめる。（5）詳細は選択ケースのみ（上限50）。**手入力・登録プリセットには trace が無い**ため、「告示風圧計算の経路を通っていない」と明記し Er / qBar を捏造しない。（6）比較は事実の差（**B − A**）のみ。優劣判定を出さない。片側だけの選択は「比較なし」に読み替えず fail closed。（7）**Full / Redacted をモデルの時点で分ける**。preview / Markdown / JSON / 印刷が同じ境界を共有する。（8）Markdown export は出所に関係なく全文字列をescapeする（内部traceに `5<Z<40` が含まれるため）。Review JSON は key順固定・決定的で、内部の source snapshot を含まない。（9）印刷は**既定で不可**。`beforeprint` がその場で鮮度を計算し直したときだけ資料が出る。Ctrl+P・変更イベントを伴わない設定変更・UI helperを通さないWorkspace変更、いずれも同じ関門を通る。（10）**独立検証の指摘6件を本フェーズ内で修復**。F1: 集計は固定していたが**値そのもの**を確かめるテストが無く、寸法や許容耐力を偽っても、NO_SOLUTION の詳細を OK に固定しても全テストが緑のままだった（実装は正しく、欠けていたのは証明）——値の一致を直接固定するテストを追加。F2 / F3: 面ごとに**項目立て**がずれていた（`publicLabel` が Markdown / JSON のみ、診断の理由が Markdown の表のみ欠落）——4面をそろえた。F4: `beforeprint` が例外時に fail open だった——既定で不許可にしてから与え直す形にした。F5 / F6: export上限の余裕を UTF-16 単位で測っていた——UTF-8 bytes で測り直した（多バイトラベルでの最大構成 1.33 MiB / 上限 8 MiB）。（11）Review操作は通信も保存もしない。1000ケースの資料も作れる（生成 226 ms / Markdown 11 ms / JSON 57 ms）。テストは baseline 398 → 500、browser 294 checks（pageError 0 / consoleError 0）。Evidenceは一切変更していない（`verifiedCases: []`、昇格なし、1250×2050 は `sample_default` / `unverified`、未解決4件も維持）。 |
 | v1.9.0-phase2h | 2026-09-20 | **Phase 2H：案件プロファイル / 検討ケース（Runtime Project Profile / Scenario Matrix）。**（1）`project-profile.js` を新設。案件共通の風条件（V0 / 粗度 / 建物高さ / 軒高 / 建物タイプ / 算定基準）を1回だけ入力し、開口ごとには W / H / 評価高さ Z / 部位 / ガラス種別だけを指定する。**Profileは registered preset ではなく verified Evidence でもない**——検証状況は `user_input_unverified` のみで、保存・export・100回の利用いずれによっても変わらない。schemaが `verificationStatus` / `evidence` / `sourceReference` / `sourceKind` / `presetId` を受け付けない。（2）**評価高さ Z と部位は Profile に入る場所が無い**。この2つは開口ごとに違い設計風圧を直接左右するため、規約ではなくschemaの構造として継承を不可能にした。（3）**階→評価高さの自動変換を持たない**。ラベルに `2F` と書いても Z は独立入力で、TSVの `floor` / `storey` / `level` 列は専用メッセージで拒否する。（4）**既定値を作らない**。V0 / 粗度 / 各高さ / 建物タイプ / 算定基準 / Z / 部位のいずれも欠ければ fail closed。とくに `basis` は Phase 2E と同じ理由で既定値を持たない。（5）`resolveEffectiveWindInput()` は Profile + Scenario を1つの WindInput へ展開するだけで、そこから先は既存の `ProjectInput.fromWindCalculation()` を通る。**Profile経由のPIPは direct path と deepEqual**（traceを含む）で、Profile layerは数値を変えない。（6）**snapshot semantics**: Workspaceへ追加した時点で effective input を PIP v2 として固定する。以後 Profile を変更しても既存caseは変わらず、UIが「反映されていません」と明示する（自動同期しない）。（7）Workspace export は Profile に依存せず、**Workspace JSON だけで再計算できる**。（8）組み合わせ生成（直積）と Profile Package v1 の export/import。すべて memory-only。（9）Phase 2G の TSV表パーサを `workspace.js` から共有化し、Workspace TSV と Scenario TSV の**物理行番号規約が一致する**ことを実測で確認。（10）**継続パケットの Required Fix 3件を修復**。RF-A: `options.maxTotal` が上限をそのまま置き換えていたため `maxTotal: 2000` で1400件生成でき、負の `existingCaseCount` でも同じことができた——`MAX_SCENARIOS` を絶対の天井にし、optionは狭める方向にしか効かないようにした。RF-B: TSVのrow isolationが**格納段階で切れて**おり、重複IDで後続行が試されないままMatrixが部分変更されていた——canonical helper `addParsedScenarios()` を置き1行ずつ隔離した。RF-C: gateが構築時のみで、手で組んだ `{profileType:'runtime_wind_profile', verificationStatus:'verified'}` がpreviewへ到達しPIPまで生成できた——**結果objectそのもの**を検査する `assertRuntimeProfile()` / `assertCanonicalScenario()` を置き、各消費関数が推移的な呼び出しに頼らず自分で通すようにした（Phase 2F D-013 の一般形）。（11）**独立検証の指摘7件を本フェーズ内で修復**。F5: 寸法と `extraFactor` の契約が遅れて効いていたため `extraFactor: 5.0` や W=999999 の行がケース一覧に並び、「Workspaceへ追加」まで落ちなかった——契約の実装を `project-input.js` に1つだけ置き（`assertPaneDimensionMm` / `assertExtraFactor`）、入力された時点で適用するようにした。これによりTSV由来の違反は**物理行番号付きで**落ちる。F2: Scenario Matrix の追加失敗が「取込エラー（JSON）」——起きていない取り込みの名前——と表示されていたため、診断のsourceに `scenario_matrix` を足し、専用の見出しにした。F6: Z / 部位の拒否が own property のみで、`Object.create()` で継承させると通過できた——継承の判定を1か所（`assertOrdinaryObject`）に置いた。F4b: 危険キーの事前走査が値まで拒否していたため、ラベルがちょうど `constructor` のProfileが弾かれていた——key位置のみを見るようにした。F3a / F3b / F4a / F7: 実行時には効いているのに削除してもテストが緑のままだった guard 4件（Matrix自身の1000上限 / Scenario TSVの余剰セル検査 / nest深さcap / 「既定値を置かない」メッセージ）を、それぞれ削除すると落ちるテストで固定した。（12）攻撃 33件すべて遮断、mutation は Wave 4H 14/14 と Wave 7 の修理後 8/9 kill（生存1件は別のguardが拾ったための生存で、coverageを主張せず判定を1か所へ戻した）、browser 130 checks（pageError 0 / consoleError 0）、テストは baseline 342 → 398。Evidenceは一切変更していない（`verifiedCases: []`、昇格なし、1250×2050 は `sample_default` / `unverified`）。 |
 | v1.8.0-phase2g | 2026-09-20 | **Phase 2G：一括検討 Workspace（Batch / Scenario Workspace）。**（1）複数ケースを1画面で比較する `workspace.js` を新設。**Batch layerは計算式を持たない**——各ケースは単一ケース計算とまったく同じ経路（PIP v2 → `GlassCalc.paneAreaM2` → `generateCandidates` → `splitCandidates`）を通る。見付面積の式は `GlassCalc.paneAreaM2()` に一本化し、単一ケースUIとBatchの両方が同じ関数を呼ぶ。テストは `workspace.js` のソースを読み、計算コアの識別子や案件固有値が現れたら失敗する。（2）**Workspace Package v1**（`schemaVersion: 1` / `workspaceType: "glass_batch_workspace"`）を新設。1ケース = 既存PIP v2で、PIPは v2 のまま（v3へ上げていない）。**保存するのは入力だけ**で、設計風圧・推奨構成・許容耐力・traceといった計算結果を正本として保存しない。import後は必ず再計算する。（3）外部importは既存 `ProjectInput.deserialize()` を必ず通す。ファイルが `registered_preset` / `verified` を名乗っても `imported_unverified` / `unverified` へ降格し、改ざんされた `designPressure` は再計算で上書きされる。TSVから registered preset / Evidence を作る経路は存在しない。（4）ExcelからのTSV貼り付け（`manual` / `notification` のみ。`basis` は必須で既定値を持たない——業界推奨値が法定最低値として通らないようにするため）。未知の列・計算結果側の列・header列数超過はいずれも読み飛ばさずエラーにする。（5）結果CSV出力。`=` `+` `-` `@` タブ・CRで始まる**文字列セル**を中和し、数値セルは中和しない（`-918` はそのまま）。RFC4180 escaping。（6）取り込めなかった行は消えず「入力エラー」として一覧に残る。ただしWorkspaceがauthoritativeに持つ入力は常に妥当なPIP v2だけで、壊れた行は**表示専用の診断レコード**として別レイヤに隔離される。診断は計算値をすべて `null` で持つため、最大設計風圧にも支配ケースにも混ざらず、Workspace JSONにも出力されない。（7）診断が持つのは位置と理由だけ（物理行番号 / case index / 安全なcaseId / 列名 / 理由）。行番号は貼り付けたシート上の**物理行**で、空行があってもずれない。理由の文面は、既知語彙以外の引用部分を伏せ字にし長さ上限を設ける（CSVは共有されるファイルであり、実際の流出経路になるため）。（8）Workspaceは**メモリ上だけ**に存在する（localStorage / サーバー / DB のいずれにも保存しない）。上限は 1000ケース / JSON 1MB / TSV 1MB / label 200文字 / caseId 64文字。（9）**Single（単一ケース）が既定**で、その挙動・結果は Phase 2G 前と完全一致。実装中に `display: grid` が `[hidden]` を上書きして初期表示で両viewが同時に描画される実バグを発見し修正、回帰テストで固定した。（10）**独立検証（別コンテキスト）の指摘4件をすべて修復**。最も重いものは、validatorの例外メッセージが落ちた値をそのまま引用するため、案件名や図面番号を含むセルが画面と**エクスポートされたCSV**へ出ていた点（F1。3000文字のセルが3075文字の診断になった）。あわせて必須列欠落時に直前の列を原因として報告していた点（F2）、header列数超過ガードの未テスト（F3）、`errorToInvalidResult` がlabel契約を呼び出し側に委ねていた点（F4）を修復。Evidenceは一切変更していない（`verifiedCases: []`、昇格なし、1250×2050 は `sample_default` / `unverified`）。テストは baseline 270 → 342。 |

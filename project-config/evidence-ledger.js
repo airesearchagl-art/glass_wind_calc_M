@@ -121,6 +121,11 @@
     if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
       throw new Error('ledger entry spec must be an object');
     }
+    // Phase 2J Wave 1: 継承させたfieldは Object.keys に現れないため、
+    // 直下のallowlist検査が**空虚に真**になったまま factKey / value /
+    // verificationStatus / evidence のすべてを prototype から読めてしまう。
+    // allowlistを意味のある検査にするため、先に構造を閉じる。
+    Evidence.assertOrdinaryObject(spec, 'ledger entry spec');
     var allowed = ['factKey', 'value', 'unit', 'verificationStatus', 'evidence', 'sourceReference'];
     var keys = Object.keys(spec);
     for (var i = 0; i < keys.length; i++) {
@@ -153,6 +158,11 @@
     if (!specEvidence || typeof specEvidence !== 'object' || Array.isArray(specEvidence)) {
       throw new Error(label + ': evidence must be an object');
     }
+    // Phase 2J Wave 1: 下のsnapshotは `specEvidence.level` 等を素のproperty readで
+    // 写すため、custom prototype に載せた契約値を**素の literal へ漂白**してしまう。
+    // その結果 gate は漂白後のobjectだけを見ることになり、gate側の構造ガードが
+    // ここでは効かない。呼び出し側objectを読む**この地点**で閉じる必要がある。
+    Evidence.assertOrdinaryObject(specEvidence, label + ': evidence');
     var verificationStatus = spec.verificationStatus;
     var evidence = {
       level: specEvidence.level,
@@ -248,6 +258,11 @@
    * @returns {{verified: boolean, missing: string[], reasons: string[]}}
    */
   function evaluateCasePromotion(ledger, caseTypeKey, options) {
+    // options.claimsCalculationProvenance も素のproperty readである。
+    // ここを継承で false 側へ倒されると evaluation_height の要求が静かに消える。
+    if (options !== null && options !== undefined) {
+      Evidence.assertOrdinaryObject(options, 'evaluateCasePromotion() options');
+    }
     options = options || {};
     if (!Object.prototype.hasOwnProperty.call(CASE_TYPE_CRITICAL_FACTS, caseTypeKey)) {
       throw new Error('unknown case type: ' + JSON.stringify(caseTypeKey));
@@ -321,8 +336,18 @@
    * presetを変更しない。呼び出し側が変更に使うことも想定しない。
    */
   function reconcileFact(presetValue, ledgerEntry, options) {
+    if (options !== null && options !== undefined) {
+      Evidence.assertOrdinaryObject(options, 'reconcileFact() options');
+    }
     options = options || {};
     var tolerance = typeof options.tolerance === 'number' ? options.tolerance : 0;
+
+    // F5と同じ理由: ledgerEntry は Ledger 由来とは限らず、呼び出し側が組み立てた
+    // objectでもありうる。verificationStatus / value / evidence / sourceReference は
+    // いずれも素のproperty readなので、継承経路で MATCH を作れてしまう。
+    if (ledgerEntry !== null && ledgerEntry !== undefined) {
+      Evidence.assertOrdinaryObject(ledgerEntry, 'reconcileFact() ledgerEntry');
+    }
 
     if (!ledgerEntry) {
       return {
