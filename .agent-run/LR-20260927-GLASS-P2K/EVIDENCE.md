@@ -548,3 +548,34 @@ M-29 と K3-07 は修理で anchor が消えたので **retarget** した（削�
 （両方とも tools/verification/README.md の「Rules」節に入れた）
 ```
 
+### Wave 6 の exact-head reverify
+
+```text
+測定対象 head : 27053ca69222b42b225c4a9557a5008e48f6dae3
+tree          : clean（測定前に確認）
+
+browser（全 5 harness、実 Chromium）
+  browser-w4         34 checks / 0 fail  PASS  exit 0
+  probe-w4            8 checks / 0 fail  PASS  exit 0
+  failopen-w4        10 checks / 0 fail  PASS  exit 0
+  stageA-regression  10 checks / 0 fail  PASS  exit 0
+  parser-boundary    42 forms  / 0 bypass PASS exit 0
+  合計 104 項目。bypass 0
+
+npm test          : 729 / 729 / 0
+publication lint  : inspected 12 / advisory 0 / hard 0 / exit 0
+diff-heads        : corpus 643,419 / digest ac68342e…
+                    REGRESSIONS 0 / unexpected errors 0
+                    rule coverage 9 attributed, gap なし
+                    advisory も全部 trigger 済み
+                    constant coverage 両 head とも corpus と同一
+```
+
+この browser 測定も **27053ca という 1 つの sha について**のものである。
+spec の browser 系 4 件が UNVERIFIED のままなのはこのためであり、
+この repo が任意の head についての browser 証拠を持っていないという
+事実の記述である。fresh verifier は自分の head で自分で走らせる。
+
+Wave 4 時点では browser-w4 の 34 項目だけだった。
+他 4 harness はこの環境に playwright があったから動いていただけで、
+**別のマシンでは UNVERIFIED を名乗れず FAIL と見分けがつかなかった**。
