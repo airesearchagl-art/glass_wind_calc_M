@@ -41,3 +41,52 @@ Human Gate が「いや BLOCK だ」と考えるならそう言ってほしい�
 CASE_ID の構造的独立性 / Evidence-first / Promotion Gate / Closure / Candidate semantics
 はすべて観察対象であって再設計対象ではない。
 Phase 2J の artifact と history も変更しない。
+
+## D-003 — evidence class と admissibility を 2 軸に分ける
+
+1 つの field にまとめると `guard-diff` について真のことが言えなくなる——
+「これは regression evidence であり、かつ現在引用できない」。
+
+```text
+class         : regression / independent / observational
+admissibility : ADMISSIBLE / DIAGNOSTIC_ONLY / INADMISSIBLE / UNVERIFIED
+outcome       : PASS / FAIL / ERROR / UNVERIFIED（結果。admissibility とは別）
+```
+
+`UNVERIFIED` は admissibility と outcome の両方に**意図的に**属する。
+「測っていない」は証拠の質としても結果としても正当。
+PASS / FAIL / ERROR だけが結果専用であり、`RESULT_ONLY_STATES` として分けている。
+
+この区別は自分の test が見つけた——初版は OUTCOMES 全員を
+admissibility 位置で拒否しており、正当な UNVERIFIED をも拒否していた。
+
+## D-004 — `guard-diff` を INADMISSIBLE として隔離する（§2 の裁定を反映）
+
+Human Gate §2 に従い、`diff-heads` および現行の導出 corpus は
+
+```text
+no regressions / completeness / independent verification
+```
+
+のいずれの主張にも使えない。diagnostic としての実行は可。
+報告する場合は「diagnostic only / inadmissible」と明記し、
+「verification PASS」と書かない。Wave 3 が修理と再認定を持つ。
+
+## D-005 — verifier package に verdict を入れない
+
+これは利便性の問題ではない。Phase 2J の独立検証は
+実装者が clean と信じていた head に対して繰り返し FINDINGS を返してきた。
+それが成立するのは handoff が「何が大事か」を言い、
+「どう結論すべきか」を言わないからである。
+
+```text
+禁止 field : expectedVerdict / recommendedVerdict / verdict /
+           verified / reviewPassed / allChecksPassed / pass / result
+検査方法 : assertNoSelfCertification() が再帰的に拒否。
+           planted した field が実際に拒否されることを test が実演（P2K-V01）
+```
+
+許可されるのは protected invariant（例: verifiedCases は [] のまま）。
+これは domain 制約であって結論の指示ではない。
+verifier は invariant が破られていると発見できる。
+

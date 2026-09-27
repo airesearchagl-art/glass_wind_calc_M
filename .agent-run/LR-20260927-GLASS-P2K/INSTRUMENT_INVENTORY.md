@@ -327,3 +327,50 @@ P2K-F07  入力 corpus digest を記録する仕組みが無い（§16 provenanc
 ```
 
 注: いずれも **Wave 0 では修理していない**。§5 の「最初は実装しない」に従う。
+
+---
+
+# Wave 1 追記 — 分類表（§40）
+
+この表の機械可読版が `tools/verification/verification-spec.json`。
+`node tools/verification/manifest.mjs` で展開される。
+
+| Instrument | Class | Admissibility | Why |
+|---|---|---|---|
+| `npm-test` | regression | **ADMISSIBLE** | 契約を固定する。うち 4 箇所は定数と独立な手書き期待列を持ち、定数の縮小を捕らえる（実験 A/B で実証） |
+| `publication-lint` | regression | **ADMISSIBLE** | 警告が描画されることを FP-01 test が positive control 付きで押さえている |
+| `guard-diff` | regression | **INADMISSIBLE** | corpus が production 定数から導出され、定数と一緒に縮む（P2K-F01、実測 2 例） |
+| `mutation` | regression | DIAGNOSTIC_ONLY | KILLED は npm test が判定するので強いが、SURVIVED/EQUIVALENT の分岐は隔離中の corpus が判定する |
+| `project-state-probe` | observational | **ADMISSIBLE** | 実 API 経由。期待値は test 側の手書き。式を転記していないことを test が検査 |
+| `browser-w4` | observational | UNVERIFIED | 現 target head の測定が存在しない |
+| `probe-w4` | observational | UNVERIFIED | 同上 |
+| `failopen-w4` | observational | UNVERIFIED | 同上 |
+| `stageA-regression` | observational | UNVERIFIED | 同上 |
+| `parser-boundary` | **independent** | UNVERIFIED | oracle は実 Chromium——本 repo で最も独立。ただし現 head 未測定 |
+| `independent-review` | independent | ADMISSIBLE | 別実行文脈。Wave 1 で初めて handoff が committed された |
+
+## 分類上の判断 1 件（明記）
+
+`mutation` を ADMISSIBLE でなく **DIAGNOSTIC_ONLY** にした。
+
+```text
+KILLED の oracle    : npm test（ADMISSIBLE）
+SURVIVED/EQUIVALENT : corpus（INADMISSIBLE）
+```
+
+1 つの field に 1 つの値しか入らないので、**低い方へ寄せた**。
+KILLED の強さを過小評価する側の誤りを取っている。
+Human Gate が ADMISSIBLE が適当と考えるならそう言ってほしい。
+
+## Wave 0 からの状態変化
+
+```text
+P2K-F04  閉じた——project-state-probe が committed + test 済み
+P2K-F05  閉じた——verifier-package が committed。verdict を指示しないことを test で押さえた
+P2K-F07  部分的に閉じた——inputDigest の schema slot と instrumentSourceSha はできた。
+         独立な corpus digest を計算する instrument はまだ無い（Wave 3）
+P2K-F01  確認済み / 隔離済み / INADMISSIBLE（Wave 3 が修理と再認定を持つ）
+P2K-F02  未閉（Wave 3）
+P2K-F03  未閉（Wave 3）
+P2K-F06  未閉（Wave 4）。manifest に known limitation として記録済み
+

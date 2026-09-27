@@ -55,3 +55,45 @@ README はこの件を明記している（「別の環境では import 行を�
 
 §16 provenance。「607,956」と書いても、どの corpus だったか後から判別できない。
 実験 A と B で corpus サイズが 3 通り（643,284 / 607,956 / 578,004）になったのが実例。
+
+---
+
+# Wave 1 後の状態（§40）
+
+```text
+P2K-F01  確認済み / 隔離済み / **INADMISSIBLE**。D-004。Wave 3 が修理と再認定を持つ
+P2K-F02  未閉（Wave 3）。corpus に positive control がない
+P2K-F03  未閉（Wave 3）。diff-heads が first match しか記録しない
+P2K-F04  **閉じた**。tools/verification/project-state-probe.mjs が committed、
+         test 7 件（手書き期待値 + positive control）。
+         K1-04 / K1-05 / K1-06 が KILLED
+P2K-F05  **閉じた**。tools/verification/verifier-package.mjs が committed、
+         verdict を指示しないことを P2K-V01 が planted field で実演。K1-07 KILLED
+P2K-F06  未閉（Wave 4）。manifest の knownLimitations に記録済み
+P2K-F07  **部分的に閉じた**。inputDigest の schema slot と
+         instrumentSourceSha（内容導出、mtime でない）ができた。
+         独立な corpus digest を計算する instrument はまだ無い（Wave 3）
+```
+
+## P2K-F08 — 「とにかく throw した」を見る test は何も固定していない（新規・本 Wave で修正済み）
+
+K1-08 が生き残った原因。緩い regex の `assert.throws` が
+**別の理由の throw** で満足していた。
+
+```text
+教訓: 失敗モードが複数ある場所では、それぞれを別の message で固定する。
+      `/A|B/` でまとめると、A の経路を消しても B で通る。
+```
+
+他の既存 test に同じ形が残っていないかは **未調査**。
+Wave 5 の fresh verifier trial で見るべき項目として残す。
+
+## 引き続き Phase 2J から
+
+```text
+QD-J19 / QD-J22 / QD-J23 / QD-J24 は
+.agent-run/LR-20260921-GLASS-P2J/QUALITY_DEBT.md にある（変更しない）。
+QD-J23 / QD-J24 は Wave 2、QD-J22 は Human Review 手順。
+manifest の knownLimitations にすべて機械可読形で入っている。
+```
+

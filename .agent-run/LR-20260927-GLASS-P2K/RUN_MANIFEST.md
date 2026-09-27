@@ -94,3 +94,21 @@ Phase 2J history の書き換えもしない（§2）。
 branch → Draft PR → independent verifier → Human Gate
 No direct main / No Ready / No merge / No Production（別途許可がない限り）
 ```
+
+## Wave 1 で解消したこと（上記 Wave 0 の発見への回答）
+
+上の引用部に書いた「**fresh verifier が project state を読む方法が
+どこにも committed されていない**」は Wave 1 で閉じた。
+
+```text
+node tools/verification/project-state-probe.mjs
+  → 上記の state を stdout に JSON 1 本で出す。key 名を推測しなくてよい。
+  → 決定的（byte-identical）。timestamp を含まない。
+  → test 7 件が形と保護値を押さえている。
+```
+
+以降、この manifest の「Current project state」は手書きの写しではなく
+上のコマンドの出力と照合できる。不一致なら manifest が古いと見なす。
+
+ただし probe の出力は **software についての証拠**であって
+project Evidence ではない（§21）。verified として import できない。
