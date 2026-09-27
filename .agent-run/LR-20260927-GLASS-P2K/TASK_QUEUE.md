@@ -8,7 +8,7 @@ Wave 3  mutation + differential tool reproducibility            DONE
 Wave 4  browser verification durability                         DONE
 Wave 5  fresh independent verifier trial（committed のみ）       DONE
 Wave 6  repair findings / exact-head reverify                   DONE
-Wave 7  README / Artifact convergence / Draft PR                NEXT
+Wave 7  README / Artifact convergence / Draft PR                DONE
 ```
 
 ## Wave 0 が生んだ項目

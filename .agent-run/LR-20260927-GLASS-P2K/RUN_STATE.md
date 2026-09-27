@@ -249,33 +249,59 @@ browser    : 5 harness 全部 PASS、不在時は全部 UNVERIFIED exit 3
 それを捕らえるべき test の集団が手書きだった——
 Wave 2 で自分が直した anti-pattern を Wave 4 で戻していた。
 
+## Wave 7 — README / Run Artifact convergence / Draft PR
+
+```text
+README        : v1.12.0-phase2k 行を追加。残した限界も同じ行に書いてある
+root README   : tools/verification への入口節を追加（検証者の指摘 D-6）
+Draft PR      : ここで止まる
+```
+
+## 最終状態
+
+```text
+branch : claude/phase2k-verification-instrument-independence
+base   : main @ 7bef30751ebaa2aa0f306f3bd584c4e025be77a1
+npm test         : 729 / 729 / 0（baseline 659 から +70）
+mutation         : 85 operator / KILLED 84 / SURVIVED 1（K2-03 = EQUIVALENT 判定済み）
+browser          : 5 harness 合計 104 項目、bypass 0、exact head で実測済み
+publication lint : inspected 12 / advisory 0 / hard 0
+differential     : corpus 643,419 / digest ac68342e… / REGRESSIONS 0 /
+                   rule coverage gap 0 / advisory gap 0 / unexpected errors 0
+```
+
+## Evidence は一切動かしていない
+
+```text
+closureStatus BLOCKED / observations 0 / readySlot 0 of 12 /
+category 0 of 4 / caseScope 0 of 8 / promotionCandidate なし /
+verifiedCases [] / 1250×2050 sample_default unverified /
+V0 34 / roughness III
+```
+
+Wave 0 の実測値と同一。probe の出力と browser の読み戻しの両方で確認。
+
+## 残してあるもの（閉じたと言わない）
+
+```text
+P2K-F08  緩い assert.throws 18 箇所。file:line は検証報告にあるが未 triage
+P2K-F10  corpus は有限の列挙。開集合の形には届かない——修理不可
+P2K-F14  § 参照の packet は未 commit。有界化しただけ
+mutation の EQUIVALENT 判定は guard corpus の分解能に縛られる
+mutation → DIAGNOSTIC_ONLY は自分の判断（P2K-M09 が literal で固定）
+guard-diff の ADMISSIBLE への再認定も自分の判断（戻すのは 2 行）
+```
+
+## Human Gate に上げる判断 2 件
+
+```text
+1. mutation を DIAGNOSTIC_ONLY に置いていること。
+   KILLED は npm test が決めるので分割して強くする道もある
+2. guard-diff を INADMISSIBLE から ADMISSIBLE へ戻したこと。
+   根拠は実測だが分類は判断である
+```
+
 ## Next action
 
-Wave 7: README / Run Artifact convergence / Draft PR。
-**そこで止まる**——Ready 化・merge・Production は含まない。
-
-## Stop conditions status
-
-```text
-Fresh Gate            : PASS
-Hard Gate failure     : なし（P2K-F01 は §24 の字面に当たるが
-                        §1 の修理対象そのもの。下記 DECISIONS D-001 参照）
-BLOCKED transition    : 発生していない
-no_progress_waves     : 0 / 2（Wave 1 は進捗あり）
-same_hypothesis_retry : 0 / 2
-repair_strategies     : 0 / 3
-```
-
-## Resume instructions
-
-```text
-0. 現在位置: Wave 6 完了。次は Wave 7
-1. RUN_MANIFEST.md から binding を確認
-2. TASK_PACKET_SNAPSHOT.md を再 hash し
-   aa68c9c5c820419c1f4413bbb7864a2d9cf49bc7b0b18c69645174cab0c6aa96
-   と一致することを確認（不一致なら BLOCKED）
-3. INSTRUMENT_INVENTORY.md を読む（Wave 0 の全成果）
-4. npm test で smoke check（**729** pass を期待）
-4b. tools/verification/README.md を読む（Wave 1 の入口）
-5. Next action から再開
-```
+**Draft PR で止まる。**
+Ready 化・merge・Production はこの Campaign の Next Action に含まない——Human Gate 専管。
