@@ -1,4 +1,6 @@
-import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+// Playwright is resolved, not hardcoded (P2K-F06). See harness.mjs: a failed
+// resolve reports UNVERIFIED and exits 3, never FAIL's exit 1.
+import { openBrowser, finishRun } from './harness.mjs';
 import { fileURLToPath } from 'url';
 // リポジトルートは**このファイルの位置から**求める。
 // 絶対パスを埋め込むと、harness は自分が入っている tree ではなく
@@ -7,6 +9,7 @@ import { fileURLToPath } from 'url';
 // 報告することを実証した——欠陥を原理的に検出できない形だった。
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 
+const { chromium, playwrightSource } = await openBrowser('probe-w4', () => ({ checksRun: 0, failures: 0 }));
 const browser = await chromium.launch();
 const page = await browser.newPage();
 const pageErrors = []; page.on('pageerror', e => pageErrors.push(e.message));
@@ -73,4 +76,4 @@ let fail = 0;
 for (const [name, ok] of checks) { if (!ok) fail++; console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${name}`); }
 console.log(`\ninjection probe: ${checks.length - fail} pass / ${fail} fail`);
 await browser.close();
-process.exit(fail ? 1 : 0);
+finishRun('probe-w4', checks.length, fail, { playwrightSource });

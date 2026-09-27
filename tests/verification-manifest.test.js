@@ -224,7 +224,7 @@ test('P2K-M09: 12 instrument 全部の class と admissibility を literal で�
     ['browser-w4', 'UNVERIFIED', 'observational'],
     ['failopen-w4', 'UNVERIFIED', 'observational'],
     ['guard-diff', 'ADMISSIBLE', 'regression'],
-    ['independent-review', 'ADMISSIBLE', 'independent'],
+    ['independent-review', 'UNVERIFIED', 'independent'],
     ['lint-discovery-depth-experiment', 'ADMISSIBLE', 'independent'],
     ['mutation', 'DIAGNOSTIC_ONLY', 'regression'],
     ['npm-test', 'ADMISSIBLE', 'regression'],
@@ -249,5 +249,102 @@ test('P2K-M09: 12 instrument 全部の class と admissibility を literal で�
         i.id + ': 非 ADMISSIBLE なのに reason が空か短すぎる');
     }
   }
+});
+
+test('P2K-M10: README と spec は finding の状態について矛盾できない', async () => {
+  const m = await load();
+  const manifest = m.buildManifest();
+  const readmePath = path.join(__dirname, '..', 'tools', 'verification', 'README.md');
+  const readme = fs.readFileSync(readmePath, 'utf8');
+
+  // No test read this file at all, and it drifted: it described guard-diff as
+  // INADMISSIBLE in the present tense fifty lines below the section saying the
+  // finding had been repaired, quoted pre-repair corpus sizes as current, and
+  // instructed a verifier to label a result "diagnostic only / inadmissible".
+  // An independent verifier following it as the designated entry point reported
+  // it could not tell which of two committed documents was current.
+  const status = {};
+  for (const k of manifest.spec.knownLimitations) status[k.id] = k.status;
+
+  // (1) Anything the README lists as closed must be closed in the spec.
+  const closedStart = readme.indexOf('## Recently closed');
+  assert.notEqual(closedStart, -1, 'README に Recently closed 節がない');
+  const afterClosed = readme.slice(closedStart);
+  const nextHeading = afterClosed.indexOf('\n## ', 4);
+  const closedSection = nextHeading === -1 ? afterClosed : afterClosed.slice(0, nextHeading);
+  const claimed = [...new Set((closedSection.match(/\b(?:P2K-F\d+|QD-J\d+)\b/g) || []))];
+  assert.equal(claimed.length > 0, true, 'Recently closed に finding id が一つもない');
+  for (const id of claimed) {
+    assert.ok(Object.prototype.hasOwnProperty.call(status, id),
+      id + ': README は閉じたと言うが spec の knownLimitations に存在しない');
+    assert.match(status[id], /CLOSED/i,
+      id + ': README は閉じたと言い、spec は "' + status[id] + '" と言っている');
+  }
+
+  // (2) The README must not call an instrument INADMISSIBLE that the spec admits.
+  const admissibility = {};
+  for (const i of manifest.spec.instruments) admissibility[i.id] = i.admissibility;
+  for (const id of Object.keys(admissibility)) {
+    const claimsQuarantined =
+      new RegExp('`' + id + '`[^.\n]{0,80}\\*\\*INADMISSIBLE\\*\\*').test(readme);
+    if (claimsQuarantined) {
+      assert.equal(admissibility[id], 'INADMISSIBLE',
+        id + ': README は INADMISSIBLE と書くが spec は ' + admissibility[id]);
+    }
+  }
+
+  // (3) A figure the README publishes must agree with the committed
+  //     expectations file, so the two cannot drift the way 32,000 did.
+  const expected = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'tools',
+    'verification', 'experiments', 'corpus-independence.expected.json'), 'utf8'));
+  for (const [id, e] of Object.entries(expected.experiments)) {
+    const withCommas = String(e.regressions).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    assert.equal(readme.includes(withCommas) || readme.includes(String(e.regressions)), true,
+      '実験 ' + id + ' の実測値 ' + withCommas + ' が README にない');
+  }
+});
+
+test('P2K-M11: tools が引く §NN はすべて committed な表に存在する', () => {
+  // An independent verifier found that tools/ cites §7..§38 while the only
+  // committed packet has 25 numbered sections and no "§" characters at all, so
+  // §26/§27/§28/§34/§35/§38 were out of range and none of the rest was
+  // resolvable from the tree. The design rationale for several instruments was
+  // anchored to documents that are not in the repository -- the same shape as
+  // P2K-F05, one layer up.
+  //
+  // This cannot be fixed by committing the packets (they were delivered in
+  // conversation). What it can do is bound the gap: every citation must be
+  // explained in REQUIREMENT-REFERENCES.md, so a fresh verifier can judge the
+  // code without the original document, and a NEW dangling reference fails.
+  const refsPath = path.join(__dirname, '..', 'tools', 'verification',
+    'REQUIREMENT-REFERENCES.md');
+  assert.equal(fs.existsSync(refsPath), true, '参照表がない');
+  const table = fs.readFileSync(refsPath, 'utf8');
+
+  const toolsDir = path.join(__dirname, '..', 'tools');
+  const cited = new Set();
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) { walk(full); continue; }
+      if (!/\.(mjs|js|json|md)$/.test(entry.name)) continue;
+      if (full === refsPath) continue;   // the table itself lists them all
+      for (const ref of fs.readFileSync(full, 'utf8').match(/§\d+/g) || []) cited.add(ref);
+    }
+  };
+  walk(toolsDir);
+  assert.equal(cited.size > 0, true, '§ 参照が一つも見つからない——走査が壊れている');
+
+  const missing = [...cited].filter((ref) => !table.includes('| ' + ref + ' |'));
+  assert.deepEqual(missing.sort(), [],
+    '参照表に無い § 参照: ' + JSON.stringify(missing.sort()) +
+    '（新しく引くなら REQUIREMENT-REFERENCES.md に行を追加する）');
+
+  // The table must also keep saying which packet is committed and which is not.
+  assert.match(table, /aa68c9c5c820419c1f4413bbb7864a2d9cf49bc7b0b18c69645174cab0c6aa96/,
+    'committed な packet の digest が表にない');
+  assert.match(table, /not\s+in\s+this\s+repository|are \*\*not\*\*/,
+    '未 commit の packet があることを表が言っていない');
 });
 

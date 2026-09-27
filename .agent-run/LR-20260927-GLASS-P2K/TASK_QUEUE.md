@@ -6,9 +6,9 @@ Wave 1  evidence-admissibility model + verification manifest    DONE
 Wave 2  publication-lint discovery independence（QD-J23）        DONE
 Wave 3  mutation + differential tool reproducibility            DONE
 Wave 4  browser verification durability                         DONE
-Wave 5  fresh independent verifier trial（committed のみ）       NEXT
-Wave 6  repair findings / exact-head reverify                   pending
-Wave 7  README / Artifact convergence / Draft PR                pending
+Wave 5  fresh independent verifier trial（committed のみ）       DONE
+Wave 6  repair findings / exact-head reverify                   DONE
+Wave 7  README / Artifact convergence / Draft PR                NEXT
 ```
 
 ## Wave 0 が生んだ項目
@@ -46,3 +46,10 @@ corpus digest と大きさは literal で固定したので、
 corpus を意図的に変える場合は同じ commit で P2K-D09 を更新する
 ```
 
+## Wave 6 が生んだ項目（黙って落とさない）
+
+```text
+P2K-F08  緩い assert.throws 18 箇所の triage。file:line は検証報告にある
+P2K-F14  § 参照は有界化しただけ。packet は依然 committed でない
+mutate.mjs の EQUIVALENT 判定の分解能（決着実験は QUALITY_DEBT に記載）
+```

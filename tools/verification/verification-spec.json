@@ -9,7 +9,7 @@
       "command": "npm test",
       "evidenceClass": "regression",
       "admissibility": "ADMISSIBLE",
-      "target": "every module contract across 18 test files",
+      "target": "every module contract pinned by the test files in tests/",
       "oracle": "mixed: mostly the stated implementation contract (regression); four sites use hand-written expected sets independent of the constant under test (P2J-S37 dots, P2J-TB19 extensions, the advisory rule-name deepEqual, FP-01b path grammar)",
       "sharedDependencies": [
         "requires production modules as the subject under test (legitimate)",
@@ -56,7 +56,7 @@
       "sharedDependencies": [
         "none: the corpus owns its committed threat list and imports nothing from project-config (pinned by P2K-D01)"
       ],
-      "positiveControl": "the two Wave 0 shrink experiments now produce 26496 and 32000 regressions respectively, where the derived corpus produced 0; mutants K3-01..K3-09",
+      "positiveControl": "tools/verification/experiments/corpus-independence.mjs regenerates 26496 and 40000 and cross-checks them against a committed expectations file; mutants K3-01..K3-09 cover the corpus repair itself",
       "negativeControl": "base and target identical produces 0 in every bucket",
       "proves": "that no corpus input the base rejects is accepted by the target, that every hard rule and every advisory rule is exercised by at least one input, and which rule each rejection is attributed to on each side",
       "doesNotProve": "completeness. The corpus is a finite enumerated threat list and cannot reach open-set forms — confusable homoglyphs, spelled-out separators, bracketed dots (QD-J13). A re-attribution count also does not bound how far a rule weakened, only that attribution moved.",
@@ -66,7 +66,7 @@
         "tools/guard-diff/diff-heads.mjs"
       ],
       "finding": null,
-      "reason": "P2K-F01 repaired in Wave 3. The corpus was quarantined because it derived DOT_EQUIVALENTS from the module under test and took the extension source from the head under test, so a commit that shrank either constant shrank the corpus policing it. The corpus now owns its threat list and imports nothing from project-config (pinned structurally by P2K-D01). Re-measured on the two Wave 0 experiments: dropping one dot equivalent went from 0 to 26496 regressions, dropping four extension atoms from 0 to 32000, both exit 1."
+      "reason": "P2K-F01 repaired in Wave 3. The corpus was quarantined because it derived DOT_EQUIVALENTS from the module under test and took the extension source from the head under test, so a commit that shrank either constant shrank the corpus policing it. The corpus now owns its threat list and imports nothing from project-config (pinned structurally by P2K-D01). Re-measured on Wave 0's two experiments, exactly as Wave 0 made them: dropping one dot equivalent gives 26496 regressions, dropping five extension atoms gives 40000, both exit 1, where the derived corpus gave 0 for both. Regenerate with tools/verification/experiments/corpus-independence.mjs, which fails if the measurement disagrees with its committed expectations file. Wave 3 first published 32000 for the second figure; that came from a FOUR-atom mutation, not Wave 0's five, and the two were wrongly described as the same experiment."
     },
     {
       "id": "mutation",
@@ -88,7 +88,7 @@
         "tools/guard-diff/suite-verdict.mjs"
       ],
       "finding": null,
-      "reason": "KILLED verdicts are decided by npm test and are strong; the SURVIVED-versus-EQUIVALENT split is decided by the quarantined corpus, so the instrument as a whole is not cited as verification until Wave 3 requalifies the corpus Wave 3: the harness no longer reads a suite run from 'did it throw' alone — a run with no TAP summary, or one whose exit code and fail count disagree, is a HARNESS ERROR rather than 'no test failed' (P2K-F09). The split remains corpus-bound, so every SURVIVED outside project-config/evidence.js is strictly 'SURVIVED or EQUIVALENT, undetermined'."
+      "reason": "KILLED verdicts are decided by npm test and are strong. The SURVIVED-versus-EQUIVALENT split is decided by the guard corpus probe, which cannot adjudicate a mutant in any other file, so every SURVIVED outside project-config/evidence.js is strictly 'SURVIVED or EQUIVALENT, undetermined'. The weaker half sets the label. Wave 3 also fixed how the harness reads a suite run: a run with no TAP summary, or one whose exit code and fail count disagree, is a HARNESS ERROR rather than 'no test failed' (P2K-F09)."
     },
     {
       "id": "project-state-probe",
@@ -130,7 +130,7 @@
         "tools/browser-checks/browser-outcome.mjs"
       ],
       "finding": null,
-      "reason": "UNVERIFIED is about the TARGET, not the instrument: this repository carries no browser measurement for an arbitrary head, so a verifier must run it at theirs. Wave 4 made that possible anywhere — Playwright is discovered (PLAYWRIGHT_MODULE, bare specifier, npm root -g, interpreter-relative) instead of imported from one machine's absolute path (P2K-F06) — and made the result readable: PASS 0 / FAIL 1 / UNVERIFIED 3 / ERROR 4, with zero checks and zero failures classified ERROR rather than PASS."
+      "reason": "UNVERIFIED is about the TARGET, not the instrument: this repository carries no browser measurement for an arbitrary head, so a verifier must run it at theirs. Wave 4 made that possible anywhere — Playwright is discovered (PLAYWRIGHT_MODULE, bare specifier, npm root -g, interpreter-relative) instead of imported from one machine's absolute path (P2K-F06) — and made the result readable by mapping each outcome to its own exit code (PASS->0, FAIL->1, UNVERIFIED->3, ERROR->4), with zero checks and zero failures classified ERROR rather than PASS. Wave 6 extended both halves to the other four harnesses, which Wave 4 had left on the absolute path."
     },
     {
       "id": "probe-w4",
@@ -216,7 +216,7 @@
       "id": "independent-review",
       "command": null,
       "evidenceClass": "independent",
-      "admissibility": "ADMISSIBLE",
+      "admissibility": "UNVERIFIED",
       "target": "whether a reader without the implementer's context reaches the same conclusion",
       "oracle": "a separate execution context, with scope fixed in advance by the Human Gate",
       "sharedDependencies": [
@@ -225,10 +225,10 @@
       "positiveControl": "reviews have returned FINDINGS on heads the implementer believed clean, repeatedly",
       "negativeControl": null,
       "proves": "an independent reader's findings on the exact head reviewed",
-      "doesNotProve": "that the next reviewer can reconstruct the same scope without the conversation",
+      "doesNotProve": "anything at all until an actual review is recorded against a named head; in particular it does not pre-approve the review being requested",
       "instrumentFiles": null,
       "finding": null,
-      "reason": null
+      "reason": "nothing about this instrument is committed: no command, no instrumentFiles, no source digest, and its scope was delivered in conversation. Wave 1 listed it as ADMISSIBLE, which pre-certified the review a verifier was being asked to perform — a verdict handed over rather than reached. UNVERIFIED is the honest value: a review exists only once someone runs one and records it against a named head."
     },
     {
       "id": "lint-discovery-depth-experiment",
@@ -376,19 +376,19 @@
     {
       "id": "P2K-F02",
       "statement": "the corpus has no positive control: nothing checks it contains the inputs it is meant to contain.",
-      "status": "open",
-      "owner": "Wave 3"
+      "status": "CLOSED in Wave 3 — hard and advisory rule coverage are both checked and a gap exits non-zero; the check found control-character never exercised",
+      "owner": "closed"
     },
     {
       "id": "P2K-F03",
       "statement": "diff-heads records only the first matching rule, so a rule masked by an earlier one is invisible.",
-      "status": "open",
-      "owner": "Wave 3"
+      "status": "PARTIALLY CLOSED in Wave 3 — an attribution shift between two rules is now recorded and reported (the reattributed bucket). First-match attribution remains the mechanism, so how far a rule weakened is still not bounded",
+      "owner": "open — mechanism unchanged"
     },
     {
       "id": "P2K-F06",
       "statement": "the browser check imported Playwright from one machine's absolute path, so a fresh verifier could not run it. The larger half was that a failed import died with ERR_MODULE_NOT_FOUND, making 'never ran' indistinguishable from 'ran and failed' — which is what §18's 'UNVERIFIED is acceptable' depends on.",
-      "status": "CLOSED in Wave 4",
+      "status": "CLOSED in Wave 6 — Wave 4 converted one of five harnesses and recorded the finding as closed; an independent verifier applied the repair's own structural test to the whole directory and found the other four still on the absolute path. All five now share harness.mjs, and the UNVERIFIED exit was demonstrated for each",
       "owner": "closed"
     },
     {

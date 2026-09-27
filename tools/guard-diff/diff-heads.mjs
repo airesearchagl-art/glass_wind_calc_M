@@ -49,6 +49,7 @@ d.tightened.slice(0, 4).forEach(([t, r]) => console.log(`     ${r}  ${t.slice(0,
 // Both reject, different rule. Not a safety regression on that input, but it is
 // the only signal a weakened rule leaves when another rule still matches.
 console.log(`re-attributed (both reject, rule changed) : ${d.reattributed.length}`);
+console.log(`unexpected errors (neither rule nor closure) : ${d.unexpectedErrors}  <- must be 0`);
 d.reattributed.slice(0, 6).forEach(([t, b, h]) =>
   console.log(`     ${b} -> ${h}  ${t.slice(0, 40)}`));
 
@@ -82,5 +83,6 @@ console.log('Rules listed as NEVER EXERCISED have not been measured at all.');
 // to police -- reporting 0 for an unexercised rule is the defect, not the zero.
 process.exit(exitCodeFor({
   regressions: d.regressions.length,
-  coverageGaps: headGaps.length + advGaps.length
+  coverageGaps: headGaps.length + advGaps.length,
+  unexpectedErrors: d.unexpectedErrors
 }));

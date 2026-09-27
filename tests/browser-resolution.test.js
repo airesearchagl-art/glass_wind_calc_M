@@ -25,12 +25,26 @@ const loadOutcome = () => import('../tools/browser-checks/browser-outcome.mjs');
 const FAILING_IMPORT = () =>
   Promise.reject(Object.assign(new Error('nope'), { code: 'ERR_MODULE_NOT_FOUND' }));
 
-test('P2K-R01: playwright の場所は発見する。source に絶対 path を埋めない', () => {
-  // Structural, like P2K-D01. The defect was a hardcoded location, and no
-  // value assertion can see a hardcoded location.
-  for (const rel of ['tools/browser-checks/browser-w4.mjs',
-                     'tools/browser-checks/resolve-playwright.mjs']) {
-    const src = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+test('P2K-R01: harness のどれも playwright の絶対 path を埋めない（対象は導出）', () => {
+  // Structural, like P2K-D01: the defect was a hardcoded location, and no value
+  // assertion can see a hardcoded location.
+  //
+  // The POPULATION is derived. The first version of this test listed two files
+  // by hand, and an independent verifier applied this test's own regex to the
+  // whole directory and found four harnesses it never looked at -- still
+  // importing Playwright from one machine's absolute path, while P2K-F06 was
+  // recorded CLOSED. That is the same failure the publication lint's
+  // defaultRoots() was rewritten to remove ("a hand-written list of what to
+  // inspect goes stale the same way a hand-written list of what to detect
+  // does"), reintroduced one wave later in the test meant to enforce it.
+  const dir = path.join(REPO_ROOT, 'tools', 'browser-checks');
+  const harnesses = fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')).sort();
+  assert.equal(harnesses.length >= 6, true,
+    'harness の数が縮んでいる: ' + JSON.stringify(harnesses));
+
+  for (const file of harnesses) {
+    const rel = 'tools/browser-checks/' + file;
+    const src = fs.readFileSync(path.join(dir, file), 'utf8');
     // Comments are excluded deliberately: resolve-playwright.mjs quotes the old
     // hardcoded import line to record what the defect was, and that quotation
     // is documentation, not a dependency. An actual import cannot live on a
@@ -41,6 +55,31 @@ test('P2K-R01: playwright の場所は発見する。source に絶対 path を�
       .filter(([, line]) => /['"`]\/[^'"`\n]*node_modules[^'"`\n]*playwright/.test(line));
     assert.deepEqual(offenders, [],
       rel + ' に playwright への絶対 path がある: ' + JSON.stringify(offenders));
+  }
+});
+
+test('P2K-R08: browser harness は全部が共通の入口と出口を使う', () => {
+  // The path check above only proves no harness hardcodes a location. It does
+  // NOT prove a harness reports UNVERIFIED rather than exit 1 when the browser
+  // is missing -- four harnesses passed that check for two waves while still
+  // dying with ERR_MODULE_NOT_FOUND. Population derived again.
+  const dir = path.join(REPO_ROOT, 'tools', 'browser-checks');
+  const SUPPORT = ['harness.mjs', 'resolve-playwright.mjs', 'browser-outcome.mjs'];
+  const harnesses = fs.readdirSync(dir)
+    .filter((f) => f.endsWith('.mjs') && !SUPPORT.includes(f)).sort();
+  assert.equal(harnesses.length >= 5, true,
+    'harness が減っている: ' + JSON.stringify(harnesses));
+
+  for (const file of harnesses) {
+    const src = fs.readFileSync(path.join(dir, file), 'utf8');
+    assert.match(src, /openBrowser\(/,
+      file + ': openBrowser を経由していない——browser 不在時に UNVERIFIED を名乗れない');
+    assert.match(src, /finishRun\(/,
+      file + ': finishRun を経由していない—— 0 件測定を PASS と誤る');
+    // A bare `process.exit(fail ? 1 : 0)` is the old shape: it cannot express
+    // UNVERIFIED or ERROR at all.
+    assert.equal(/process\.exit\(\s*(fail|bypasses)/.test(src), false,
+      file + ': 旧形の process.exit が残っている');
   }
 });
 

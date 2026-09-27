@@ -240,3 +240,58 @@ test('P2K-D10: advisory 3 規則も corpus が触っていることを確かめ�
     '触られていない advisory 規則を報告しない');
 });
 
+test('P2K-D11: guard の crash を「厳しくなった」と読まない', async () => {
+  const d = await loadDiff();
+
+  // A throw that is neither a rule match nor the deliberate closure guard is
+  // not a verdict about the input. The first version returned the literal
+  // 'error' and every caller treated it as an ordinary rejection, so a
+  // production change that made the guard CRASH on valid prose landed in
+  // `tightened` — base accepts, target rejects — which exitCodeFor does not
+  // fail on. A crash read as the guard getting stricter.
+  const crashing = {
+    assertPublicSafeEvidenceText() { throw new TypeError('x is not a function'); },
+    HARD_REJECT_RULES: []
+  };
+  const accept = { assertPublicSafeEvidenceText() {}, HARD_REJECT_RULES: [] };
+
+  assert.equal(d.attribute(crashing, 'ordinary prose'), d.UNEXPECTED_ERROR,
+    'crash が rule 名として扱われている');
+
+  const r = d.compare(accept, crashing, ['ordinary prose']);
+  assert.equal(r.unexpectedErrors, 1, 'crash が数えられていない');
+  assert.equal(d.exitCodeFor({ regressions: 0, coverageGaps: 0, unexpectedErrors: 1 }), 1,
+    'crash があっても 0 で抜けた');
+
+  // The deliberate fail-closed path stays a rejection, not an anomaly: the
+  // normalization closure refusing to converge IS the guard working.
+  const closureGuard = {
+    assertPublicSafeEvidenceText() {
+      throw new Error('assertPublicSafeEvidenceText: normalization closure did not converge');
+    },
+    HARD_REJECT_RULES: []
+  };
+  assert.equal(d.attribute(closureGuard, 'x'), d.CLOSURE_GUARD);
+  assert.equal(d.compare(accept, closureGuard, ['x']).unexpectedErrors, 0,
+    'fail-closed の closure guard を異常と扱った');
+});
+
+test('P2K-D12: buildCorpus の override をどの呼び出しも使っていない', async () => {
+  // P2K-D01 locks corpus.mjs against importing production. But the door P2K-F01
+  // walked through was the CALL SITE: diff-heads used to pass
+  // head.PRIVATE_DOCUMENT_EXTENSION_SOURCE into buildCorpus. A structural test
+  // that reads only corpus.mjs cannot see that, so the call sites are pinned
+  // here. The parameter is kept for tests to drive the expander directly.
+  const fs = require('node:fs');
+  const files = ['tools/guard-diff/diff-heads.mjs', 'tools/guard-diff/mutate.mjs'];
+  for (const rel of files) {
+    const src = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf8');
+    const calls = src.match(/buildCorpus\([^)]*\)/g) || [];
+    assert.equal(calls.length > 0, true, rel + ': buildCorpus の呼び出しが無い');
+    for (const call of calls) {
+      assert.equal(call, 'buildCorpus()',
+        rel + ': corpus に引数を渡している（P2K-F01 の入口）: ' + call);
+    }
+  }
+});
+

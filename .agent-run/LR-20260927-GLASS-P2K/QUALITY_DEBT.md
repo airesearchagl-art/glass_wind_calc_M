@@ -241,3 +241,71 @@ P2K-F11  新規・下記
 他の instrument に同じ形が残っていないかは **未調査**。
 Wave 5 の fresh verifier trial で見る。
 
+---
+
+# Wave 6 後の状態（独立検証 2 件の指摘を反映）
+
+```text
+P2K-F06  **本当に閉じた**。Wave 4 の CLOSED は 5 件中 1 件だけの修理であった。
+         5 件全部を harness.mjs に集約し、
+         各々について UNVERIFIED exit 3 を実演した
+P2K-F08  一部進展。検証者が 18 箇所の候補を file:line で特定した。
+         本 Wave では未着手 → Wave 7 以降もしくは次 Phase
+P2K-F10  構造上開いたまま（修理不可）
+P2K-F11  閉じた（Wave 4 で修正済み）
+P2K-F12  新規・下記。閉じた
+P2K-F13  新規・下記。閉じた
+P2K-F14  新規・下記。**有界化したが閉じてはいない**
+QD-J24   閉じた（D-014）
+```
+
+## P2K-F12 — 再認定の根拠が prose の文字列一致で守られていた
+
+```text
+守っていたもの : assert.match(gd.reason, /26496/)
+固定していたこと: 「文がその数字を含む」だけ
+実際の被害 : Wave 3 は 4 atom を測って 32,000 を得、
+           Wave 0 の 5 atom（= 40,000）と「同じ実験」として公表した
+修正 : corpus-independence.mjs + expected.json。
+       npm test の fail 数 1 / 3 も一致し、同じ変異である裏付けになった
+```
+
+## P2K-F13 — lint の value walker と oracle が一字一句同じだった
+
+QD-J24 の実体。Wave 2 は file oracle だけを差し替えていた。
+
+```text
+実害（検証者が実演）:
+  publicDescription: ['C:\Users\... .pdf']  → inspected 12 / 警告 0 / exit 0 / 720 全緑
+  同じ文字列を裸で                       → hard 違反
+  FP-01 はどちらも緑（= 見逃しを検出できることを一度も示していない）
+修正 : 公開面 key の下の全文字列を収集。読めない形は報告。
+       oracle は walker を捨て 12 経路の literal + 形の表（FP-01c）
+```
+
+## P2K-F14 — 計器の根拠がツリーの外にある（**有界化のみ**）
+
+```text
+tools が引く : §7 8 9 10 13 17 18 21 23 24 26 27 28 34 35 38
+committed packet : 25 節、§ 文字 0
+```
+
+packet は会話で渡されているので commit できない。
+REQUIREMENT-REFERENCES.md で**操作的な要件**を書き、
+P2K-M11 が表に無い § 参照を落とす。
+これは gap を消さない——**見えるようにして増えないようにした**だけである。
+
+## 未着手として残すもの（黙って落とさない）
+
+```text
+1. mutate.mjs の EQUIVALENT 判定は guard の text API 経由のみ。
+   evidence.js 内でも guard 以外の契約を触る mutant（M-12/13/16）は
+   原理上 0 divergence となりうる。現在は 3 つとも KILLED。
+   spec の doesNotProve に記載済み。決着実験は「どの test も押さえていない
+   非 guard 振る舞いを変える operator を 1 つ追加し、
+   EQUIVALENT かつ exitCode 0 になることを見る」
+2. P2K-F08: 緩い assert.throws が 18 箇所。file:line は検証報告にある
+3. project-state-probe の observations:0 は literal。
+   実商品も [] を渡すので現状一致。browser B10b が別経路で読む
+```
+

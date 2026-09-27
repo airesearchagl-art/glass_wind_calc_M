@@ -124,27 +124,69 @@ export function defaultRoots(dir) {
   return sources;
 }
 
+/**
+ * Collect publication-facing values.
+ *
+ * A publication-facing KEY makes everything beneath it publication-facing. The
+ * first version required the value to be a string at the key itself, so
+ *
+ *     publicDescription: ['C:\\Users\\...\\plan.pdf を参照']
+ *     publicDescription: { ja: '...', en: '...' }
+ *
+ * were both walked and then collected from nowhere: the array's members have no
+ * key, and `ja` / `en` are not publication-facing names. An independent verifier
+ * demonstrated the consequence with a tracked config module — a Windows
+ * absolute path inside an array-wrapped publicDescription gave
+ * `inspected 12 / No advisory warnings`, exit 0, and 720 green tests, while the
+ * identical string unwrapped was rejected.
+ *
+ * A value under such a key that is neither a string nor a container is reported
+ * as an unreadable shape rather than skipped. This lint is a publication guard;
+ * a field it cannot read is a thing it cannot vouch for.
+ */
 export function collectInventory(roots) {
   const sources = roots || defaultRoots();
   const found = [];
-  const seen = new Set();
-  const walk = (node, path) => {
-    if (!node || typeof node !== 'object' || seen.has(node)) return;
-    seen.add(node);
+  const unreadable = [];
+  // Keyed by node AND by the field context, because the same object reached
+  // from inside a publication-facing subtree must still be collected from even
+  // if it was already walked from outside one.
+  const seen = new Map();
+  const visited = (node, field) => {
+    const fields = seen.get(node);
+    if (fields) {
+      if (fields.has(field || '')) return true;
+      fields.add(field || '');
+      return false;
+    }
+    seen.set(node, new Set([field || '']));
+    return false;
+  };
+  const note = (here, field, value) => {
+    if (typeof value === 'string') { found.push({ path: here, field, value }); return; }
+    unreadable.push({ path: here, field,
+      valueType: value === null ? 'null' : typeof value });
+  };
+  const walk = (node, path, field) => {
+    if (!node || typeof node !== 'object' || visited(node, field)) return;
     if (Array.isArray(node)) {
-      node.forEach((v, i) => walk(v, path + '[' + i + ']'));
+      node.forEach((v, i) => {
+        const here = path + '[' + i + ']';
+        if (v && typeof v === 'object') walk(v, here, field);
+        else if (field) note(here, field, v);
+      });
       return;
     }
     for (const [key, value] of Object.entries(node)) {
       const here = path + '.' + key;
-      if (typeof value === 'string' && PUBLICATION_FACING_FIELDS.includes(key)) {
-        found.push({ path: here, field: key, value });
-      } else if (value && typeof value === 'object') {
-        walk(value, here);
-      }
+      const isField = PUBLICATION_FACING_FIELDS.includes(key);
+      const inner = isField ? key : field;
+      if (value && typeof value === 'object') walk(value, here, inner);
+      else if (inner) note(here, inner, value);
     }
   };
-  for (const [name, root] of Object.entries(sources)) walk(root, name);
+  for (const [name, root] of Object.entries(sources)) walk(root, name, null);
+  found.unreadableShapes = unreadable;
   return found;
 }
 
@@ -171,8 +213,9 @@ export function analyse(inventory, evidenceModule) {
  * function to drop warnings and asserts the suite fails (Human Gate §18) --
  * that is what stops advisory lint from becoming three silent accepts.
  */
-export function formatReport(results) {
+export function formatReport(results, unreadableShapes) {
   const lines = [];
+  const unreadable = unreadableShapes || [];
   const withWarnings = results.filter((r) => r.warnings.length > 0);
   const withHardErrors = results.filter((r) => r.hardError);
 
@@ -181,6 +224,14 @@ export function formatReport(results) {
   lines.push('inspected ' + results.length + ' publication-facing value(s): ' +
     PUBLICATION_FACING_FIELDS.join(', '));
   lines.push('');
+
+  if (unreadable.length) {
+    lines.push('UNREADABLE SHAPES (a publication-facing field this lint cannot check):');
+    for (const u of unreadable) {
+      lines.push('  ' + u.path + '  (' + u.field + ' held a ' + u.valueType + ')');
+    }
+    lines.push('');
+  }
 
   if (withHardErrors.length) {
     lines.push('HARD RULE VIOLATIONS (these must not reach publication):');
@@ -220,14 +271,31 @@ export function formatReport(results) {
 export function runLint(options) {
   const inventory = (options && options.inventory) || collectInventory(options && options.roots);
   const results = analyse(inventory, options && options.evidenceModule);
-  const lines = formatReport(results);
-  return { results, lines, hardErrorCount: results.filter((r) => r.hardError).length };
+  const unreadableShapes = inventory.unreadableShapes || [];
+  const lines = formatReport(results, unreadableShapes);
+  // Inspecting nothing is not a clean result. Without this, `inspected 0 /
+  // No advisory warnings` exits 0 and a CI job reading only the exit code
+  // cannot tell "nothing unsafe" from "nothing inspected" -- the same shape
+  // browser-outcome.mjs classifies as ERROR rather than PASS, and the shape
+  // this file's own header warns about.
+  const inspectedNothing = results.length === 0;
+  if (inspectedNothing) {
+    lines.push('');
+    lines.push('ERROR: 0 publication-facing values were inspected. That is not a');
+    lines.push('clean result, it is a failure to measure. Check that the config');
+    lines.push('directory is present and that the modules load.');
+  }
+  return {
+    results, lines, inspectedNothing, unreadableShapes,
+    hardErrorCount: results.filter((r) => r.hardError).length
+  };
 }
 
 const invokedDirectly = process.argv[1] &&
   fileURLToPath(import.meta.url) === process.argv[1];
 if (invokedDirectly) {
-  const { lines, hardErrorCount } = runLint();
+  const { lines, hardErrorCount, inspectedNothing, unreadableShapes } = runLint();
   console.log(lines.join('\n'));
-  process.exitCode = hardErrorCount > 0 ? 1 : 0;
+  process.exitCode =
+    (hardErrorCount > 0 || inspectedNothing || unreadableShapes.length > 0) ? 1 : 0;
 }

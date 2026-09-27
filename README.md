@@ -8,6 +8,23 @@
 
 ---
 
+
+## 検証ツールの入口（fresh verifier 向け）
+
+このリポジトリの検証系は `tools/verification/` に集約されている。
+独立検証者はそこから始める。
+
+```
+tools/verification/README.md                       入口。何が何を証明し、何を証明しないか
+node tools/verification/verifier-package.mjs       引き渡し package（verdict は含まない）
+node tools/verification/project-state-probe.mjs    project state と保護値
+node tools/verification/manifest.mjs               instrument の provenance
+```
+
+独立検証者からの指摘で追加した節である。root README には
+`tools/verification` への参照が一つも無く、
+「そこから始めよ」と口頭で言われなければ辿り着けなかった。
+
 ## 概要
 
 ガラスの幅・高さ・設置階数・部位を入力するだけで、設計風圧に対して成立する**最小板厚のガラス構成を自動選定**し、計算根拠を一画面で確認できる簡易ツールです。

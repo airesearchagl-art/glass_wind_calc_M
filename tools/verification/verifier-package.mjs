@@ -99,6 +99,9 @@ export function buildVerifierPackage(options) {
     }))
     .sort((a, b) => (a.instrumentId < b.instrumentId ? -1 : 1));
 
+  // Emitted, not discarded. Computing a value and rendering it nowhere is the
+  // blockerKinds shape the publication lint exists to prevent (QD-J17), and it
+  // had been reproduced here inside the verification tooling itself.
   const browserInstruments = spec.instruments
     .filter((i) => i.evidenceClass === 'observational' || i.id === 'parser-boundary')
     .filter((i) => (i.instrumentFiles || []).some((f) => f.indexOf('browser-checks') !== -1));
@@ -131,6 +134,7 @@ export function buildVerifierPackage(options) {
     // imply these were executed for this target.
     browserAssertions: (spec.browserAssertions || [])
       .slice().sort((a, b) => (a.id < b.id ? -1 : 1)),
+    browserInstruments: browserInstruments.map((i) => i.id).sort(),
     browserExecutionRequired: true,
     browserEvidenceForTarget: 'UNVERIFIED',
     browserEvidenceNote:

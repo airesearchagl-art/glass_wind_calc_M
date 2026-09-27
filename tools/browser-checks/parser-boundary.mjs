@@ -1,4 +1,6 @@
-import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+// Playwright is resolved, not hardcoded (P2K-F06). See harness.mjs: a failed
+// resolve reports UNVERIFIED and exits 3, never FAIL's exit 1.
+import { openBrowser, finishRun } from './harness.mjs';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 // リポジトルートは**このファイルの位置から**求める。
@@ -29,6 +31,7 @@ const FORMS = [
   'たわみδ<Dmaxかつ設計風圧力P>Pa', '見付幅W<Hとなる場合、P>Qで検討する'
 ];
 
+const { chromium, playwrightSource } = await openBrowser('parser-boundary');
 const b = await chromium.launch();
 const pg = await b.newPage();
 await pg.goto('about:blank');
@@ -58,4 +61,8 @@ bypasses.forEach(d => console.log('   !! ' + JSON.stringify(d)));
 console.log('over-rejections (reject but 0 elements)        : ' + overRejections.length + '  <- fail-closed, allowed');
 overRejections.forEach(d => console.log('      ' + d.f));
 await b.close();
-process.exit(bypasses.length ? 1 : 0);
+// A bypass is a failure; an over-rejection is fail-closed and allowed, so it is
+// reported but not counted as one. checksRun is the number of forms measured,
+// so a silent drop to zero forms classifies ERROR instead of PASS.
+finishRun('parser-boundary', FORMS.length, bypasses.length,
+  { playwrightSource, overRejections: overRejections.length });

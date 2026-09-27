@@ -443,3 +443,108 @@ resolver の existsSync が注入不可だった。
 修理対象の欠陥と同じ形。自分の test（P2K-R04）が先に落ちて教えた。
 ```
 
+## §10 — Wave 5 の独立検証と Wave 6 の修理
+
+### Wave 5: 別実行文脈の検証者 2 件
+
+両方ともこの会話の結論を一切渡さず、
+committed 成果物と入口だけを渡した。両方とも repo を変更せずに戻した。
+
+```text
+再構成 trial : §23 の受入基準そのもの
+敵対的 audit : 共有仮定 / 再生不能な数字 / 何も固定しない test を探す
+```
+
+**両者が独立に同じ最重要欠陥を指摘した**——P2K-F06 の CLOSED が偽であること。
+
+### 検証者が再現したもの（こちらは健全）
+
+```text
+26,496 / 40,000（再認定の数字）      committed 履歴から双方向に再現
+Wave 0 の盲点（derived corpus で 0）    base revision を checkout して再現
+corpus 643,419 / digest ac68342e…        一致
+mutation 73/74                           逐語一致
+browser 62 checks / bypass 0             5 harness 全部実行して一致
+parser-boundary の sabotage control      19 bypasses を再現
+taskPacketDigest / instrumentSourceSha   文書化された手順で再計算し一致
+```
+
+### 自分の欠陥 — すべて自分で再現してから修理した
+
+**(1) P2K-F06 の CLOSED が偽だった（最重）**
+
+```text
+P2K-R01 の regex を directory 全体に当てる:
+  clean     browser-w4.mjs / resolve-playwright.mjs / browser-outcome.mjs
+  OFFENDER  failopen-w4.mjs        line 1
+  OFFENDER  parser-boundary.mjs    line 1
+  OFFENDER  probe-w4.mjs           line 1
+  OFFENDER  stageA-regression.mjs  line 1
+```
+
+つまり 5 件中 1 件を直して CLOSED と記録していた。
+それを捕らえるべき自分の test は **手書きの 2 file リスト**を見ていた——
+Wave 2 で自分が導出形に直した anti-pattern を Wave 4 で戻していた。
+
+修理後の実測（全 5 harness）:
+
+```text
+                     通常          playwright 不在
+browser-w4           PASS exit 0    UNVERIFIED exit 3
+probe-w4             PASS exit 0    UNVERIFIED exit 3
+failopen-w4          PASS exit 0    UNVERIFIED exit 3
+stageA-regression    PASS exit 0    UNVERIFIED exit 3
+parser-boundary      PASS exit 0    UNVERIFIED exit 3
+```
+
+**(2) 再認定の数字が別の実験のものだった**
+
+```text
+Wave 0 の実験 B : atom 5 件削除
+Wave 3 の「再測」: atom 4 件削除
+実測:
+  5 atom → REGRESSIONS 40,000 / npm test fail 3  ← Wave 0 の fail 3 と一致
+  4 atom → REGRESSIONS 32,000 / npm test fail 2
+```
+
+fail 数が一致することが、どちらが Wave 0 の変異かの裏付けである。
+現在の生成器出力（expected.json と照合済み）:
+
+```text
+A  regressions 26,496  diff exit 1  npm test fail 1
+B  regressions 40,000  diff exit 1  npm test fail 3
+agreesWithExpectations: true
+```
+
+**(3) lint の walker と oracle が一字一句同じだった**
+
+検証者が実演した被害を自分でも確かめた。修理後:
+
+```text
+publicDescription が配列   → [0] として収集され hard 違反になる
+publicDescription が object → .ja / .en として収集される
+publicDescription が数値   → unreadable shape として報告され exit 1
+出荷 config             → 12 値のまま、unreadable 0
+```
+
+### test / mutation
+
+```text
+npm test : tests 729 / pass 729 / fail 0（720 から +9）
+mutation : KILLED 84 / SURVIVED 1 / EQUIVALENT 0 /
+           PATCH-MISS 0 / HARNESS ERROR 0（of 85）
+           K5-01..K5-11 は 11/11 KILLED
+           SURVIVED 1 = K2-03（Wave 2 で EQUIVALENT と判定済み）
+```
+
+M-29 と K3-07 は修理で anchor が消えたので **retarget** した（削除していない）。
+どちらも意図は同じままで KILLED。
+
+### 今回の教訓を規則化した
+
+```text
+- 「CLOSED」は測定。修理自身の検査を集団全体に当ててから書く
+- 数字は生成器に押さえる。prose の文字列一致は固定ではない
+（両方とも tools/verification/README.md の「Rules」節に入れた）
+```
+

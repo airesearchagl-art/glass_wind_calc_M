@@ -20,9 +20,18 @@ test('P2K-V01: the package carries no expected or recommended verdict', async ()
   const m = await load();
   const pkg = m.buildVerifierPackage();
   const json = JSON.stringify(pkg);
-  // Hand-written forbidden field list (K1-07).
-  ['expectedVerdict', 'recommendedVerdict', 'verdict', 'verified',
-   'reviewPassed', 'allChecksPassed'].forEach((key) => {
+  // Hand-written forbidden field list (K1-07). It omitted `pass` and `result`
+  // for three waves while the runtime walker enforced all eight -- a weaker test
+  // than the code, found by an independent verifier. Kept hand-written on
+  // purpose (deriving it from the module under test would prove only that the
+  // module equals itself), but now checked for completeness against the module's
+  // own list, so the two cannot drift apart again.
+  const FORBIDDEN = ['expectedVerdict', 'recommendedVerdict', 'verdict', 'verified',
+    'reviewPassed', 'allChecksPassed', 'pass', 'result'];
+  assert.deepEqual(FORBIDDEN.slice().sort(), m.FORBIDDEN_PACKAGE_KEYS.slice().sort(),
+    'hand-written list and the enforced list disagree: ' +
+    JSON.stringify(m.FORBIDDEN_PACKAGE_KEYS));
+  FORBIDDEN.forEach((key) => {
     assert.equal(json.indexOf('"' + key + '":'), -1,
       'package must not contain field ' + key);
   });
@@ -83,8 +92,17 @@ test('P2K-V03: the package states which evidence is admissible', async () => {
   // knows the re-admission rests on a measurement.
   assert.equal(byId['guard-diff'].admissibility, 'ADMISSIBLE');
   assert.match(byId['guard-diff'].reason, /corpus/i);
-  assert.match(byId['guard-diff'].reason, /26496|32000/,
-    'package が再認定の実測根拠を伝えていない');
+  // Cross-checked against the committed expectations file rather than matched as
+  // digits in prose. The digits-in-prose version accepted a figure from a
+  // DIFFERENT experiment, which is what Wave 3 shipped: 32000 came from a
+  // four-atom mutation where Wave 0's was five atoms and gives 40000.
+  const expectedFigures = JSON.parse(require('node:fs').readFileSync(
+    require('node:path').join(__dirname, '..', 'tools', 'verification', 'experiments',
+      'corpus-independence.expected.json'), 'utf8'));
+  for (const [id, e] of Object.entries(expectedFigures.experiments)) {
+    assert.match(byId['guard-diff'].reason, new RegExp(String(e.regressions)),
+      'package に実験 ' + id + ' の実測値が無い');
+  }
   assert.equal(byId['parser-boundary'].evidenceClass, 'independent');
 
   // Every command carries its admissibility inline, so a verifier never has to
@@ -192,3 +210,56 @@ test('P2K-V07: serialisation is deterministic and identifies the tree', async ()
   assert.match(pkg.taskPacketDigest, /^sha256:[0-9a-f]{64}$/);
   assert.equal(pkg.schemaVersion, 1);
 });
+
+test('P2K-V08: 処方された command はすべて実際に解決する', async () => {
+  const m = await load();
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const pkg = m.buildVerifierPackage();
+  const repoRoot = path.join(__dirname, '..');
+  const pkgJson = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+
+  // The package hands a fresh verifier a list of commands to run. Nothing used
+  // to check that any of them resolves: the loop asserted only that `command`
+  // was non-empty and the admissibility was in the vocabulary. A renamed or
+  // deleted instrument would still be handed out as runnable, suite green.
+  assert.equal(pkg.verificationCommands.length > 0, true);
+  for (const c of pkg.verificationCommands) {
+    const script = (c.command.match(/([\w./-]+\.mjs)/) || [])[1];
+    if (script) {
+      assert.equal(fs.existsSync(path.join(repoRoot, script)), true,
+        c.instrumentId + ': 処方された script が存在しない: ' + script);
+      continue;
+    }
+    const npmScript = (c.command.match(/^npm run (?:--silent )?([\w:-]+)/) || [])[1];
+    if (npmScript) {
+      assert.equal(Object.prototype.hasOwnProperty.call(pkgJson.scripts, npmScript), true,
+        c.instrumentId + ': package.json に script がない: ' + npmScript);
+      continue;
+    }
+    // `npm test` is the only bare form allowed, and it must be defined.
+    assert.equal(c.command, 'npm test',
+      c.instrumentId + ': 解決できない command: ' + c.command);
+    assert.ok(pkgJson.scripts.test, 'package.json に test script がない');
+  }
+});
+
+test('P2K-V09: browser が必要な instrument は package に出てくる', async () => {
+  const m = await load();
+  const pkg = m.buildVerifierPackage();
+  // This list was computed and thrown away for two waves: the blockerKinds
+  // shape the publication lint exists to prevent (QD-J17), reproduced inside
+  // the verification tooling itself.
+  assert.equal(Array.isArray(pkg.browserInstruments), true,
+    'browserInstruments が package に無い');
+  assert.equal(pkg.browserInstruments.length >= 5, true,
+    'browser instrument が減っている: ' + JSON.stringify(pkg.browserInstruments));
+  assert.deepEqual(pkg.browserInstruments, pkg.browserInstruments.slice().sort(),
+    '順序が決定的でない');
+  // Every one of them must also appear as a runnable command.
+  const ids = new Set(pkg.verificationCommands.map((c) => c.instrumentId));
+  for (const id of pkg.browserInstruments) {
+    assert.equal(ids.has(id), true, id + ': browser instrument なのに command がない');
+  }
+});
+

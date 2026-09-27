@@ -459,3 +459,54 @@ mutation を ADMISSIBLE に書き換えても全 suite が通ってしまった�
 
 → P2K-M09 が 12 instrument 全部の class × admissibility を
    手書きの表で deepEqual する。分類変更はこれ以降意図的な編集になる。
+
+---
+
+## §43 — Wave 6 での変更（独立検証 2 件の指摘）
+
+### browser 系 5 instrument の分類根拠が変わった
+
+```text
+従来 : browser-w4 だけが resolver 経由。他 4 件は 1 行目に絶対 path。
+       つまり 4 件については「走っていない」= exit 1 = FAIL だったのに
+       P2K-F06 は CLOSED と記録されていた
+現在 : 5 件とも tools/browser-checks/harness.mjs 経由。
+       UNVERIFIED exit 3 を 5 件とも実演済み
+```
+
+### 新規 I-13 `tools/browser-checks/harness.mjs`
+
+```text
+openBrowser()  resolve し、失敗したら UNVERIFIED を名乗って exit 3。
+               crash guard もここで入れる
+finishRun()    outcome を分類して JSON を出し、exit code を決める
+```
+
+**5 回写すと 1 つ見逃す**ので 1 つにした。それが実際に起きたことである。
+
+### 新規 I-14 `tools/verification/experiments/corpus-independence.mjs`
+
+```text
+class        : independent
+admissibility: ADMISSIBLE
+見ているもの : guard-diff 再認定の根拠となる 2 つの数字
+共有依存     : なし。Wave 0 の変異をそのまま適用して外から測る
+positive control : expected.json と不一致なら throw する
+証明しないこと : derived corpus の 0（歴史的。再生不可）
+```
+
+### 分類の変更 1 件
+
+```text
+independent-review : ADMISSIBLE → **UNVERIFIED**
+```
+
+command も instrumentFiles も source digest も無いのに ADMISSIBLE だった。
+検証者の言い方では「依頼されているレビューをあらかじめ認定している」。
+実際に review が走って head を名指して記録されるまでは UNVERIFIED が正しい。
+
+### 計器の限界を 1 つ追記
+
+`REQUIREMENT-REFERENCES.md` を追加したが、
+packet が committed になったわけではない。
+**gap を可視で有界にしただけ**である（P2K-F14）。

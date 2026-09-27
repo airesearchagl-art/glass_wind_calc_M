@@ -1,4 +1,6 @@
-import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+// Playwright is resolved, not hardcoded (P2K-F06). See harness.mjs: a failed
+// resolve reports UNVERIFIED and exits 3, never FAIL's exit 1.
+import { openBrowser, finishRun } from './harness.mjs';
 import { fileURLToPath } from 'url';
 // リポジトルートは**このファイルの位置から**求める。
 // 絶対パスを埋め込むと、harness は自分が入っている tree ではなく
@@ -10,6 +12,7 @@ const REPO = fileURLToPath(new URL('../../', import.meta.url));
 let pass=0, fail=0; const out=[];
 const ck=(id,c,d)=>{ if(c){pass++;out.push(`  ok   ${id}  ${d??''}`);} else {fail++;out.push(`  FAIL ${id}  ${d??''}`);} };
 
+const { chromium, playwrightSource } = await openBrowser('stageA-regression', () => ({ checksRun: pass + fail, failures: fail }));
 const browser = await chromium.launch();
 const page = await browser.newPage();
 const consoleErrors=[], pageErrors=[], requests=[];
@@ -83,4 +86,4 @@ ck('A-facts', facts.vc===0&&facts.mode==='sample_default'&&facts.w===1250&&facts
 console.log(out.join('\n'));
 console.log(`\nStage A extended regression: ${pass} pass / ${fail} fail`);
 await browser.close();
-process.exit(fail?1:0);
+finishRun('stageA-regression', pass + fail, fail, { playwrightSource });

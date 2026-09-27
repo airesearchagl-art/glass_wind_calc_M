@@ -83,12 +83,31 @@ result and a legitimate evidence-quality state.
 `corpus.mjs` read `DOT_EQUIVALENTS` out of the guard, and `diff-heads` passed it
 the extension source from the head under test. Shrinking either constant shrank
 the corpus meant to police it, so the shrink could not be seen. Wave 0 measured
-that twice; Wave 3 repaired it and re-measured the same two experiments:
+that twice; Wave 3 repaired it and Wave 6 corrected the re-measurement to use
+Wave 0's mutations exactly:
 
-| change to the guard | derived corpus | independent corpus |
+| change to the guard | derived corpus (historical) | independent corpus |
 |---|---|---|
-| drop one dot equivalent | REGRESSIONS 0 | REGRESSIONS 26,496, exit 1 |
-| drop four extension atoms | REGRESSIONS 0 | REGRESSIONS 32,000, exit 1 |
+| drop one dot equivalent (U+0387) | REGRESSIONS 0 | REGRESSIONS 26,496, exit 1 |
+| drop five extension atoms (`rar\|7z\|lzh\|tar\|gz`) | REGRESSIONS 0 | REGRESSIONS 40,000, exit 1 |
+
+Regenerate the right-hand column, which also cross-checks itself against a
+committed expectations file and fails on any difference:
+
+```
+node tools/verification/experiments/corpus-independence.mjs
+```
+
+The left-hand column is **historical and not regenerable**: the derived corpus no
+longer exists, so `REGRESSIONS 0` cannot be reproduced at this head. Check out
+`tools/guard-diff` and `project-config/evidence.js` at the phase base revision to
+see it.
+
+Wave 3 first published **32,000** for the second row. That figure came from
+dropping *four* atoms while Wave 0 had dropped *five*, and the two were described
+as the same experiment. An independent verifier measured the five-atom mutation
+and got 40,000. Both rows now reproduce Wave 0's `npm test` failure counts (1 and
+3), which is the corroboration that they are the same mutations.
 
 The corpus now owns its threat list and imports nothing from `project-config`,
 which `P2K-D01` enforces by reading the file rather than by checking a value —
@@ -104,6 +123,17 @@ zero.
 **P2K-F03 — a rejection that changed rules was discarded.** The comparison had
 two buckets and dropped the case where both sides reject for different reasons,
 which is the only trace a weakened rule leaves when another rule still matches.
+
+**P2K-F06 — the browser check imported Playwright from one machine.** Wave 4
+converted `browser-w4.mjs` to a discovered location and recorded the finding as
+closed. It was not: an independent verifier applied the repair's own structural
+test to the whole directory and found the other four harnesses still on the
+absolute path, so for four of five instruments "never ran" still exited 1 and was
+indistinguishable from "ran and failed". Wave 6 moved the resolve-and-classify
+logic into `harness.mjs`, converted all five, and demonstrated the UNVERIFIED
+exit for each. The structural test's population is now derived from the directory
+rather than listed by hand — the hand-written list was what let four files go
+unexamined while the finding was marked closed.
 
 **P2K-F09 — the mutation harness read a suite run from "did it throw".** With
 `NODE_TEST_CONTEXT` in the environment, `node --test` prints no summary and exits
@@ -136,24 +166,19 @@ node tools/verification/experiments/lint-discovery-depth.mjs        # after
 node tools/guard-diff/mutate.mjs                                    # K2-01 is the "before"
 ```
 
-## Currently quarantined
+## Nothing is currently quarantined
 
-`guard-diff` is **INADMISSIBLE** (finding P2K-F01). Its corpus derives `DOTS`
-from production `DOT_EQUIVALENTS` and its extension axis from
-`PRIVATE_DOCUMENT_EXTENSION_SOURCE`, and `diff-heads` builds that corpus from
-the working tree under test. Shrinking either constant shrinks the corpus with
-it, so both sides are compared against the same reduced input set.
+`guard-diff` was INADMISSIBLE through Waves 1 and 2 and was re-admitted in Wave 3
+on the measurement above. An earlier version of this section still described it
+as quarantined, in the present tense, fifty lines below the section saying it had
+been repaired — and an independent verifier following this file as the designated
+entry point reported that it could not tell which of two committed documents was
+current. The historical detail now lives with the measurement it belongs to, in
+`experiments/corpus-independence.expected.json` under `historical`.
 
-Measured twice, each time with a live consequence:
-
-| mutation | guard behaviour | `npm test` | `diff-heads` |
-|---|---|---|---|
-| drop one dot from `DOT_EQUIVALENTS` | `構造計算書·pdf` reject → **accept** | 658/1, caught | corpus 607,956, **REGRESSIONS 0** |
-| drop `rar\|7z\|lzh\|tar\|gz` | `図面一式.rar` reject → **accept** | 656/3, caught | corpus 578,004, **REGRESSIONS 0** |
-
-It may still be run diagnostically. Any report must label it *diagnostic only /
-inadmissible*, never "verification PASS". Wave 3 owns the repair and
-requalification.
+If an instrument is quarantined again, it belongs here, and
+`verification-spec.json` is the authority — `tests/verification-manifest.test.js`
+asserts this file and the spec cannot disagree about a finding's status.
 
 ## Rules these tools enforce on us
 
@@ -176,6 +201,13 @@ requalification.
   axis and the suite stays green while values go unseen. That was QD-J23, and
   QD-J20 and QD-J21 before it. Use a different mechanism: a hand-written
   literal, a different tool (`git ls-files`), or a structure the test builds.
+- **A closure claim is a measurement, not a conclusion.** Before writing
+  "CLOSED", apply the repair's own check to the whole population it claims to
+  cover. Wave 4 repaired one of five files and recorded the finding closed; the
+  test that should have caught it inspected a hand-written list of two.
+- **A number pinned by a string match is not pinned.** `assert.match(reason,
+  /26496/)` pins the sentence. It accepted a figure from a different experiment
+  for a whole wave. Pin figures against a committed generator's expectations.
 - **A zero is a statement about the corpus, not the subject.** Print the corpus
   digest beside the count, and say which rules the corpus never reached. A rule
   with no input attributed to it has not been measured, however many inputs ran.

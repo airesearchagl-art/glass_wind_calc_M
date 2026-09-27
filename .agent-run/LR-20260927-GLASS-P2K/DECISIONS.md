@@ -305,3 +305,125 @@ resolver の中に `existsSync` が直接入っていた。
 importer は差し替えられるのにこれは差し替えられない——
 つまり **そのマシン上でしか test できない resolver** であり、
 修理対象の欠陥と同じ形だった。`exists` も注入可能にした。
+
+## D-012 — closure 宣言は測定である。修理した file 数ではない
+
+Wave 6。独立検証 2 件が指摘した最重要の欠陥は、
+自分が Wave 4 で **P2K-F06 を CLOSED と記録したことそのもの**であった。
+
+```text
+実態 : browser harness 5 件のうち 1 件を直して CLOSED と書いた
+残り : failopen-w4 / parser-boundary / probe-w4 / stageA-regression は
+       1 行目に絶対 path のまま。つまり 4 件について
+       「走っていない」は exit 1 = FAIL のままだった
+```
+
+さらに悪いのは、それを捕らえるべき自分の test（P2K-R01）が
+**手書きの 2 file リスト**を見ていたことである。
+これはこの repo 自身が lint で非難している anti-patternであり、
+Wave 2 で `defaultRoots()` を導出形に直したその後で、
+Wave 4 に自分で戻してしまった。
+
+### 規則として固定したこと
+
+```text
+「CLOSED」と書く前に、修理自身の検査を
+**それが覆うと主張する集団全体**に当てる。
+集団を手書きするな。導出する。
+```
+
+P2K-R01 の集団は directory 走査になった。
+P2K-R08 を追加し、全 harness が `openBrowser` / `finishRun` を
+経由することを別途押さえた——path が正しいことと
+UNVERIFIED を名乗れることは別の属性である。
+
+## D-013 — 数字は生成器に押さえる。prose の文字列一致ではない
+
+Wave 3 で guard-diff を再認定した根拠は 2 つの数字だったが、
+それを守っていたのはこれだけである。
+
+```js
+assert.match(gd.reason, /26496/, ...)
+```
+
+これは **文がその数字を含むこと** しか固定していない。
+誤った値でも通るし、**別の実験の値**でも通る。
+そして実際に後者が起きていた。
+
+```text
+Wave 0 の実験 B : extension atom を 5 件落とす → 40,000 / npm test fail 3
+Wave 3 の「再測」: 4 件落としていた    → 32,000 / npm test fail 2
+README の文 : 「re-measured the same two experiments」——偽である
+```
+
+自分の EVIDENCE §8 には「4 atoms。同じ実験ではなく同じクラス」と
+正しく書いてあったのに、README と spec の文はそれを覇していた。
+
+### 修理
+
+```text
+tools/verification/experiments/corpus-independence.mjs
+  → Wave 0 の 2 つの変異をそのまま適用して測る（必ず復元）
+  → committed な corpus-independence.expected.json と照合し、
+    違えば throw する
+  → npm test の fail 数（1 と 3）も測る——Wave 0 と一致したので
+    同じ変祰であることの裏付けになる
+```
+
+test 側は「数字が文にあるか」から
+「expected.json の各値が文にあるか」へ変えた。
+連鎖は generator ↔ expected.json ↔ spec / README であり、
+前半は generator 実行時、後半は P2K-M02 / M10 / V03 が守る。
+
+## D-014 — 公開面 key の下はすべて公開面である
+
+F-2。lint の walker と FP-01 の oracle が**一字一句同じ**だった。
+Wave 2 で file oracle を git ls-files に差し替えたが、
+**value oracle は写しのまま**であった。
+D-006 で「実装のアルゴリズムの写しは oracle でない」と書きながらである。
+
+実害は検証者が実演した。
+
+```text
+publicDescription: ['C:\Users\... .pdf を参照']   ← 配列に入れると
+  → inspected 12 / No advisory warnings / exit 0 / 720 test 全緑
+同じ文字列を裸で置く → hard 違反として reject
+```
+
+さらに FP-01 は**どちらの場合も緑**だった。
+「出荷済みの公開面値をすべて覛く」と名乗る test が、
+見逃しを検出できることを一度も示していなかった。
+
+### 契約
+
+```text
+publicDescription / publicEvidenceDescription / caseId の下にある
+**すべての文字列**が公開面値である。
+配列でも nested object でも深さを問わない。
+文字列でも container でもない値は
+**unreadable shape として報告する**（黙って飛ばさない）。
+```
+
+oracle 側は walker を消し、**12 経路の literal**と
+**形の表（FP-01c）**にした。
+
+## D-015 — 未 commit の根拠を引くなら、引いていることを commit する
+
+D-4。tools は §7..§38 を根拠として引くが、
+committed な packet は 25 節しかなく § 文字を 1 つも含まない。
+つまり計器の設計根拠がツリーの外にある。
+これは P2K-F05（review scope が会話で渡されている）と同型。
+
+packet を commit できない（会話で渡された）ので、
+`tools/verification/REQUIREMENT-REFERENCES.md` を追加し、
+
+```text
+- committed な packet はどれか（digest 付き）
+- 未 commit の packet があることを明記
+- 各 § について、引用でなく**操作的な要件**を記述
+```
+
+P2K-M11 が tools 全体を走査し、表にない § 参照を落とす。
+これは packet を committed にはしない——**gap を可視で有界にする**。
+この repo が正直に主張できるのはそこまでである。
+

@@ -144,20 +144,39 @@ test('P2K-L04: 実 project-config の discovery を git ls-files（別機構）�
   assert.deepEqual(missed, [],
     'lint が見ていない tracked config module: ' + JSON.stringify(missed));
 
-  // The reverse direction is not automatically a defect: an untracked module
-  // in a working tree is legitimately discovered and legitimately absent from
-  // git's index. Assert only that every extra is explained that way, so the
-  // check stays strong for committed files without going red on a
-  // work-in-progress one.
+  // The reverse direction is not automatically a defect: an untracked module in
+  // a working tree is legitimately discovered and legitimately absent from git's
+  // index. But the first version of this check was broken twice over, and an
+  // independent verifier found both:
+  //
+  //   1. It called `git ls-files --error-unmatch`, which EXITS NON-ZERO for an
+  //      untracked path, so execFileSync threw before the assertion ran. The
+  //      very red its own comment warns about ("a red that accuses a correct
+  //      lint"), with a message about pathspecs rather than about the lint.
+  //   2. Even had it not thrown, it was vacuous: `extras` is by construction
+  //      the set not in `tracked`, so asserting each extra is absent from
+  //      `tracked` asserts nothing.
+  //
+  // The check that means something uses a DIFFERENT git view: an extra must
+  // show up as untracked in `git status`. If a file is discovered, absent from
+  // ls-files, and not reported untracked by status, the two git views disagree
+  // and the oracle is broken.
   const extras = discovered.filter((f) => !tracked.includes(f));
-  extras.forEach((f) => {
-    const isUntracked = execFileSync('git',
-      ['ls-files', '--error-unmatch', '--', 'project-config/' + f],
-      { cwd: REPO_ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }
-    ).trim() === '';
-    assert.equal(isUntracked, true,
-      'tracked なのに oracle に無い: ' + f + '（oracle 側の欠陥）');
-  });
+  const untracked = new Set(
+    execFileSync('git', ['status', '--porcelain', '--untracked-files=all', '--', 'project-config'],
+      { cwd: REPO_ROOT, encoding: 'utf8' })
+      .split('\n')
+      .filter((l) => l.startsWith('??'))
+      .map((l) => l.slice(3).trim().replace(/^project-config\//, ''))
+  );
+  const unexplained = extras.filter((f) => !untracked.has(f));
+  assert.deepEqual(unexplained, [],
+    'discovery にあり ls-files にも status にも無い——git の 2 つの見方が矛盾している: ' +
+    JSON.stringify(unexplained));
+  // Stated rather than hidden: with a clean tree `extras` is empty and the
+  // assertion above is trivially true. Its job is to catch the disagreement
+  // when a file IS there, not to prove anything on a clean checkout.
+  assert.equal(Array.isArray(extras), true);
 });
 
 test('P2K-L05: symlink は辿らない（循環しない・木の外へ出ない）', async () => {

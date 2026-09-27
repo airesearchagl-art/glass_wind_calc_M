@@ -2,8 +2,12 @@
 // an absolute path into one machine's global module root, which meant a fresh
 // verifier could not run it -- see resolve-playwright.mjs for the candidates
 // and why each is discovered rather than listed.
-import { resolvePlaywright, BrowserUnavailableError } from './resolve-playwright.mjs';
-import { classifyBrowserRun, EXIT_CODES } from './browser-outcome.mjs';
+//
+// The resolve-and-classify logic lives in harness.mjs, shared by all five
+// harnesses. It was inline here for one wave, which is precisely why the other
+// four never got it: a repair that exists as one copy gets applied to one file
+// and reported as done.
+import { openBrowser, finishRun } from './harness.mjs';
 import { fileURLToPath } from 'url';
 // リポジトルートは**このファイルの位置から**求める。
 // 絶対パスを埋め込むと、harness は自分が入っている tree ではなく
@@ -21,38 +25,8 @@ function check(id, cond, detail) {
   else { fail++; results.push(`  FAIL ${id}  ${detail ?? ''}`); }
 }
 
-// A run that breaks after the browser starts is neither a pass nor a clean
-// failure. Without these it would exit 1 and be indistinguishable from
-// "checks ran and some failed".
-const crashExit = (err) => {
-  const v = classifyBrowserRun({ browserAvailable: true, checksRun: pass + fail,
-    failures: fail, crashed: true });
-  console.error('browser run crashed: ' + (err && err.stack ? err.stack : err));
-  console.log(JSON.stringify({ schemaVersion: 1, instrument: 'browser-w4',
-    outcome: v.outcome, detail: v.detail }, null, 2));
-  process.exit(v.exitCode);
-};
-process.on('uncaughtException', crashExit);
-process.on('unhandledRejection', crashExit);
-
-let chromium;
-let playwrightSource;
-try {
-  const resolved = await resolvePlaywright();
-  chromium = resolved.chromium;
-  playwrightSource = resolved.source;
-} catch (e) {
-  if (!(e instanceof BrowserUnavailableError)) throw e;
-  // UNVERIFIED, deliberately: not a pass, not a failure, nothing measured.
-  // Phase 2K §18 -- reporting UNVERIFIED is acceptable; reporting a pass or a
-  // fail for a run that never happened is not.
-  const v = classifyBrowserRun({ browserAvailable: false, checksRun: 0, failures: 0 });
-  console.error(e.message);
-  console.log(JSON.stringify({ schemaVersion: 1, instrument: 'browser-w4',
-    outcome: v.outcome, detail: v.detail,
-    attempts: e.attempts.map((a) => ({ source: a.source, error: a.error })) }, null, 2));
-  process.exit(v.exitCode);
-}
+const { chromium, playwrightSource } =
+  await openBrowser('browser-w4', () => ({ checksRun: pass + fail, failures: fail }));
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
@@ -218,12 +192,5 @@ await browser.close();
 // The outcome is classified, not inferred from a boolean. Zero checks with zero
 // failures is an ERROR, not a pass: a run that measured nothing would otherwise
 // read exactly like a clean one.
-const verdict = classifyBrowserRun({
-  browserAvailable: true, checksRun: pass + fail, failures: fail
-});
-console.log(`\nbrowser: ${pass} pass / ${fail} fail  [${verdict.outcome}]`);
-console.log(JSON.stringify({ schemaVersion: 1, instrument: 'browser-w4',
-  outcome: verdict.outcome, detail: verdict.detail,
-  checksRun: pass + fail, failures: fail,
-  playwrightSource }, null, 2));
-process.exit(verdict.exitCode);
+console.log(`\nbrowser: ${pass} pass / ${fail} fail`);
+finishRun('browser-w4', pass + fail, fail, { playwrightSource });

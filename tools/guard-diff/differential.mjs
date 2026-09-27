@@ -16,13 +16,34 @@
 // sides answer with their own code. The instrument supplies the inputs and the
 // comparison, never the expected answer.
 
-/** Which rule a module attributes a rejection to, or null if it accepts. */
+/** A rejection that is fail-closed by design rather than a rule match. */
+export const CLOSURE_GUARD = 'normalization-closure-guard';
+/** A throw that is neither a rule match nor the closure guard. */
+export const UNEXPECTED_ERROR = 'unexpected-error';
+
+/**
+ * Which rule a module attributes a rejection to, or null if it accepts.
+ *
+ * The first version returned the literal string 'error' for any throw it could
+ * not parse, and every caller treated that as an ordinary rejection. So a
+ * production change that made the guard CRASH on valid prose would be filed as
+ * `tightened` — base accepts, target rejects — and `exitCodeFor` does not fail
+ * on tightening. A crash would have read as the guard getting stricter.
+ *
+ * Three outcomes are now distinct: a named rule, the deliberate fail-closed
+ * closure guard, and anything else.
+ */
 export function attribute(guardModule, text) {
   try {
     guardModule.assertPublicSafeEvidenceText(text, 'd');
     return null;
   } catch (e) {
-    return (String(e.message).split('pattern: ')[1] || 'error').replace(')', '');
+    const message = String(e && e.message);
+    const at = message.indexOf('pattern: ');
+    if (at !== -1) return message.slice(at + 'pattern: '.length).replace(')', '');
+    // Fail-closed by design: the normalization closure did not converge.
+    if (/closure did not converge/.test(message)) return CLOSURE_GUARD;
+    return UNEXPECTED_ERROR;
   }
 }
 
@@ -44,9 +65,11 @@ export function compare(base, head, corpus) {
   const baseAttribution = {};
   const headAttribution = {};
 
+  let unexpectedErrors = 0;
   for (const text of corpus) {
     const b = attribute(base, text);
     const h = attribute(head, text);
+    if (b === UNEXPECTED_ERROR || h === UNEXPECTED_ERROR) unexpectedErrors++;
     if (b) { baseRejects++; baseAttribution[b] = (baseAttribution[b] || 0) + 1; }
     if (h) { headRejects++; headAttribution[h] = (headAttribution[h] || 0) + 1; }
     if (b && !h) regressions.push([text, b]);
@@ -55,7 +78,7 @@ export function compare(base, head, corpus) {
   }
   return {
     corpusSize: corpus.length,
-    baseRejects, headRejects,
+    baseRejects, headRejects, unexpectedErrors,
     regressions, tightened, reattributed,
     baseAttribution, headAttribution
   };
@@ -129,6 +152,9 @@ export function byRule(rows, index) {
 export function exitCodeFor(summary) {
   const regressions = (summary && summary.regressions) || 0;
   const coverageGaps = (summary && summary.coverageGaps) || 0;
-  return (regressions > 0 || coverageGaps > 0) ? 1 : 0;
+  // An unexpected throw is not a verdict about the input. Without this the
+  // guard crashing on valid prose reads as `tightened` and passes.
+  const unexpectedErrors = (summary && summary.unexpectedErrors) || 0;
+  return (regressions > 0 || coverageGaps > 0 || unexpectedErrors > 0) ? 1 : 0;
 }
 

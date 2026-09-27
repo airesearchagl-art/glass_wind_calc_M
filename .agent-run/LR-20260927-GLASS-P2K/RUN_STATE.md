@@ -215,11 +215,44 @@ PASS 0 / FAIL 1 / UNVERIFIED 3 / ERROR 4
 この repo は任意の head についての browser 測定を持たない。
 e57e47a の測定は EVIDENCE §9 に sha 付きで置いてある。
 
+## Wave 5 — fresh independent verifier trial
+
+別実行文脈の検証者 2 件。この会話の結論は一切渡していない。
+両方とも repo を変更せずに戻した。
+
+```text
+再現できた : 再認定の数字、Wave 0 の盲点、corpus digest、
+           mutation 73/74、browser 62 checks、sabotage control 19
+指摘された : P2K-F06 の CLOSED が偽（両者が独立に）
+           再認定の数字が別実験のもの
+           lint の value oracle が実装の写し
+           README が自己矛盾し verifier に誤った報告を指示
+           § 参照がツリーの外
+           independent-review が実体無しで ADMISSIBLE
+```
+
+## Wave 6 — 指摘の修理
+
+```text
+npm test   : tests 729 / pass 729 / fail 0（+9）
+mutation   : KILLED 84 / SURVIVED 1 / EQUIVALENT 0 /
+             PATCH-MISS 0 / HARNESS ERROR 0（of 85，K5-01..K5-11 追加）
+browser    : 5 harness 全部 PASS、不在時は全部 UNVERIFIED exit 3
+閉じた     : P2K-F06（今度は本当に）/ F11 / F12 / F13 / QD-J24
+有界化     : P2K-F14（§ 参照）
+未着手     : P2K-F08（18 箇所の triage）/ F10（修理不可）
+```
+
+### 最も重要な 1 行
+
+**Wave 4 で自分が書いた CLOSED が偽だった**。5 件中 1 件しか直していなかった。
+それを捕らえるべき test の集団が手書きだった——
+Wave 2 で自分が直した anti-pattern を Wave 4 で戻していた。
+
 ## Next action
 
-Wave 5: fresh independent verifier trial。
-**committed された成果物だけ**で verifier が再構成できるかを試す。
-§23 / §41 の主要受入基準。P2K-F08 / F11 の同型探しもここで。
+Wave 7: README / Run Artifact convergence / Draft PR。
+**そこで止まる**——Ready 化・merge・Production は含まない。
 
 ## Stop conditions status
 
@@ -236,13 +269,13 @@ repair_strategies     : 0 / 3
 ## Resume instructions
 
 ```text
-0. 現在位置: Wave 4 完了。次は Wave 5
+0. 現在位置: Wave 6 完了。次は Wave 7
 1. RUN_MANIFEST.md から binding を確認
 2. TASK_PACKET_SNAPSHOT.md を再 hash し
    aa68c9c5c820419c1f4413bbb7864a2d9cf49bc7b0b18c69645174cab0c6aa96
    と一致することを確認（不一致なら BLOCKED）
 3. INSTRUMENT_INVENTORY.md を読む（Wave 0 の全成果）
-4. npm test で smoke check（**720** pass を期待）
+4. npm test で smoke check（**729** pass を期待）
 4b. tools/verification/README.md を読む（Wave 1 の入口）
 5. Next action から再開
 ```

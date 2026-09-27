@@ -186,98 +186,110 @@ test('§10: publication lint の inventory は caseId と nested な記述も拾
   assert.match(rendered, /Synthetic\.verifiedCases\[0\]\.caseId/);
 });
 
-test('FP-01: lint の inventory は出荷済みの公開面値を**すべて**覛く', async () => {
-  // 独立検証（focused re-review, FP-01）。初版は default roots を
-  // miyoshi.js だけ手書きしており、manual.js の publicDescription を
-  // 一つ見逃していた——publicDescription を見ると謳っている lint が、である。
-  //
-  // ここでは lint の実装を使わず、project-config を**独立に**歩いて
-  // 期待値を作る。列挙を検査すると列挙だけが固定されるので、
-  // 数ではなく**経路の集合**を照合する。
+test('FP-01: 出荷済みの公開面値を literal で固定する（walker の写しを使わない）', async () => {
   const lint = await loadLint();
+
+  // The first version built its expectation with a hand-copied duplicate of
+  // collectInventory()'s own walker. Wave 2 replaced the FILE oracle with
+  // `git ls-files` and left the VALUE oracle a transcription, so any shape both
+  // copies mishandled stayed invisible to both -- which an independent verifier
+  // then demonstrated: an array-wrapped publicDescription holding a Windows
+  // absolute path gave "inspected 12 / No advisory warnings", exit 0, and a
+  // green suite, while the identical string unwrapped was rejected. FP-01 was
+  // green in BOTH cases, so the test named "covers every shipped value" had
+  // never shown it could detect a missing one.
+  //
+  // There is no walker here now. The expectation is the literal set of paths.
+  // A config change fails this test, and updating it is the deliberate act.
+  const EXPECTED_PATHS = [
+    'manual.identity.evidence.publicDescription',
+    'miyoshi.dimensions.defaultH.evidence.publicDescription',
+    'miyoshi.dimensions.defaultW.evidence.publicDescription',
+    'miyoshi.identity.evidence.publicDescription',
+    'miyoshi.wind.V0.evidence.publicDescription',
+    'miyoshi.wind.negativePressureByZone.corner.evidence.publicDescription',
+    'miyoshi.wind.negativePressureByZone.general.evidence.publicDescription',
+    'miyoshi.wind.positivePressureByFloor.1.evidence.publicDescription',
+    'miyoshi.wind.positivePressureByFloor.2.evidence.publicDescription',
+    'miyoshi.wind.positivePressureByFloor.3.evidence.publicDescription',
+    'miyoshi.wind.positivePressureByFloor.R.evidence.publicDescription',
+    'miyoshi.wind.roughnessCategory.evidence.publicDescription'
+  ];
+  const inventory = lint.collectInventory();
+  assert.deepEqual(inventory.map((i) => i.path).sort(), EXPECTED_PATHS,
+    '出荷 config の公開面値が変わった。意図的ならこの literal を同じ commit で更新する: ' +
+    JSON.stringify(inventory.map((i) => i.path).sort()));
+  assert.deepEqual(inventory.unreadableShapes, [],
+    '出荷 config に lint が読めない形がある');
+
+  // File-level completeness is still checked against git's index -- that oracle
+  // IS a different mechanism, and it is what caught the missing manual.js.
   const { execFileSync } = require('node:child_process');
   const repoRoot = path.join(__dirname, '..');
-  const dir = path.join(repoRoot, 'project-config');
-
-  // QD-J23 (Phase 2K Wave 2): this oracle used to call the SAME flat
-  // readdirSync the implementation called, so neither could see a config
-  // module in a subdirectory and this test stayed green while the lint missed
-  // three planted values -- one of them tripping a HARD rule. Discovery is now
-  // recursive on both sides, so the oracle must not be a copy of it. File
-  // discovery here comes from git's index: a different mechanism with no
-  // shared traversal assumption. Depth-level properties are pinned separately
-  // and literally in tests/lint-discovery-independence.test.js.
-
-  // 経路の組み立て方は collectInventory() と**同じ文法**でなければならない。
-  // 初版は 2 点ずれていた（delta re-verify の指摘）:
-  //   配列   実装 `a.verifiedCases[0].b` / test `a.verifiedCases.0.b`
-  //   最上位 深さ 0 で p が '' なので `a..b` と二重ドットになる
-  // その上 `..` を潰す replace を **actual** 側にかけていた——actual に `..` は
-  // 決して現れないので、潰したい方にかかっていなかった。
-  //
-  // 影響は偽の失敗のみで偽の成功は無いが、verifiedCases はまさに配列であり
-  // publicEvidenceDescription の定位置なので、中身が入った日に
-  // **正しい lint を告発する赤**になる。その種の赤は assertion を緩めさせる。
-  const expected = new Set();
-  const trackedModules = execFileSync('git',
-    ['ls-files', '-z', '--', 'project-config'],
+  const tracked = execFileSync('git', ['ls-files', '-z', '--', 'project-config'],
     { cwd: repoRoot, encoding: 'utf8' })
-    .split('\0')
-    .filter(Boolean)
-    .filter((f) => f.endsWith('.js'))
-    .map((f) => f.replace(/^project-config\//, ''))
-    .sort();
-  assert.equal(trackedModules.length > 0, true,
-    'git ls-files が空——oracle が壊れている');
+    .split('\0').filter(Boolean).filter((f) => f.endsWith('.js'))
+    .map((f) => f.replace(/^project-config\//, '')).sort();
+  assert.equal(tracked.length > 0, true, 'git ls-files が空——oracle が壊れている');
+  const roots = Object.keys(lint.defaultRoots());
+  for (const file of tracked) {
+    assert.equal(roots.includes(file.replace(/\.js$/, '')), true,
+      'tracked な config module を lint が見ていない: ' + file);
+  }
+});
 
-  for (const file of trackedModules) {
-    const mod = require(path.join(dir, file));
-    const seen = new Set();
-    (function walk(node, p) {
-      if (!node || typeof node !== 'object' || seen.has(node)) return;
-      seen.add(node);
-      if (Array.isArray(node)) {
-        node.forEach((v, i) => walk(v, p + '[' + i + ']'));
-        return;
-      }
-      for (const [k, v] of Object.entries(node)) {
-        const here = p + '.' + k;
-        if (typeof v === 'string' && lint.PUBLICATION_FACING_FIELDS.includes(k)) {
-          expected.add(here);
-        } else if (v && typeof v === 'object') {
-          walk(v, here);
-        }
-      }
-    }(mod, file.replace(/\.js$/, '')));
+test('FP-01c: 公開面 key の下のあらゆる形を拾う（形の表を literal で）', async () => {
+  const lint = await loadLint();
+
+  // The shapes are enumerated by hand. Two of them -- an array member and a
+  // nested object -- were invisible to the lint AND to its oracle for the whole
+  // of Phase 2J and most of 2K, because a publication-facing KEY only counted
+  // when it held a string directly.
+  const inventory = lint.collectInventory({
+    synth: {
+      direct: { publicDescription: 'string 直下（合成fixture）' },
+      arrayed: { publicDescription: ['配列の中（合成fixture）', '2 番目'] },
+      localized: { publicDescription: { ja: 'nested object（合成fixture）', en: 'en' } },
+      deep: { publicEvidenceDescription: { a: { b: ['深い配列（合成fixture）'] } } },
+      cases: { verifiedCases: [{ caseId: 'case_a' }] }
+    }
+  });
+  assert.deepEqual(inventory.map((i) => i.path).sort(), [
+    'synth.arrayed.publicDescription[0]',
+    'synth.arrayed.publicDescription[1]',
+    'synth.cases.verifiedCases[0].caseId',
+    'synth.deep.publicEvidenceDescription.a.b[0]',
+    'synth.direct.publicDescription',
+    'synth.localized.publicDescription.en',
+    'synth.localized.publicDescription.ja'
+  ], '形の網羅が変わった: ' + JSON.stringify(inventory.map((i) => i.path).sort()));
+
+  // Every collected value keeps the publication-facing field it came from, so
+  // the guard is applied under the right contract name.
+  for (const item of inventory) {
+    assert.equal(lint.PUBLICATION_FACING_FIELDS.includes(item.field), true,
+      item.path + ': field が公開面名でない: ' + item.field);
   }
 
-  const actual = new Set(lint.collectInventory().map((i) => i.path));
-  assert.equal(expected.size > 0, true, '期待値が空——歩き方が壊れている');
+  // A shape the lint cannot read is reported, not skipped.
+  const odd = lint.collectInventory({ synth: { bad: { publicDescription: 42 } } });
+  assert.deepEqual(odd.map((i) => i.path), []);
+  assert.deepEqual(odd.unreadableShapes,
+    [{ path: 'synth.bad.publicDescription', field: 'publicDescription', valueType: 'number' }],
+    '読めない形を黙って飛ばした');
+  assert.equal(lint.runLint({ inventory: odd }).unreadableShapes.length, 1);
+  assert.match(lint.runLint({ inventory: odd }).lines.join('\n'), /UNREADABLE SHAPES/);
 
-  const missed = [...expected].filter((p) => !actual.has(p));
-  assert.deepEqual(missed, [],
-    'lint が見ていない出荷済みの公開面値: ' + JSON.stringify(missed));
-
-  // The reverse direction is not automatically a defect. git lists TRACKED
-  // files, so an untracked config module in a working tree is legitimately
-  // discovered by the lint and legitimately absent from this oracle. Requiring
-  // exact equality would turn a work-in-progress file into a red that accuses
-  // a correct lint -- and that kind of red is what gets assertions loosened.
-  // Assert instead that every extra is explained by being untracked.
-  const extras = [...actual].filter((p) => !expected.has(p));
-  const unexplained = extras.filter((p) => {
-    const root = p.split(/[.[]/)[0];
-    return trackedModules.includes(root + '.js');
+  // And the live consequence the verifier demonstrated: an array-wrapped
+  // Windows absolute path must now be a HARD rule violation.
+  const planted = lint.collectInventory({
+    synth: { notes: { publicDescription: ['C:' + String.fromCharCode(92) + 'Users' +
+      String.fromCharCode(92) + 'x を参照（合成fixture）'] } }
   });
-  assert.deepEqual(unexplained, [],
-    'tracked module 由来なのに独立走査に無い経路: ' + JSON.stringify(unexplained));
-
-  // default roots が手書きに戻っていないことを直接見る。
-  const roots = Object.keys(lint.defaultRoots());
-  assert.equal(roots.length >= 5, true, 'default roots が縮んでいる: ' + JSON.stringify(roots));
-  ['miyoshi', 'manual'].forEach((name) => {
-    assert.equal(roots.includes(name), true, 'default roots に ' + name + ' が無い');
-  });
+  const report = lint.runLint({ inventory: planted });
+  assert.equal(report.hardErrorCount, 1,
+    '配列に入った Windows 絶対 path が見逃された');
+  assert.match(report.lines.join('\n'), /windows-absolute-path/);
 });
 
 test('FP-01b: inventory の経路文法を固定する（最上位と配列の 2 形）', () => {
@@ -309,5 +321,23 @@ test('FP-01b: inventory の経路文法を固定する（最上位と配列の 2
       assert.equal(/\.\d+\./.test(p), false, '配列添字が dot 表記: ' + p);
     });
   });
+});
+
+test('P2K-LZ1: 0 件検査した実行を清らかな実行と読まない', async () => {
+  const lint = await loadLint();
+  // `inspected 0 / No advisory warnings` used to exit 0, so a CI job reading
+  // only the exit code could not tell "nothing unsafe" from "nothing
+  // inspected". This is the shape browser-outcome.mjs classifies as ERROR
+  // rather than PASS, and the shape this lint's own header warns about.
+  const empty = lint.runLint({ inventory: [] });
+  assert.equal(empty.inspectedNothing, true, '0 件を正常として返した');
+  assert.equal(empty.hardErrorCount, 0);
+  assert.match(empty.lines.join('\n'), /ERROR: 0 publication-facing values/,
+    '人が読む出力に 0 件の警告がない');
+
+  // And a non-empty run must NOT be flagged.
+  const real = lint.runLint();
+  assert.equal(real.inspectedNothing, false);
+  assert.equal(real.results.length > 0, true);
 });
 

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "note": "Regenerate with: node tools/verification/experiments/corpus-independence.mjs  — the script compares its live measurement against this file and fails on any difference. These are the figures the guard-diff re-admission rests on, so they are committed here rather than existing only inside a sentence in verification-spec.json.",
+  "experiments": {
+    "A": { "regressions": 26496, "npmTestFail": 1 },
+    "B": { "regressions": 40000, "npmTestFail": 3 }
+  },
+  "historical": {
+    "note": "Not regenerable. The derived corpus no longer exists, so the 'REGRESSIONS 0' that justified the quarantine cannot be reproduced at this head. Reproduce by checking out tools/guard-diff and project-config/evidence.js at the phase base revision 7bef30751ebaa2aa0f306f3bd584c4e025be77a1.",
+    "derivedCorpusRegressionsA": 0,
+    "derivedCorpusRegressionsB": 0,
+    "derivedCorpusSizeA": 607956,
+    "derivedCorpusSizeB": 578004
+  }
+}
