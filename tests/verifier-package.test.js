@@ -77,8 +77,14 @@ test('P2K-V03: the package states which evidence is admissible', async () => {
   // Hand-written expectations for the three that matter most (§27).
   assert.equal(byId['npm-test'].admissibility, 'ADMISSIBLE');
   assert.equal(byId['npm-test'].evidenceClass, 'regression');
-  assert.equal(byId['guard-diff'].admissibility, 'INADMISSIBLE');
+  // guard-diff was INADMISSIBLE in Wave 1 and re-admitted in Wave 3 once its
+  // corpus stopped being derived from the subject. The package must carry the
+  // current verdict AND the reasoning, so a verifier reading only the package
+  // knows the re-admission rests on a measurement.
+  assert.equal(byId['guard-diff'].admissibility, 'ADMISSIBLE');
   assert.match(byId['guard-diff'].reason, /corpus/i);
+  assert.match(byId['guard-diff'].reason, /26496|32000/,
+    'package が再認定の実測根拠を伝えていない');
   assert.equal(byId['parser-boundary'].evidenceClass, 'independent');
 
   // Every command carries its admissibility inline, so a verifier never has to
@@ -90,8 +96,11 @@ test('P2K-V03: the package states which evidence is admissible', async () => {
     assert.ok(Object.prototype.hasOwnProperty.call(c, 'doesNotProve'),
       c.instrumentId + ' must state what it does not prove');
   }
-  // guard-diff must still be listed, quarantined rather than hidden.
-  assert.equal(pkg.verificationCommands.some((c) => c.instrumentId === 'guard-diff'), true);
+  // guard-diff must still be listed with what it does not prove attached: being
+  // admissible for one claim is not being admissible for every claim.
+  const gdCmd = pkg.verificationCommands.find((c) => c.instrumentId === 'guard-diff');
+  assert.ok(gdCmd, 'guard-diff must still be listed');
+  assert.match(gdCmd.doesNotProve, /completeness/i);
 });
 
 test('P2K-V04: browser evidence is declared UNVERIFIED and execution required', async () => {

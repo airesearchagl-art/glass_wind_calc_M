@@ -177,3 +177,88 @@ Wave 2 の実験 script 自体に見つけた缺陥。別件なので分けて�
 本Campaign が閉じようとしている類型そのもの。
 Wave 1 の admissibility モデルにも同じ区別がある——
 `UNVERIFIED` は PASS でも FAIL でもない。
+
+## D-008 — corpus は自分の脅威リストを持つ。production から導出しない
+
+P2K-F01。Wave 3。
+
+### 従来の依存方向
+
+```text
+corpus.mjs  → evidenceModule.DOT_EQUIVALENTS を import
+diff-heads  → buildCorpus(head.PRIVATE_DOCUMENT_EXTENSION_SOURCE)
+```
+
+つまり **被検体が自分を測る目盛りを提供していた**。
+定数を縮むと目盛りも縮むので、縮んだことが測れない。
+
+### 修理後の実測（Wave 0 の 2 つの実験をそのまま再実行）
+
+```text
+                                  Wave 0（導出 corpus）  Wave 3（独立 corpus）
+dot equivalent 1 件削除        REGRESSIONS 0          REGRESSIONS 26,496  exit 1
+extension atom 4 件削除        REGRESSIONS 0          REGRESSIONS 32,000  exit 1
+```
+
+加えて constant coverage 行が production が失ったものを名指す。
+
+```text
+constant coverage : working tree dots corpus-only: 1
+constant coverage : working tree ext corpus-only: rar,7z,lzh,gz
+```
+
+Wave 0 の実験 B は 5 拡張子だった。本回は atom 4 件である。
+**同じ実験ではなく同じクラス**であることを明記する。
+
+### 構造的な錠
+
+値の assertion では依存方向は見えないので、
+P2K-D01 は **corpus.mjs の source を読んで** project-config への参照が
+一行も無いことを確かめる。欠陥は「値が違う」でなく
+「依存の向きが逆」だったからである。
+
+### guard-diff の再認定（判断を明示しておく）
+
+```text
+Wave 1 : INADMISSIBLE（P2K-F01）
+Wave 3 : ADMISSIBLE。ただし proves を狭く書き直した——
+         「この corpus 内で base が reject する入力が target で通らないこと」
+         「9 hard + 3 advisory のすべてが少なくとも 1 入力で行使されること」
+doesNotProve : completeness。開集合の形（homoglyph / 綾り出し / 括弧 dot）
+```
+
+この再認定は自分の判断である。Human Gate が戻せるよう
+spec の reason に実測値を入れ、P2K-M02 がその実測値を検査する。
+
+## D-009 — 「行使されていない rule の 0」は失敗とする
+
+P2K-F02。coverage gap を exit 1 にした。
+
+導入した瞬間に実害が 1 件見つかった。
+
+```text
+rule coverage : base 8 attributed, NEVER EXERCISED: control-character
+```
+
+9 ある hard rule のうち `control-character` に属する入力を
+corpus は一つも生成していなかった。
+つまりこの differential がこれまで印刷したすべての
+「REGRESSIONS: 0」は、この rule について何も言っていなかった。
+
+advisory 3 規則についても同じ検査を追加した（throw しないので
+attribution が取れない——lint の warnings から取る）。現在 gap 0。
+
+## D-010 — re-attribution は報告するが失敗にはしない
+
+P2K-F03。両方が reject し、rule だけが変わった場合。
+
+```text
+従来 : bucket が 2 つ（regression / tightened）だけなので
+       b && h && b !== h は黙って捨てていた
+現在 : reattributed として記録し、先頭 6 例を印刷する
+```
+
+失敗にしない理由: その入力は依然 reject されているので
+公開可能になったものはない。かつ Phase 2J の policy 変更のような
+正当な変更では大量に出る。**見えないこと**が欠陥だった。
+

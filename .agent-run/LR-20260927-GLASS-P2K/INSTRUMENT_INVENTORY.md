@@ -341,8 +341,8 @@ P2K-F07  入力 corpus digest を記録する仕組みが無い（§16 provenanc
 | `npm-test` | regression | **ADMISSIBLE** | 契約を固定する。うち 4 箇所は定数と独立な手書き期待列を持ち、定数の縮小を捕らえる（実験 A/B で実証） |
 | `publication-lint` | regression | **ADMISSIBLE** | 警告が描画されることを FP-01 test が positive control 付きで押さえている。Wave 2 で discovery を再帰化し、oracle を実装と別機構に分離（QD-J23 閉） |
 | `lint-discovery-depth-experiment` | independent | **ADMISSIBLE** | 外から shipped lint と shipped suite を見る。guard から何も import しない。before/after が両方再現可能 |
-| `guard-diff` | regression | **INADMISSIBLE** | corpus が production 定数から導出され、定数と一緒に縮む（P2K-F01、実測 2 例） |
-| `mutation` | regression | DIAGNOSTIC_ONLY | KILLED は npm test が判定するので強いが、SURVIVED/EQUIVALENT の分岐は隔離中の corpus が判定する |
+| `guard-diff` | regression | **ADMISSIBLE**（Wave 3 で再認定） | corpus が自分の脅威リストを持ち、project-config を一行も参照しない（P2K-D01 が source で錠）。Wave 0 の盲点 2 例が 0 → 26,496 / 0 → 32,000 と見えるようになった。completeness は証明しない（P2K-F10） |
+| `mutation` | regression | DIAGNOSTIC_ONLY | KILLED は npm test が判定するので強いが、SURVIVED/EQUIVALENT の分岐は guard corpus の probe が判定するので他 file には適用できない。Wave 3 で suite の読み方を修正（P2K-F09）。この分類は **判断**であり P2K-M09 が literal で固定する |
 | `project-state-probe` | observational | **ADMISSIBLE** | 実 API 経由。期待値は test 側の手書き。式を転記していないことを test が検査 |
 | `browser-w4` | observational | UNVERIFIED | 現 target head の測定が存在しない |
 | `probe-w4` | observational | UNVERIFIED | 同上 |
@@ -417,3 +417,45 @@ guard は冗長——file / directory / 循環 symlink を含む木で
 
 この限界を踏まえても `mutation → DIAGNOSTIC_ONLY` は変えない。
 むしろこの制約がその分類の根拠である。
+
+---
+
+## §42 — Wave 3 での変更
+
+### guard-diff の依存グラフが変わった
+
+```text
+従来 : corpus.mjs → evidence.js（DOT_EQUIVALENTS）
+       diff-heads  → head.PRIVATE_DOCUMENT_EXTENSION_SOURCE → corpus
+現在 : corpus.mjs は project-config を一行も参照しない。
+       自分の committed 脅威リスト（dot 12 / excluded 3 / atom 36）を持つ。
+       production との差は constantCoverage() が**報告**する。採用しない
+```
+
+### 新規 I-11 `tools/guard-diff/differential.mjs`
+
+```text
+compare()             regression / tightened / **reattributed** の 3 bucket
+ruleCoverageGaps()    hard rule で行使されていないものを名指す
+advisoryCoverageGaps() advisory 3 規則について同じことを lint 経由で
+exitCodeFor()         regression または coverage gap で 1
+```
+
+### 新規 I-12 `tools/guard-diff/suite-verdict.mjs`
+
+```text
+childEnvironment()   NODE_TEST_CONTEXT / NODE_OPTIONS / NODE_V8_COVERAGE を落とす
+classifySuiteRun()   TAP summary 無し、または exit code と fail 数が矛盾したら
+                     HARNESS_ERROR。「失敗なし」と読まない
+```
+
+### 分類を literal で固定した（mutation が教えてくれた）
+
+K1-01（非 admissible な instrument を黙って再認定する）を
+guard-diff から mutation へ retarget したところ PATCH-MISS になり、
+**どの instrument の admissibility も test で固定されていなかった**ことが分かった。
+語彙の所属検査しかなかったので、
+mutation を ADMISSIBLE に書き換えても全 suite が通ってしまった。
+
+→ P2K-M09 が 12 instrument 全部の class × admissibility を
+   手書きの表で deepEqual する。分類変更はこれ以降意図的な編集になる。

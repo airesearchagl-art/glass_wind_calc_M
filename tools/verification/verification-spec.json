@@ -50,24 +50,23 @@
       "id": "guard-diff",
       "command": "node tools/guard-diff/diff-heads.mjs <base-rev>",
       "evidenceClass": "regression",
-      "admissibility": "INADMISSIBLE",
-      "target": "behavioural difference in the publication guard between two heads",
-      "oracle": "the base head's own production code (differential)",
+      "admissibility": "ADMISSIBLE",
+      "target": "no input in the corpus that the base revision rejects is accepted by the target",
+      "oracle": "the base revision's own verdicts, over a corpus independent of both revisions; attribution comes from each side's own error message",
       "sharedDependencies": [
-        "corpus derived from production DOT_EQUIVALENTS",
-        "corpus extension axis derived from production PRIVATE_DOCUMENT_EXTENSION_SOURCE",
-        "records only the FIRST matching rule, so a rule masked by an earlier one is invisible (P2K-F03)"
+        "none: the corpus owns its committed threat list and imports nothing from project-config (pinned by P2K-D01)"
       ],
-      "positiveControl": "none (P2K-F02): nothing checks the corpus contains the inputs it is meant to contain",
-      "negativeControl": null,
-      "proves": "for inputs the corpus actually generated, whether the verdict changed — diagnostic only, must not be cited as 'no regressions'",
-      "doesNotProve": "completeness; any change that shrinks a constant the corpus derives from (measured: two such changes each made the guard accept a private-document filename and were reported as REGRESSIONS 0)",
+      "positiveControl": "the two Wave 0 shrink experiments now produce 26496 and 32000 regressions respectively, where the derived corpus produced 0; mutants K3-01..K3-09",
+      "negativeControl": "base and target identical produces 0 in every bucket",
+      "proves": "that no corpus input the base rejects is accepted by the target, that every hard rule and every advisory rule is exercised by at least one input, and which rule each rejection is attributed to on each side",
+      "doesNotProve": "completeness. The corpus is a finite enumerated threat list and cannot reach open-set forms — confusable homoglyphs, spelled-out separators, bracketed dots (QD-J13). A re-attribution count also does not bound how far a rule weakened, only that attribution moved.",
       "instrumentFiles": [
-        "tools/guard-diff/diff-heads.mjs",
-        "tools/guard-diff/corpus.mjs"
+        "tools/guard-diff/corpus.mjs",
+        "tools/guard-diff/differential.mjs",
+        "tools/guard-diff/diff-heads.mjs"
       ],
-      "finding": "P2K-F01",
-      "reason": "the corpus derives DOTS from production DOT_EQUIVALENTS and the extension axis from PRIVATE_DOCUMENT_EXTENSION_SOURCE, and diff-heads builds that corpus from the working tree under test — so shrinking either constant shrinks the corpus with it and both sides are compared against the same reduced input set"
+      "finding": null,
+      "reason": "P2K-F01 repaired in Wave 3. The corpus was quarantined because it derived DOT_EQUIVALENTS from the module under test and took the extension source from the head under test, so a commit that shrank either constant shrank the corpus policing it. The corpus now owns its threat list and imports nothing from project-config (pinned structurally by P2K-D01). Re-measured on the two Wave 0 experiments: dropping one dot equivalent went from 0 to 26496 regressions, dropping four extension atoms from 0 to 32000, both exit 1."
     },
     {
       "id": "mutation",
@@ -77,8 +76,7 @@
       "target": "whether the test suite actually pins each stated contract",
       "oracle": "the test suite (counterfactual)",
       "sharedDependencies": [
-        "inherits the corpus blindness for the SURVIVED/EQUIVALENT decision only",
-        "anchors are literal source strings, so independent of production semantics"
+        "the SURVIVED/EQUIVALENT split uses the guard corpus probe, so it cannot adjudicate a mutant in any other file"
       ],
       "positiveControl": "anchor-exact-once check; PATCH-MISS and HARNESS ERROR reported as failures, never as kills",
       "negativeControl": "byte-difference check rejects a no-op mutant",
@@ -86,10 +84,11 @@
       "doesNotProve": "operator-set completeness; EQUIVALENT is only as good as the probe's resolution (QD-J21: a probe recording only rule names reported a gutted warning message as equivalent)",
       "instrumentFiles": [
         "tools/guard-diff/mutate.mjs",
-        "tools/guard-diff/mutants.mjs"
+        "tools/guard-diff/mutants.mjs",
+        "tools/guard-diff/suite-verdict.mjs"
       ],
       "finding": null,
-      "reason": "KILLED verdicts are decided by npm test and are strong; the SURVIVED-versus-EQUIVALENT split is decided by the quarantined corpus, so the instrument as a whole is not cited as verification until Wave 3 requalifies the corpus"
+      "reason": "KILLED verdicts are decided by npm test and are strong; the SURVIVED-versus-EQUIVALENT split is decided by the quarantined corpus, so the instrument as a whole is not cited as verification until Wave 3 requalifies the corpus Wave 3: the harness no longer reads a suite run from 'did it throw' alone — a run with no TAP summary, or one whose exit code and fail count disagree, is a HARNESS ERROR rather than 'no test failed' (P2K-F09). The split remains corpus-bound, so every SURVIVED outside project-config/evidence.js is strictly 'SURVIVED or EQUIVALENT, undetermined'."
     },
     {
       "id": "project-state-probe",
@@ -369,7 +368,7 @@
     {
       "id": "P2K-F01",
       "statement": "guard-diff and its corpus are blind to any change that shrinks a production constant the corpus derives from. Measured twice; each made the guard accept a private-document filename while the differential reported REGRESSIONS 0.",
-      "status": "quarantined INADMISSIBLE",
+      "status": "CLOSED in Wave 3",
       "owner": "Wave 3"
     },
     {
@@ -422,14 +421,20 @@
     },
     {
       "id": "P2K-F09",
-      "statement": "an instrument that spawns a child `node --test` reads differently depending on who invoked it: NODE_TEST_CONTEXT leaking into the child makes it print no summary and exit 0 even when a test fails. Fixed in the Wave 2 experiment (env sanitised; an unparseable or self-contradictory run now throws). Whether mutate.mjs and diff-heads.mjs carry the same dependency is NOT yet examined.",
-      "status": "open for other instruments",
-      "owner": "Wave 3"
+      "statement": "an instrument that spawns a child reads differently depending on who invoked it: NODE_TEST_CONTEXT leaking into the child makes `node --test` print no summary and exit 0 even when a test fails. Measured in the mutation harness on a mutant it otherwise reports KILLED: clean env gave exit 1 with 5 'not ok' lines, the leaked env gave exit 0 with no TAP at all, which the harness read as 'no test failed' — every operator in such a battery reports SURVIVED behind a normal-looking table.",
+      "status": "CLOSED in Wave 3 for the mutation harness and the Wave 2 experiment (env sanitised; no TAP summary or disagreeing signals is a HARNESS ERROR). diff-heads spawns only git, which is unaffected.",
+      "owner": "closed"
     },
     {
       "id": "K2-03",
       "statement": "the symlink guard in discoverConfigModules is EQUIVALENT under mutation: removing it produced byte-identical output on a tree with file, directory and cyclic symlinks, because withFileTypes already reports isDirectory() and isFile() as false for a symlink. The classification is a measurement on THIS filesystem and Node version; a filesystem returning DT_UNKNOWN was not tested.",
       "status": "equivalent — kept as defence in depth",
+      "owner": "none"
+    },
+    {
+      "id": "P2K-F10",
+      "statement": "the differential corpus is a finite enumerated threat list. It now exercises every hard and advisory rule and is independent of the subject, but it cannot reach open-set forms: confusable homoglyphs, spelled-out separators, bracketed dots. A REGRESSIONS: 0 is a statement about this corpus, whose digest is printed beside it, and never about the guard in general.",
+      "status": "open by construction — not repairable, only stated",
       "owner": "none"
     }
   ],

@@ -148,12 +148,50 @@ P2K-F09  計器の読みが NODE_TEST_CONTEXT に依存していた。
 K2-03    EQUIVALENT。guard は残すが comment を訂正
 ```
 
+## Wave 3 — mutation + differential tool reproducibility
+
+```text
+npm test   : tests 713 / pass 713 / fail 0（+18）
+mutation   : KILLED 65 / SURVIVED 1 / EQUIVALENT 0 /
+             PATCH-MISS 0 / HARNESS ERROR 0（of 66，K3-01..K3-16 追加）
+             SURVIVED 1 = K2-03（Wave 2 で EQUIVALENT と判定済み）
+corpus     : 643,419 / sha256:ac68342e…（大きさと digest を literal で固定）
+閉じた     : P2K-F01 / F02 / F03 / F07 / F09
+```
+
+### 中心の結果
+
+```text
+                              導出 corpus   独立 corpus
+dot equivalent 1 件削除    0            26,496  exit 1
+extension atom 4 件削除    0            32,000  exit 1
+```
+
+corpus が被検体から目盛りを受け取るのをやめた。
+project-config への参照が一行も無いことを P2K-D01 が source で錠をかける——
+欠陥は「値が違う」でなく「依存の向きが逆」だったから。
+
+### 導入してすぐに見つかったもの 2 件
+
+```text
+coverage 検査 : `control-character` が NEVER EXERCISED。
+               9 hard rule の 1 つに入力が無く、
+               過去の「0 regressions」はその rule について無内容
+K1-01 retarget: どの instrument の admissibility も test で固定されていなかった。
+               mutation を ADMISSIBLE に書き換えても全 suite が通ってしまった
+```
+
+### Human Gate に上げる判断 1 件
+
+**guard-diff を INADMISSIBLE から ADMISSIBLE へ戻した**（D-008）。
+根拠は実測だが判定は自分のものである。
+spec の reason に実測値が入っており P2K-M02 が検査するので、
+戻すなら spec 1 行と M02 の 1 行。
+
 ## Next action
 
-Wave 3: mutation + differential tool reproducibility。
-P2K-F01（corpus が被検体由来）/ P2K-F02 / P2K-F03（first match）/
-P2K-F07（独立 corpus digest）、加えて P2K-F09 を
-mutate.mjs と diff-heads.mjs について調べる。
+Wave 4: browser verification durability。P2K-F06（Playwright の絶対 path）。
+§18: exact head の browser 測定がない限り UNVERIFIED のままにする。
 
 ## Stop conditions status
 
@@ -170,13 +208,13 @@ repair_strategies     : 0 / 3
 ## Resume instructions
 
 ```text
-0. 現在位置: Wave 2 完了。次は Wave 3
+0. 現在位置: Wave 3 完了。次は Wave 4
 1. RUN_MANIFEST.md から binding を確認
 2. TASK_PACKET_SNAPSHOT.md を再 hash し
    aa68c9c5c820419c1f4413bbb7864a2d9cf49bc7b0b18c69645174cab0c6aa96
    と一致することを確認（不一致なら BLOCKED）
 3. INSTRUMENT_INVENTORY.md を読む（Wave 0 の全成果）
-4. npm test で smoke check（**695** pass を期待）
+4. npm test で smoke check（**713** pass を期待）
 4b. tools/verification/README.md を読む（Wave 1 の入口）
 5. Next action から再開
 ```

@@ -4,9 +4,21 @@
 // reader can recompute it. Five rounds of independent review found figures that
 // reproduced under no corpus at all, because the corpus lived in a scratch
 // directory and only the count was written down.
-import { createRequire as __cr } from 'module';
-const evidenceModule = __cr(import.meta.url)(
-  new URL('../../project-config/evidence.js', import.meta.url).pathname);
+// This file imports NOTHING from project-config. That is the repair for
+// P2K-F01: the corpus used to read DOT_EQUIVALENTS out of the module under
+// test, and diff-heads passed it the extension source from the head under
+// test, so a commit that SHRANK either constant also shrank the corpus that
+// was supposed to police it. Measured in Wave 0: removing one dot equivalent
+// and five private-document extensions each made a real value publishable, and
+// the differential reported REGRESSIONS: 0 both times.
+//
+// The constants below are the corpus's own committed threat list. They are
+// compared against production by `constantCoverage()`, which REPORTS the
+// difference and never adopts it.
+
+import { createHash } from 'node:crypto';
+
+const NUL = Buffer.from([0]);
 
 export const STEMS = ['構造計算書', '図面', '見積書', 'plan'];
 export const DECORATIONS = ['', '（最新）', '(1)', ' ', '「最新」', '＂', '，', '＿'];
@@ -19,10 +31,20 @@ export const DECORATIONS = ['', '（最新）', '(1)', ' ', '「最新」', '＂
 // version hand-listed 16 entries and got it wrong in both directions: U+0387 (a
 // real member) was absent and U+00B7 (an exclusion) appeared twice, so
 // diff-heads certified "0 regressions" for removing U+0387 (review 14, F14-04).
-const EXCLUDED_DOTS = ['\u30fb', '\uff65', '\u00b7'];
+// The dot-equivalent threat list, OWNED BY THE CORPUS. Enumerated because
+// there is no decidable derivation (QD-J13): NFKC is a compatibility relation,
+// not a confusables relation, so no normalizer set reaches all of these.
+export const CORPUS_DOT_EQUIVALENTS = [
+  '\u3002', '\uff61', '\ufe12', '\u2024', '\ufe52', '\u2027',
+  '\u2e33', '\u0387', '\u06d4', '\u0701', '\ua4f8', '\u02d9'
+];
+// Deliberate non-members: these must NOT be folded to a dot. They stay in the
+// corpus as the other half of the control -- if a normalizer starts folding
+// them, inputs that were accepted become rejected and show up as `tightened`.
+export const CORPUS_EXCLUDED_DOTS = ['\u30fb', '\uff65', '\u00b7'];
 export const DOTS = ['.', '\uff0e']
-  .concat([...evidenceModule.DOT_EQUIVALENTS])
-  .concat(EXCLUDED_DOTS);
+  .concat(CORPUS_DOT_EQUIVALENTS)
+  .concat(CORPUS_EXCLUDED_DOTS);
 export const TRAILING = ['', 'Ａ', '１', '９', 'A', '2'];
 
 // Rule cores for the non-filename rules, so a differential covers all 12 rules
@@ -95,8 +117,51 @@ export function expandExtensions(source) {
   return out;
 }
 
+// The private-document extension threat list, OWNED BY THE CORPUS, as the
+// same alternation atoms production uses so the two are comparable atom by
+// atom. Expanded by this file's own expander, not production's.
+export const CORPUS_EXTENSION_ATOMS = [
+  'pdf', 'dwg', 'dxf', 'jww', 'jwc', 'xdw',
+  'sfc', 'p21', 'ifc', 'dwf', 'pln', 'rvt',
+  'skp', 'xls[xm]?', 'doc[xm]?', 'ppt[xm]?', 'od[tsp]', 'jpe?g',
+  'png', 'gif', 'bmp', 'tiff?', 'heic', 'heif',
+  'webp', 'zip', 'rar', '7z', 'lzh', 'tar',
+  'gz', 'msg', 'eml', 'txt', 'csv', 'bak'
+];
+export const CORPUS_EXTENSION_SOURCE = CORPUS_EXTENSION_ATOMS.join('|');
+
+/**
+ * Compare the corpus's committed threat lists against a production module.
+ *
+ * REPORTS, never adopts. `missingFromCorpus` means production grew and the
+ * corpus should be widened deliberately. `extraInCorpus` is the valuable
+ * direction: production no longer covers something the corpus still tests, so
+ * those inputs become the positive controls that make a shrink visible.
+ */
+export function constantCoverage(productionModule) {
+  const prodDots = [...(productionModule.DOT_EQUIVALENTS || '')];
+  const prodAtoms = String(productionModule.PRIVATE_DOCUMENT_EXTENSION_SOURCE || '')
+    .split('|').filter(Boolean);
+  const diff = (mine, theirs) => ({
+    missingFromCorpus: theirs.filter((x) => mine.indexOf(x) === -1),
+    extraInCorpus: mine.filter((x) => theirs.indexOf(x) === -1)
+  });
+  return {
+    dots: diff(CORPUS_DOT_EQUIVALENTS, prodDots),
+    extensionAtoms: diff(CORPUS_EXTENSION_ATOMS, prodAtoms)
+  };
+}
+
+/**
+ * Build the corpus. Takes no production input.
+ *
+ * `extensionSource` exists only so a test can drive the expander directly; it
+ * defaults to the corpus's own committed atoms. Callers in this repository pass
+ * nothing, and a caller that passes production's constant has reintroduced
+ * P2K-F01.
+ */
 export function buildCorpus(extensionSource) {
-  const exts = expandExtensions(extensionSource);
+  const exts = expandExtensions(extensionSource || CORPUS_EXTENSION_SOURCE);
   const extForms = [];
   exts.forEach((e) => { [e, e.toUpperCase(), fw(e), fw(e.toUpperCase())].forEach((f) => extForms.push(f)); });
   const out = [];
@@ -126,5 +191,51 @@ export function buildCorpus(extensionSource) {
     });
   });
   PROSE.forEach((t) => { out.push(t, fw(t)); });
+  // Control characters. Added in Wave 3 because the new rule-coverage check
+  // reported `control-character` as NEVER EXERCISED: the corpus had no input
+  // attributed to it, so every "REGRESSIONS: 0" this differential printed was
+  // silent about that rule. A zero for a rule the corpus cannot reach is the
+  // defect, not the zero (P2K-F02).
+  //
+  // Both ends of each range plus the isolated members, so narrowing the class
+  // at either boundary shows up rather than being sampled around.
+  const CONTROL_CHARS = [
+    '\u0000', '\u0001', '\u0008', '\u000b', '\u000c',
+    '\u000e', '\u001f', '\u007f', '\u0080', '\u009f',
+    '\u2028', '\u2029'
+  ];
+  // Deliberate non-members sit alongside them: tab, newline and carriage return
+  // are legitimate in prose and must stay accepted, so a mutant that widens the
+  // class into them appears as `tightened` rather than passing unnoticed.
+  const CONTROL_NON_MEMBERS = ['\t', '\n', '\r'];
+  const CONTROL_HOSTS = ['一次資料で確認した', 'plan', '検討 2026'];
+  CONTROL_HOSTS.forEach((host) => {
+    CONTROL_CHARS.concat(CONTROL_NON_MEMBERS).forEach((ch) => {
+      out.push(ch + host, host + ch, host.slice(0, 2) + ch + host.slice(2));
+    });
+  });
   return out;
 }
+
+/**
+ * A digest of the corpus, so a quoted count is tied to a specific corpus.
+ *
+ * P2K-F07. "REGRESSIONS: 0 over 643,419 inputs" names a number but not the
+ * thing it was measured over; two different corpora of the same size would
+ * quote identically. The digest is over the inputs IN ORDER, because order
+ * decides which rule wins first-match attribution.
+ *
+ * Algorithm, stated so it can be reimplemented independently:
+ *   sha256 of the concatenation, for each input in corpus order, of
+ *   the input's UTF-8 bytes followed by one 0x00 byte.
+ *
+ * A test pins the digest as a committed literal. That makes every corpus
+ * change a deliberate, reviewed one -- which is the point, not an
+ * inconvenience: the corpus is the instrument's measuring scale.
+ */
+export function corpusDigest(corpus) {
+  const h = createHash('sha256');
+  for (const text of corpus) { h.update(text, 'utf8'); h.update(NUL); }
+  return 'sha256:' + h.digest('hex');
+}
+

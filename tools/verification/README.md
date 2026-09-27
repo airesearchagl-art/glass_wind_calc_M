@@ -45,6 +45,9 @@ so the comparison is not the tree agreeing with itself.
 | `manifest.mjs` | resolves dynamic provenance (SHAs, digests) and merges it with the spec, keeping `spec` and `measured` apart. |
 | `project-state-probe.mjs` | the one stable way to read project state and protected calculations. |
 | `verifier-package.mjs` | the handoff package for an independent verifier. |
+| `../guard-diff/corpus.mjs` | the differential's own committed threat list. Imports nothing from `project-config`, and reports its drift from production rather than following it. |
+| `../guard-diff/differential.mjs` | the comparison: three buckets, hard- and advisory-rule coverage, and the exit policy. |
+| `../guard-diff/suite-verdict.mjs` | how the mutation harness reads a suite run, including the environment it refuses to inherit. |
 | `experiments/lint-discovery-depth.mjs` | measures how deep publication-lint discovery reaches, by planting a synthetic config module one directory down and restoring the tree. Closes QD-J23 with numbers rather than prose. |
 
 ## Evidence class vs admissibility
@@ -75,6 +78,42 @@ deliberately in both vocabularies: "nothing was measured" is both a legitimate
 result and a legitimate evidence-quality state.
 
 ## Recently closed
+
+**P2K-F01 — the differential's corpus was derived from the thing it measured.**
+`corpus.mjs` read `DOT_EQUIVALENTS` out of the guard, and `diff-heads` passed it
+the extension source from the head under test. Shrinking either constant shrank
+the corpus meant to police it, so the shrink could not be seen. Wave 0 measured
+that twice; Wave 3 repaired it and re-measured the same two experiments:
+
+| change to the guard | derived corpus | independent corpus |
+|---|---|---|
+| drop one dot equivalent | REGRESSIONS 0 | REGRESSIONS 26,496, exit 1 |
+| drop four extension atoms | REGRESSIONS 0 | REGRESSIONS 32,000, exit 1 |
+
+The corpus now owns its threat list and imports nothing from `project-config`,
+which `P2K-D01` enforces by reading the file rather than by checking a value —
+the defect was a dependency direction, and a value assertion cannot see one.
+
+**P2K-F02 — a rule the corpus never reached still got a zero.** The new coverage
+check found one the day it was added: `control-character`, one of nine hard
+rules, had no corpus input attributed to it, so every `REGRESSIONS: 0` printed
+before Wave 3 was silent about it. Hard and advisory rules are both checked now,
+and a gap exits non-zero: a zero for an unmeasured rule is the defect, not the
+zero.
+
+**P2K-F03 — a rejection that changed rules was discarded.** The comparison had
+two buckets and dropped the case where both sides reject for different reasons,
+which is the only trace a weakened rule leaves when another rule still matches.
+
+**P2K-F09 — the mutation harness read a suite run from "did it throw".** With
+`NODE_TEST_CONTEXT` in the environment, `node --test` prints no summary and exits
+0 even when tests fail, so every operator in a battery would report SURVIVED
+behind a normal-looking table. Measured on a mutant otherwise reported KILLED:
+clean env gave exit 1 with five `not ok` lines; the leaked env gave exit 0 with
+no TAP at all. The child's environment is sanitised, and a run with no TAP
+summary — or with an exit code and fail count that disagree — is now a harness
+error rather than a result.
+
 
 **QD-J23 — publication-lint discovery was non-recursive on both sides.**
 `defaultRoots()` and its own test called the same flat `readdirSync`, so a
@@ -137,6 +176,9 @@ requalification.
   axis and the suite stays green while values go unseen. That was QD-J23, and
   QD-J20 and QD-J21 before it. Use a different mechanism: a hand-written
   literal, a different tool (`git ls-files`), or a structure the test builds.
+- **A zero is a statement about the corpus, not the subject.** Print the corpus
+  digest beside the count, and say which rules the corpus never reached. A rule
+  with no input attributed to it has not been measured, however many inputs ran.
 - **A reading you cannot parse is not a negative result.** An instrument that
   returns nulls has not observed "no problem"; it has failed to observe. Make
   it throw. `NODE_TEST_CONTEXT` leaking into a spawned `node --test` made one

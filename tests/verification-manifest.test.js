@@ -38,19 +38,39 @@ test('P2K-M01: the manifest lists exactly the known instruments', async () => {
   assert.deepEqual(ids, ids.slice().sort());
 });
 
-test('P2K-M02: guard-diff is recorded as INADMISSIBLE with its finding', async () => {
+test('P2K-M02: guard-diff の再認定は測定に基づいていること（P2K-F01）', async () => {
   const m = await load();
   const manifest = m.buildManifest();
   const gd = manifest.spec.instruments.find((i) => i.id === 'guard-diff');
   // Positive control: removing the entry must fail this test, not be silently
-  // tolerated. A broken instrument is still part of the verification surface.
-  assert.ok(gd, 'guard-diff must be present in the manifest even though it is quarantined');
-  assert.equal(gd.admissibility, 'INADMISSIBLE');
-  assert.equal(gd.finding, 'P2K-F01');
-  assert.match(gd.reason, /corpus/i);
+  // tolerated. An instrument is part of the verification surface whether it is
+  // quarantined or admitted.
+  assert.ok(gd, 'guard-diff must be present in the manifest');
+
+  // Wave 1 quarantined it INADMISSIBLE for P2K-F01: the corpus derived its
+  // threat list from the module under test. Wave 3 repaired that, so this
+  // assertion is INVERTED rather than deleted -- something has to watch whether
+  // the repair holds, and the thing to watch is that the re-admission still
+  // rests on a measurement.
+  assert.equal(gd.admissibility, 'ADMISSIBLE',
+    'guard-diff の admissibility: ' + gd.admissibility);
+  assert.equal(gd.finding, null, '修理済みなのに finding が残っている');
+  // The reason must carry the numbers, not just the claim. Both are the
+  // measured before/after of the Wave 0 experiments.
+  assert.match(gd.reason, /P2K-F01/);
+  assert.match(gd.reason, /26496/, '再認定の根拠に実測値が無い');
+  assert.match(gd.reason, /32000/, '再認定の根拠に実測値が無い');
+  // Re-admission is narrow: it still proves nothing about completeness.
   assert.match(gd.doesNotProve, /completeness/i);
-  // It is still regression-class evidence; class and admissibility are separate.
+  assert.match(gd.doesNotProve, /homoglyph/i,
+    '開集合の限界が doesNotProve から消えた');
+  // Class and admissibility stay separate axes.
   assert.equal(gd.evidenceClass, 'regression');
+
+  // And the closure is recorded where a fresh verifier reads it.
+  const f01 = manifest.spec.knownLimitations.find((k) => k.id === 'P2K-F01');
+  assert.ok(f01, 'P2K-F01 must stay in knownLimitations, recorded as closed');
+  assert.match(f01.status, /CLOSED/, 'P2K-F01 status: ' + f01.status);
 });
 
 test('P2K-M03: every instrument declares sharedDependencies explicitly', async () => {
@@ -61,9 +81,24 @@ test('P2K-M03: every instrument declares sharedDependencies explicitly', async (
       i.id + ': sharedDependencies must be an array, never omitted (K1-09)');
   }
   // The ones Wave 0 measured as sharing a production constant must say so.
+  // guard-diff's shared dependency on two production constants WAS P2K-F01.
+  // Wave 3 removed it, so the assertion is inverted: the entry must no longer
+  // claim to read either constant from the subject. Structural enforcement of
+  // the same property lives in P2K-D01, which reads corpus.mjs itself.
   const gd = manifest.spec.instruments.find((i) => i.id === 'guard-diff');
-  assert.equal(gd.sharedDependencies.some((d) => /DOT_EQUIVALENTS/.test(d)), true);
-  assert.equal(gd.sharedDependencies.some((d) => /PRIVATE_DOCUMENT_EXTENSION_SOURCE/.test(d)), true);
+  assert.equal(gd.sharedDependencies.some((d) => /DOT_EQUIVALENTS/.test(d)), false,
+    'guard-diff がまだ DOT_EQUIVALENTS を共有と記録している（P2K-F01 再発?）');
+  assert.equal(gd.sharedDependencies.some((d) => /PRIVATE_DOCUMENT_EXTENSION_SOURCE/.test(d)), false,
+    'guard-diff がまだ extension source を共有と記録している');
+  assert.equal(gd.sharedDependencies.some((d) => /none/i.test(d)), true,
+    '独立になったことが sharedDependencies に書かれていない');
+
+  // The mutation harness's remaining shared assumption must stay declared: its
+  // SURVIVED/EQUIVALENT split is decided by the guard corpus, so it cannot
+  // adjudicate a mutant in any other file.
+  const mut = manifest.spec.instruments.find((i) => i.id === 'mutation');
+  assert.equal(mut.sharedDependencies.some((d) => /corpus/i.test(d)), true,
+    'mutation の corpus 依存が宣言から消えた');
   // QD-J23 was publication-lint's shared assumption: the implementation and
   // its test walked the config directory with the same flat readdirSync.
   // Wave 2 closed it, so this assertion is inverted rather than deleted --
@@ -93,10 +128,16 @@ test('P2K-M04: provenance slots exist, including inputDigest (P2K-F07)', async (
         i.id + ' is missing provenance slot ' + f + ' (K1-03)');
     }
   }
-  // A digest does not make an oracle independent: guard-diff stays INADMISSIBLE
-  // whether or not inputDigest is filled.
+  // A digest does not make an oracle independent -- that was the point of this
+  // assertion in Wave 1, when guard-diff was quarantined with inputDigest
+  // available. What re-admitted it in Wave 3 was removing the dependency and
+  // measuring the result, not filling a slot. So this now checks the ordering
+  // of the argument rather than the verdict: the slot exists AND the reason
+  // cites a measurement.
   const gd = manifest.spec.instruments.find((i) => i.id === 'guard-diff');
-  assert.equal(gd.admissibility, 'INADMISSIBLE');
+  assert.equal(Object.prototype.hasOwnProperty.call(gd, 'inputDigest'), true);
+  assert.match(gd.reason, /\d{4,}/,
+    'admissibility の根拠が実測値を含んでいない——slot を埋めただけでは独立にならない');
 });
 
 test('P2K-M05: instrument source identity is content-derived, not timestamp-derived', async () => {
@@ -163,3 +204,50 @@ test('P2K-M08: serialisation is deterministic', async () => {
   assert.equal(m.serializeManifest(m.buildManifest()),
                m.serializeManifest(m.buildManifest()));
 });
+
+test('P2K-M09: 12 instrument 全部の class と admissibility を literal で固定する', async () => {
+  const m = await load();
+  const manifest = m.buildManifest();
+
+  // Hand-written. Found by mutation in Wave 3: mutant K1-01 was retargeted from
+  // guard-diff (legitimately re-admitted) to the mutation harness, and PATCH-MISS
+  // exposed that NOTHING pinned any individual admissibility -- only that each
+  // value was a member of the vocabulary. Re-admitting the mutation harness as
+  // ADMISSIBLE would have passed the entire suite.
+  //
+  // That matters most for `mutation`: DIAGNOSTIC_ONLY is a JUDGEMENT, not a
+  // measurement. KILLED verdicts come from npm test (admissible), but the
+  // SURVIVED/EQUIVALENT split is decided by the guard corpus probe, which cannot
+  // adjudicate a mutant in any other file. The weaker half sets the label.
+  // A Human Gate may split it; this table makes that a deliberate edit.
+  const EXPECTED = [
+    ['browser-w4', 'UNVERIFIED', 'observational'],
+    ['failopen-w4', 'UNVERIFIED', 'observational'],
+    ['guard-diff', 'ADMISSIBLE', 'regression'],
+    ['independent-review', 'ADMISSIBLE', 'independent'],
+    ['lint-discovery-depth-experiment', 'ADMISSIBLE', 'independent'],
+    ['mutation', 'DIAGNOSTIC_ONLY', 'regression'],
+    ['npm-test', 'ADMISSIBLE', 'regression'],
+    ['parser-boundary', 'UNVERIFIED', 'independent'],
+    ['probe-w4', 'UNVERIFIED', 'observational'],
+    ['project-state-probe', 'ADMISSIBLE', 'observational'],
+    ['publication-lint', 'ADMISSIBLE', 'regression'],
+    ['stageA-regression', 'UNVERIFIED', 'observational']
+  ];
+  const actual = manifest.spec.instruments
+    .map((i) => [i.id, i.admissibility, i.evidenceClass])
+    .sort((a, b) => (a[0] < b[0] ? -1 : 1));
+  assert.deepEqual(actual, EXPECTED,
+    'instrument の分類が変わった。意図的ならこの表を同じ commit で更新する: ' +
+    JSON.stringify(actual));
+
+  // Every non-ADMISSIBLE entry must carry a reason. An unexplained downgrade is
+  // as unusable as an unexplained upgrade.
+  for (const i of manifest.spec.instruments) {
+    if (i.admissibility !== 'ADMISSIBLE') {
+      assert.ok(i.reason && i.reason.length > 20,
+        i.id + ': 非 ADMISSIBLE なのに reason が空か短すぎる');
+    }
+  }
+});
+

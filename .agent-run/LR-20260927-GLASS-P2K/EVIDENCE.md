@@ -266,3 +266,107 @@ test 経由 : suite exit 0 / summary 全部 null
 初版は null の summary を「気づかなかった」として報告していた。
 **白紙の計器を 0 と読む**のと同じ誤りである。
 
+## §8 — Wave 3 の実測値
+
+### 中心の実測：Wave 0 の盲点 2 例を同じ script で再測した
+
+```text
+                              導出 corpus（Wave 0）   独立 corpus（Wave 3）
+dot equivalent 1 件削除    REGRESSIONS 0          REGRESSIONS 26,496  exit 1
+extension atom 4 件削除    REGRESSIONS 0          REGRESSIONS 32,000  exit 1
+```
+
+いずれも rule は `private-document-filename`、先頭例は
+`構造計算書·pdf` と `構造計算書.rar`。
+加えて constant coverage 行が production が失ったものを名指す。
+
+```text
+constant coverage : working tree dots corpus-only: 1
+constant coverage : working tree ext corpus-only: rar,7z,lzh,gz
+```
+
+再現方法は evidence.js にその変更を当てて
+`node tools/guard-diff/diff-heads.mjs HEAD`。mutant K3-01 / K3-02 でも同じ。
+
+Wave 0 の実験 B は 5 拡張子だった。本回は atom 4 件である。
+**同じ実験ではなく同じクラス**である。
+
+### 導入した瞬間に見つかった実害
+
+```text
+rule coverage : base 8 attributed, NEVER EXERCISED: control-character
+```
+
+9 ある hard rule のうち 1 つに、corpus は入力を一つも生成していなかった。
+その rule についてはこの differential の過去のすべての「0」が無内容だった。
+control 文字軸（メンバ 12 + 非メンバ tab/LF/CR）を追加して gap 0。
+advisory 3 規則についても同じ検査を入れた——現在 gap 0。
+
+### corpus の同定（P2K-F07）
+
+```text
+size   : 643,419
+digest : sha256:ac68342ee1eb21aad45e2c7ed57199b0cd27fe28180a3ecfa55952789b97996e
+```
+
+アルゴリズム: corpus 順に各入力の UTF-8 バイト + 0x00 を連結して sha256。
+順序に敏感（first-match 帰属を決めるので）。
+大きさと digest の両方を P2K-D09 が committed literal で固定する。
+
+### P2K-F09：mutation harness の読みが環境に依存していた
+
+KILLED と報告される mutant 1 件を当てた状態での実測。
+
+```text
+                          threw  exit  TAP  not ok  # fail  mutate.mjs の判定
+clean env                 yes    1     yes  5       5       KILLED
+NODE_TEST_CONTEXT 漏れ    no     0     no   0       null    SURVIVED/EQUIVALENT
+```
+
+この変数がある環境では **全 operator が SURVIVED**になる。
+旧 guard は catch 内にあったので throw しないこの経路に届かない。
+diff-heads の子は git のみなので影響しない（確認済み）。
+
+### test
+
+```text
+npm test : tests 713 / pass 713 / fail 0（695 から +18）
+  suite-verdict             P2K-H01..H07
+  guard-diff-differential   P2K-D01..D10
+  verification-manifest     P2K-M09 追加
+```
+
+### mutation（66 operator）
+
+```text
+KILLED 65 / SURVIVED 1 / EQUIVALENT 0 / PATCH-MISS 0 / HARNESS ERROR 0
+
+SURVIVED 1 = K2-03（Wave 2 で別途測定し EQUIVALENT と判定済み）
+K3-01..K3-16 は 16/16 KILLED
+```
+
+### mutation が自分の盲点を 1 件教えた（PATCH-MISS 経由）
+
+K1-01（非 admissible な instrument を黙って再認定する）の anchor は
+guard-diff の `INADMISSIBLE` だった。Wave 3 でそれが正当に消えたので
+mutation へ retarget したところ——
+
+```text
+PATCH-MISS → 調べる → **どの instrument の admissibility も
+test で固定されていなかった**。語彙の所属検査だけ。
+つまり mutation を ADMISSIBLE に書き換えても 713 test 全部が通る。
+```
+
+これは自分が「判断であって測定でない」と Wave 1 で明記したまさにその分類である。
+→ P2K-M09 が 12 instrument 全部の class × admissibility を literal で deepEqual。
+
+### K2-03 と K1-01 の対比を記録しておく
+
+```text
+K2-03  SURVIVED  → 別途測定したら EQUIVALENT だった（実害なし）
+K1-01  PATCH-MISS → 調べたら本物の test 欠陥だった（実害あり、修正済み）
+```
+
+どちらも「緑以外の結果を調べる」だけで出てきた。
+PATCH-MISS を harness の雑音として流さないことに意味がある。
+

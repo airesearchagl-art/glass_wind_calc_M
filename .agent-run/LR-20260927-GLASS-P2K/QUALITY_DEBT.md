@@ -145,3 +145,60 @@ P2K-L03 初版: results.find(r => r.path.startsWith('sub/beta.'))
 
 first-match でしか見ないのは P2K-F03（diff-heads）と同じ形である。
 **演繰返しているので Wave 3 の F03 修理は優先度を上げる**。
+
+---
+
+# Wave 3 後の状態
+
+```text
+P2K-F01  **閉じた**。corpus が自分の脅威リストを持つ（D-008）。
+         project-config への参照が一行も無いことを P2K-D01 が source で検査。
+         Wave 0 の 2 実験を再測: 0 → 26,496 / 0 → 32,000、いずれも exit 1
+P2K-F02  **閉じた**。hard 9 + advisory 3 の coverage 検査を入れ、
+         gap を exit 1 にした（D-009）。
+         導入した瞬間に `control-character` の実害を 1 件検出
+P2K-F03  **閉じた**。reattributed bucket を追加（D-010）。
+         失敗にはしない——理由は D-010
+P2K-F06  未閉（Wave 4）。Playwright の絶対 path
+P2K-F07  **閉じた**。corpusDigest。大きさと digest を
+         committed literal で固定（P2K-D09）。diff-heads が毎回印刷する
+P2K-F08  未調査（Wave 5）。緩い assert.throws が他に残っていないか
+P2K-F09  **閉じた**（mutate.mjs と Wave 2 実験）。
+         diff-heads の子は git のみなので影響しない——確認済み
+P2K-F10  **構造上開いたまま**。corpus は有限の列挙なので
+         開集合の形（homoglyph / 綾り出し / 括弧 dot）には届かない。
+         修理できない——明記するだけ
+```
+
+## P2K-F09 の実測（mutation harness 側）
+
+KILLED と報告される mutant 1 件を当てた状態で `npm test` を 2 通り走らせた。
+
+```text
+                          threw  exit  TAP  not ok  # fail  mutate.mjs の判定
+clean env                 yes    1     yes  5       5       KILLED
+NODE_TEST_CONTEXT 漏れ    no     0     no   0       null    SURVIVED/EQUIVALENT
+```
+
+つまりこの変数がある環境で battery を回すと
+**全 operator が SURVIVED と報告され、表は普通に見える**。
+旧 guard（`!/^# (pass|fail)/m` で crashed 判定）は catch 内にあったので
+throw しないこの経路には届かない。
+
+修正を `tools/guard-diff/suite-verdict.mjs` に分離し、
+literal TAP サンプルで P2K-H01..H07 が押さえる。
+
+## この Wave の判断 1 件（Human Gate に上げる）
+
+**guard-diff を INADMISSIBLE から ADMISSIBLE へ戻した**。
+
+```text
+根拠 : 依存方向を切った（構造的に P2K-D01 が錠）
+       Wave 0 の盲点 2 例がいずれも見えるようになった（実測）
+       9 hard + 3 advisory に positive control がある（実測）
+限定 : proves を狭く書き直した。completeness は証明しない。
+       P2K-F10 がその理由を機械可読形で保持する
+戻し方: spec の reason に実測値が入っており、P2K-M02 がそれを検査する。
+       Human Gate が INADMISSIBLE へ戻すなら spec 1 行と M02 の 1 行
+```
+
