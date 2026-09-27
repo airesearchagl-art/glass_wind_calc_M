@@ -262,3 +262,46 @@ P2K-F03。両方が reject し、rule だけが変わった場合。
 公開可能になったものはない。かつ Phase 2J の policy 変更のような
 正当な変更では大量に出る。**見えないこと**が欠陥だった。
 
+## D-011 — browser の場所は発見する。しかし本題は exit code の方
+
+P2K-F06。Wave 4。
+
+### 前半（易しい方）
+
+```text
+従来 : import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+現在 : PLAYWRIGHT_MODULE → bare specifier → npm root -g → interpreter 相対
+       いずれも**発見**する。列挙ではない
+```
+
+偶然だがこの環境の `npm root -g` は
+その絶対 path の親そのものだった。だから動いていた。
+
+### 後半（こちらが本題）
+
+§18 は「exact head の測定がなければ browser VERIFIED と書かない。
+UNVERIFIED でよい」と言う。これが成立するには
+**「走っていない」と「走って通った」と「走って落ちた」が
+別物として見えなければならない**。
+import で死ぬ script は 1 つ目を 2 つ目・3 つ目に混ぜる。
+
+```text
+outcome     exit  意味
+PASS         0    測って全部通った
+FAIL         1    測って落ちた
+UNVERIFIED   3    起動できなかった——**何も測っていない**
+ERROR        4    起動したが途中で壊れた
+```
+
+語彙は Wave 1 の admissibility モデルと同じ。変換せずに記録できる。
+
+**0 件測って 0 失敗は PASS ではなく ERROR** とした。
+何も測らなかった実行が清らかな実行と同じ見え方をするのは
+D-007（白紙の計器を 0 と読む）と同じ誤りである。
+
+### 自分の缺陥を 1 件検出し修正（test が先に見つけた）
+
+resolver の中に `existsSync` が直接入っていた。
+importer は差し替えられるのにこれは差し替えられない——
+つまり **そのマシン上でしか test できない resolver** であり、
+修理対象の欠陥と同じ形だった。`exists` も注入可能にした。

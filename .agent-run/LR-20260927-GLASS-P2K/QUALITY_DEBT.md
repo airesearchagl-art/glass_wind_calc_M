@@ -202,3 +202,42 @@ literal TAP サンプルで P2K-H01..H07 が押さえる。
        Human Gate が INADMISSIBLE へ戻すなら spec 1 行と M02 の 1 行
 ```
 
+---
+
+# Wave 4 後の状態
+
+```text
+P2K-F06  **閉じた**。playwright を発見する（D-011）。
+         加えて UNVERIFIED / ERROR を PASS / FAIL から別の exit code に分した
+P2K-F08  未調査（Wave 5）
+P2K-F10  構造上開いたまま（修理不可）
+P2K-F11  新規・下記
+```
+
+## P2K-F06 の本体は path でなく exit code だった
+
+```text
+従来 : import が失敗すると ERR_MODULE_NOT_FOUND で死ぬ。
+       呼び出し側は非 0 exit を見るだけなので
+       **「走っていない」と「走って落ちた」が区別できない**
+現在 : PASS 0 / FAIL 1 / UNVERIFIED 3 / ERROR 4。
+       0 件測って 0 失敗は ERROR（PASS ではない）
+```
+
+§18 の「UNVERIFIED でよい」は、UNVERIFIED を名乗れる形が
+存在してはじめて意味を持つ。
+
+## P2K-F11 — 計器の依存のうち 1 つだけ注入不可だった（本 Wave で修正済み）
+
+```text
+現象 : resolver の中に existsSync が直接入っていた。
+       importer は差し替えられるのにこれは差し替えられない
+意味 : 「そのマシン上でしか test できない resolver」——
+       まさに修理対象の欠陥と同じ形
+検出 : 自分の test（P2K-R04）が先に落ちた
+修正 : exists も注入可能にした
+```
+
+他の instrument に同じ形が残っていないかは **未調査**。
+Wave 5 の fresh verifier trial で見る。
+

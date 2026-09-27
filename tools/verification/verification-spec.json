@@ -118,17 +118,19 @@
       "target": "the Evidence Closure Matrix renders and protected facts read back from the loaded page",
       "oracle": "real Chromium",
       "sharedDependencies": [
-        "requires Playwright at an environment-specific absolute path (P2K-F06)"
+        "none: the page is loaded over file:// and observed through a real Chromium"
       ],
-      "positiveControl": "documented sabotage test: replacing containsHtmlLikeTag with `return false` makes the copy report 19 bypasses",
-      "negativeControl": "over-rejections reported separately from bypasses",
+      "positiveControl": "mutants K4-01..K4-08: removing the override, the bare specifier, the chromium check, the typed error, or collapsing UNVERIFIED into FAIL are each killed by P2K-R02..R07",
+      "negativeControl": "with Playwright unresolvable the run reports UNVERIFIED and exits 3, never 0 or 1",
       "proves": "how index.html behaves in a real browser for the head actually measured",
-      "doesNotProve": "behaviour in another environment or browser; anything about an unmeasured head",
+      "doesNotProve": "anything about a head other than the one it ran against; a PASS recorded in a document is evidence only for the sha printed beside it",
       "instrumentFiles": [
-        "tools/browser-checks/browser-w4.mjs"
+        "tools/browser-checks/browser-w4.mjs",
+        "tools/browser-checks/resolve-playwright.mjs",
+        "tools/browser-checks/browser-outcome.mjs"
       ],
       "finding": null,
-      "reason": "no browser measurement exists for the current target head; source inspection is not browser verification"
+      "reason": "UNVERIFIED is about the TARGET, not the instrument: this repository carries no browser measurement for an arbitrary head, so a verifier must run it at theirs. Wave 4 made that possible anywhere — Playwright is discovered (PLAYWRIGHT_MODULE, bare specifier, npm root -g, interpreter-relative) instead of imported from one machine's absolute path (P2K-F06) — and made the result readable: PASS 0 / FAIL 1 / UNVERIFIED 3 / ERROR 4, with zero checks and zero failures classified ERROR rather than PASS."
     },
     {
       "id": "probe-w4",
@@ -385,9 +387,9 @@
     },
     {
       "id": "P2K-F06",
-      "statement": "browser harnesses import Playwright from an environment-specific absolute path; devDependencies is empty by design.",
-      "status": "open",
-      "owner": "Wave 4"
+      "statement": "the browser check imported Playwright from one machine's absolute path, so a fresh verifier could not run it. The larger half was that a failed import died with ERR_MODULE_NOT_FOUND, making 'never ran' indistinguishable from 'ran and failed' — which is what §18's 'UNVERIFIED is acceptable' depends on.",
+      "status": "CLOSED in Wave 4",
+      "owner": "closed"
     },
     {
       "id": "P2K-F07",

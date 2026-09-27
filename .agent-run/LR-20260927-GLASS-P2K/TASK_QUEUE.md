@@ -5,8 +5,8 @@ Wave 0  instrument inventory / shared-assumption graph          DONE
 Wave 1  evidence-admissibility model + verification manifest    DONE
 Wave 2  publication-lint discovery independence（QD-J23）        DONE
 Wave 3  mutation + differential tool reproducibility            DONE
-Wave 4  browser verification durability                         NEXT
-Wave 5  fresh independent verifier trial（committed のみ）       pending
+Wave 4  browser verification durability                         DONE
+Wave 5  fresh independent verifier trial（committed のみ）       NEXT
 Wave 6  repair findings / exact-head reverify                   pending
 Wave 7  README / Artifact convergence / Draft PR                pending
 ```
