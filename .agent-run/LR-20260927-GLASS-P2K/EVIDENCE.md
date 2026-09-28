@@ -812,3 +812,110 @@ npm test : tests 731 / pass 731 / fail 0
 mutation : 90 operator（K7-03 追加）
 ```
 
+
+---
+
+## Post-merge hotfix — verifier-package の正当なゼロ差分（2026-09-28）
+
+### 直前の測定値に対する訂正
+
+上の `npm test : tests 731 / pass 731 / fail 0` は **branch head での測定**である。
+merge 後の `main`（`26619be`）では成り立たなかった。
+
+```text
+main @ 26619be
+npm test : tests 731 / pass 722 / fail 9
+失敗は tests/verifier-package.test.js の P2K-V01..V09 全件、root cause は 1 つ
+
+error: 'verifier-package: changed-file list is empty against origin/main;
+        this branch is expected to carry Phase 2K changes, so an empty list
+        means the comparison is wrong rather than that nothing changed'
+```
+
+これは runtime / 計算 / Evidence / UI の回帰ではない。**検証計器側の欠陥**である。
+
+### root cause
+
+`resolveChangedFiles` は `git diff --name-only <base>...HEAD` の結果が 0 件であることを
+無条件に error として扱っていた（Wave 1、K1-08）。その前提——「この branch は Phase 2K の
+変更を必ず運んでいる」——は稼働中の feature branch では真、merge 済みの `main` では偽。
+`main` では target が base そのものであり、0 件が正しい答えである。
+
+branch では緑、merge した瞬間に main が赤になる。branch でしか測っていなかったため
+merge 前には見えなかった。Phase 2K が扱ってきた欠陥族——**計器と対象が仮定を共有していて、
+その軸には誰も気づけない**——と同じ形が、計器自身の側に残っていた。
+
+### 修理の規準：ancestry ではなく content tree
+
+```text
+files > 0                      → 変更 file を返す
+files = 0 かつ target tree = base tree → [] は真。target の内容は base の内容である
+files = 0 かつ tree が異なる／不明      → hard error
+```
+
+commit ancestry を判定基準にしない。Phase 2J / 2K が実際に示したとおり、squash merge は
+**history が違っても tree は同じ**という状態を作る（PR #12 自身がそれで、branch tree と
+main tree はともに `7a340f8`）。verifier に渡されるのは内容であって履歴ではない。
+
+判定を純関数 `validateChangedFiles({files, baseRef, targetTreeSha, baseTreeSha})` に切り出し、
+git の履歴を組まなくても全分岐を test できるようにした。`targetTreeSha` / `baseTreeSha` /
+`changedFilesNote` を package に出す——`changedFiles: []` だけを読んだ verifier は
+「内容が同一」と「比較が失敗した」を区別できず、それはこの package が消すために存在する
+種類の問いだからである。
+
+### K1-08 の安全性は保持している（測定）
+
+`tools/verification/verifier-package.mjs` を一時的に変異させ、`node --test
+tests/verifier-package.test.js` を環境変数を除去して実行（P2K-F09）。毎経路で復元し、
+復元を sha256 で確認した。
+
+```text
+baseline（hotfix のまま）                     9 / 9 pass / 0 fail
+
+NC-1  「空 list は常に throw」を復元          9 tests / 0 pass / 9 fail  exit 1
+      ＝ merge 後 main の失敗をそのまま再現（同一 message）
+
+NC-2  K1-08 committed 版（空分岐を通さない）  9 tests / 8 pass / 1 fail  exit 1
+      P2K-V02: 'Missing expected exception: an empty list whose content trees
+      differ must be a hard error (K1-08)'
+```
+
+NC-2 が落ちることが要点である。空 list を無条件に通す変異は、この hotfix の**あとも**
+殺されている。緩めたのは「空はすべて error」という前提だけで、「失敗した lookup が
+空 list に化けて verifier に届く」ことは依然として通らない。
+
+### test 側の欠陥
+
+P2K-V02 は `changedFiles.length > 0` を普遍不変条件として主張していた。これは package の
+性質ではなく **merge されていない feature branch の性質**であり、main を赤くしたのは
+実装側の guard だけでなくこの主張でもある。主張を契約へ置き換えた——list は非空であるか、
+さもなくば**内容が同一であるがゆえに**空であるか。
+
+test 内に 4 ケースを置いた（件数を増やさないため P2K-V02 の中に収めている）。
+
+```text
+A  同一 tree のゼロ差分            resolveChangedFiles('HEAD') → []
+   同一 tree・別 commit            commit-tree で dangling commit を作り → []
+                                   （squash merge の形。ref は作らない）
+B  解決不能な ref                  /cannot resolve changed files/ で throw、[] を返さない
+C  実際の内容差分                  tree の異なる祖先を探して非空・sorted
+D  疑わしい空（tree 不一致）        親が HEAD・tree が古い dangling commit。
+                                   diff は空、tree は異なる → hard error
+   ＋ 純関数として同じ 4 分岐（tree 不明を「同一」と読まないことを含む）
+```
+
+### 測定値
+
+```text
+hotfix branch
+npm test                                    : tests 731 / pass 731 / fail 0
+node tools/verification/verifier-package.mjs: exit 0
+  targetTreeSha === baseTreeSha             : true (7a340f8b…)
+  changedFiles                              : []
+post-merge simulation  baseRef = HEAD       : changedFiles [] / exit 0
+```
+
+test の件数は 731 のまま（ケースは既存 test の中に置いた）。mutation operator は 90 のまま
+追加していない。Evidence は一切変更していない——`verifiedCases: []`、昇格なし、
+1250×2050 は `sample_default` / `unverified`、V0 = 34、粗度区分 III、observations 0、
+closure BLOCKED。guard 規則の追加も変更もしていない。
