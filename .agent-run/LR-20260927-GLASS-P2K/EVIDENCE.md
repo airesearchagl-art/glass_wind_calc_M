@@ -919,3 +919,57 @@ test の件数は 731 のまま（ケースは既存 test の中に置いた）�
 追加していない。Evidence は一切変更していない——`verifiedCases: []`、昇格なし、
 1250×2050 は `sample_default` / `unverified`、V0 = 34、粗度区分 III、observations 0、
 closure BLOCKED。guard 規則の追加も変更もしていない。
+
+### 焦点を絞った独立レビュー（PR #13）
+
+committed 成果物と branch だけを渡し、こちらの結論は一切渡していない。scope は
+A–F の 6 問のみ（merged main のゼロ差分 / 解決不能 ref / tree 不一致の疑わしい空 /
+feature branch の実差分 / suite / 変更範囲）。
+
+```text
+A..F 全て PASS      Required Fix 0 / Optional 3
+```
+
+レビュアーは実際に squash merge された main を clone 内で構成して測った——branch の
+tree を載せた commit を旧 main に親付けし、`origin/main` を動かして checkout。
+そのうえで **修理前の code で同じ状況が exit 1 で落ちること**、および素の main
+(26619be) で `731 / 722 / 9` になることを独立に再現している。つまり上に書いた
+9 失敗は主張ではなく測定である。
+
+`if (!c.targetTreeSha || !c.baseTreeSha)` を `if (false)` にすると
+`validateChangedFiles({files: [], baseRef: 'r'})` が `[]` を返す——実在の bypass——
+ことも示し、そのとき suite が落ちる（8 pass / 1 fail）ことまで確認している。
+
+### Optional 3 件は blocking ではないが、いずれもこの hotfix が入れた code なので直した
+
+```text
+O-1  working tree に未 commit の変更があっても changedFiles: [] と報告し、
+     note が「target content equals the base content」と述べていた。
+     この package の比較はすべて **committed** content についてのものなので
+     そう書き、さらに workingTree を出す。CLEAN / DIRTY / UNAVAILABLE の 3 状態——
+     clean な tree と失敗した呼び出しはどちらも何も出力せず、その 2 つを
+     1 つに潰すことがこの hotfix の欠陥そのものだから
+O-2  changedFiles は merge-base（3 点）差分、tree SHA は両端点そのものの tree。
+     問いが違うので両立して食い違いうる（base が同じ branch から squash merge
+     された場合に到達可能）。どの field がどの比較なのかを note に明記した
+O-3  validateChangedFiles が tree SHA を truthiness で見ていた。UNAVAILABLE は
+     文字列 'unavailable'——truthy で、自分自身と等しい。buildVerifierPackage は
+     解決失敗時にまさにこの 2 field へそれを書く。現状の経路では到達しないが、
+     export された helper はその 1 関数隣にある。shape 検査に変え、構成上
+     到達不能にした。空文字・非文字列の entry も同じ理由で拒否する
+```
+
+レビュアーの test 品質指摘も直した。空 list 分岐の
+`assert.equal(pkg.targetTreeSha, pkg.baseTreeSha)` は**恒真**である——list が空なのは
+その 2 つが等しいからであって、両者は一致しかしえない。現在は git に直接問い合わせた
+値と突き合わせている。
+
+### 再測定（Optional 3 件を直したあと）
+
+```text
+npm test                    : tests 731 / pass 731 / fail 0
+K1-07 / K1-08 / K1-12 / K5-09 : 全て KILLED（harness 自身の classifier で判定）
+NC-1「空は常に throw」を復元  : suite 落ちる（Case A が捕える）
+NC-2  K1-08 committed 版      : suite 落ちる（Case D が捕える）
+workingTree                 : CLEAN
+```

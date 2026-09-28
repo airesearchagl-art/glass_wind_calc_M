@@ -37,6 +37,9 @@ export const FORBIDDEN_PACKAGE_KEYS = Object.freeze([
 
 function fail(message) { throw new Error('verifier-package: ' + message); }
 
+/** A resolved content-tree SHA. Nothing else counts as one. */
+const TREE_SHA = /^[0-9a-f]{40}$/;
+
 /**
  * The content-tree SHA of a revision, or null when it cannot be resolved.
  *
@@ -49,8 +52,23 @@ export function resolveTreeSha(rev) {
   try {
     const out = execFileSync('git', ['rev-parse', '--verify', '--quiet', rev + '^{tree}'],
       { cwd: ROOT, encoding: 'utf8' }).trim();
-    return /^[0-9a-f]{40}$/.test(out) ? out : null;
+    return TREE_SHA.test(out) ? out : null;
   } catch (e) { return null; }
+}
+
+/**
+ * CLEAN, DIRTY, or UNAVAILABLE. Three states, because two would repeat the
+ * defect: `git()` below collapses "succeeded and printed nothing" into
+ * UNAVAILABLE, and a clean tree prints nothing. Everything this package says
+ * about content is about COMMITTED content, so a verifier standing in a
+ * modified checkout needs to be told that rather than left to infer it.
+ */
+export function workingTreeStatus() {
+  try {
+    const out = execFileSync('git', ['status', '--porcelain'],
+      { cwd: ROOT, encoding: 'utf8' });
+    return out.trim() === '' ? 'CLEAN' : 'DIRTY';
+  } catch (e) { return UNAVAILABLE; }
 }
 
 /**
@@ -83,8 +101,18 @@ export function validateChangedFiles(comparison) {
     fail('changed-file list is not an array against ' + against +
       '; refusing to guess what was compared');
   }
-  if (files.length > 0) return files;
-  if (!c.targetTreeSha || !c.baseTreeSha) {
+  if (files.length > 0) {
+    if (files.some((f) => typeof f !== 'string' || f.trim() === '')) {
+      fail('changed-file list contains a blank or non-string entry against ' +
+        against + '; a path that names nothing is not a changed file');
+    }
+    return files;
+  }
+  // Shape, not truthiness. `UNAVAILABLE` is the string 'unavailable': truthy,
+  // and equal to itself, so a truthiness test would have read two failed
+  // resolutions as "the trees match" -- the same empty-means-fine confusion
+  // this function exists to end, one level up.
+  if (!TREE_SHA.test(String(c.targetTreeSha)) || !TREE_SHA.test(String(c.baseTreeSha))) {
     fail('changed-file list is empty against ' + against + ' and the content ' +
       'trees could not be resolved, so a legitimate zero delta cannot be ' +
       'told apart from a comparison that failed');
@@ -184,16 +212,23 @@ export function buildVerifierPackage(options) {
     taskPacketDigest: taskPacketDigest,
 
     changedFiles: resolveChangedFiles(baseRef),
+    workingTree: workingTreeStatus(),
     // Emitted so that `changedFiles: []` is auditable rather than ambiguous.
     // Reading an empty list alone, a verifier cannot tell "identical content"
     // from "the comparison broke" — the same shape of unanswerable question
-    // this package exists to remove.
+    // this package exists to remove. The note names which comparison each
+    // field is, because they are not the same one and can disagree.
     changedFilesNote:
-      'An empty changedFiles list means the target content equals the base ' +
-      'content (targetTreeSha === baseTreeSha), which is the ordinary state ' +
+      'changedFiles is the merge-base (three-dot) delta of the committed ' +
+      'target against the base ref; targetTreeSha and baseTreeSha are the two ' +
+      'endpoints\' own content trees. They answer different questions, so a ' +
+      'non-empty list alongside identical trees is possible and is not a ' +
+      'contradiction. An empty changedFiles list means the committed target ' +
+      'content equals the committed base content, which is the ordinary state ' +
       'once this work has been merged. It never means the comparison failed: ' +
       'an unresolvable base, or an empty list whose content trees differ, is ' +
-      'a hard error and no package is emitted at all.',
+      'a hard error and no package is emitted at all. Uncommitted changes are ' +
+      'outside every one of these comparisons; see workingTree.',
 
     verificationCommands: verificationCommands,
 

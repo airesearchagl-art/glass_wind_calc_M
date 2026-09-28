@@ -71,9 +71,16 @@ test('P2K-V02: changed files come from git; [] survives only when the content tr
   // invariant is the contract -- the list is either non-empty, or empty BECAUSE
   // the content is identical.
   if (pkg.changedFiles.length === 0) {
+    // Checked against git directly, not against the package's own other field.
+    // `targetTreeSha === baseTreeSha` alone is tautological here -- the list is
+    // empty BECAUSE they are equal, so the two can only ever agree, which is
+    // the shape of self-agreement this campaign exists to stop.
+    assert.equal(pkg.targetTreeSha, treeOf('HEAD'),
+      'targetTreeSha must be the tree git reports for HEAD');
+    assert.equal(pkg.baseTreeSha, treeOf('origin/main'),
+      'baseTreeSha must be the tree git reports for the base');
     assert.equal(pkg.targetTreeSha, pkg.baseTreeSha,
       'an empty changedFiles list is legitimate only when the content trees match');
-    assert.match(pkg.targetTreeSha, /^[0-9a-f]{40}$/);
   } else {
     for (const f of pkg.changedFiles) {
       assert.equal(typeof f, 'string');
@@ -81,6 +88,13 @@ test('P2K-V02: changed files come from git; [] survives only when the content tr
     }
   }
   assert.match(pkg.changedFilesNote, /never means the comparison failed/i);
+  // Everything the package says about content is about COMMITTED content, so a
+  // verifier standing in a modified checkout has to be told rather than left to
+  // infer it. Three states, because a clean tree and a failed call both print
+  // nothing and collapsing them is the very defect this file is about.
+  assert.equal(['CLEAN', 'DIRTY', 'unavailable'].includes(pkg.workingTree), true,
+    'workingTree must be CLEAN / DIRTY / unavailable, got ' + JSON.stringify(pkg.workingTree));
+  assert.equal(m.workingTreeStatus(), pkg.workingTree);
 
   // --- Case A: a legitimate same-tree zero delta must not throw -------------
   // This is the exact call that failed on merged main.
@@ -146,6 +160,19 @@ test('P2K-V02: changed files come from git; [] survives only when the content tr
     /trees could not be resolved/);
   assert.throws(() => m.validateChangedFiles({ files: null, baseRef: 'r' }),
     /not an array/);
+  // A tree SHA is checked by shape, not by truthiness. UNAVAILABLE is the
+  // string 'unavailable' -- truthy, and equal to itself -- and this helper is
+  // exported one function away from the place that writes it, so a truthiness
+  // test would read two failed resolutions as "the trees match".
+  assert.throws(() => m.validateChangedFiles(
+    { files: [], baseRef: 'r', targetTreeSha: 'unavailable', baseTreeSha: 'unavailable' }),
+    /trees could not be resolved/,
+    'the UNAVAILABLE sentinel must not be readable as a resolved tree');
+  assert.throws(() => m.validateChangedFiles(
+    { files: [], baseRef: 'r', targetTreeSha: 'xyz', baseTreeSha: 'xyz' }),
+    /trees could not be resolved/, 'equal non-SHAs are not matching trees');
+  assert.throws(() => m.validateChangedFiles({ files: [''], baseRef: 'r' }),
+    /blank or non-string entry/, 'a path that names nothing is not a changed file');
 });
 
 test('P2K-V03: the package states which evidence is admissible', async () => {
