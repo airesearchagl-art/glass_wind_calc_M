@@ -623,16 +623,41 @@ K1-01  非 admissible を黙って再認定（逆向き）  KILLED  by P2K-M09, 
 
 全件表は `F08_TRIAGE.md`。
 
+> ## 【HISTORICAL / SUPERSEDED】
+>
+> **この節の以下の数字と「測定で行った」という記述は、初版のまま残してある
+> 時系列の記録であって、現在の真ではない。**
+> 最終独立レビューの指摘で分類を改め、方法の記述も限定した。
+> 現在の真はこれである（§12 と `F08_TRIAGE.md` が正）:
+>
+> ```text
+> throw message の測定 : 49 / 49  —— 全件測った
+> 判定 C（guard を消しても別の throw で通るか）:
+>                     2 件のみ測定
+>                     47 件は推論（inferred / reasoned）
+>
+> 最終 disposition : BENIGN 38 / AMBIGUOUS 8 / REQUIRED_FIX 3 / UNTRIAGED 0
+> ```
+>
+> つまり **49 件の判定 C がすべて実験的に測定されたわけではない**。
+> 測ったのは投げられた message であり、判定 C は 2 件を除いて推論である。
+> この限界は P2K-F16 として QUALITY_DEBT に登録してある。
+
+以下、初版の記述（残してあるが上記により超えられている）。
+
 ```text
 候補集団 : 単一引数の assert.throws = **49 箇所** / 5 file / 25 test block
 検証者の数 : 18（どの数え方でも再現できなかった。名指し分は 13）
 取った方針 : 同じ基準を完全適用した 49 件全部を triage（名指し 13 の超集合）
 
-BENIGN 43 / AMBIGUOUS 4 / REQUIRED_FIX 2 —— untriaged 0
+【SUPERSEDED】BENIGN 43 / AMBIGUOUS 4 / REQUIRED_FIX 2 —— untriaged 0
+             → 現在は BENIGN 38 / AMBIGUOUS 8 / REQUIRED_FIX 3
 ```
 
-判定は測定で行った。`assert.throws` を preload で wrap し、
-全 49 箇所が実際に投げている message を 108 回分記録した。
+【SUPERSEDED】初版はここで「判定は測定で行った」と書いていた。
+正確には `assert.throws` を preload で wrap し、
+全 49 箇所が実際に投げている **message を** 108 回分記録しただけであり、
+**判定 C の測定は 2 件にとどまる**（残り 47 件は推論。P2K-F16）。
 
 **REQUIRED_FIX 1: tests/manual-config.test.js:171**
 
@@ -648,8 +673,21 @@ BENIGN 43 / AMBIGUOUS 4 / REQUIRED_FIX 2 —— untriaged 0
 ```text
 入力 : registerPreset({})
 実測 : projectId guard を if (false) へ消しても AC-04 は ok のまま通った
-理由 : {} は hasFixedPreset も getPublicLabel も欠くので後続 guard が代わりに発火
 ```
+
+【SUPERSEDED / corrected below】
+初版はここで理由を「{} は hasFixedPreset も getPublicLabel も欠くので
+**後続 guard が代わりに発火**」と書いていた。**これは偽である。**
+後続 guard は一つも発火しない。実測した機序はこれである:
+
+```text
+TypeError: Cannot read properties of undefined (reading 'length')
+  ← project-config/registry.js の config.projectId.length
+    （guard ではなく、直後の property 読み）
+```
+
+判定（REQUIRED_FIX）と処置（matcher 4 行 + K7-01）は変わらない。
+訂正されたのは機序の説明だけである。
 
 どちらも **test の欠陥**であり runtime の欠陥ではない——
 不正入力は結局拒否されている（fail closed）。
