@@ -24,6 +24,7 @@
 import { createRequire } from 'node:module';
 import { readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { posix as posixPath } from 'node:path';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const require = createRequire(import.meta.url);
@@ -43,49 +44,149 @@ export const PUBLICATION_FACING_FIELDS = [
   'caseId'                      // published identifier (UI, export package, PR body)
 ];
 
+/** The shipped configuration tree, relative to the repository root. */
+export const CONFIG_DIR_NAME = 'project-config';
+
 /**
- * Default roots are DERIVED, not listed.
+ * Discover every shipped config module under `dir`, RECURSIVELY.
  *
- * The first version named `project-config/miyoshi.js` by hand and therefore
- * missed the manual input-mode config's shipped publicDescription entirely
- * (FP-01) -- the lint claimed to inspect publicDescription and did not inspect
- * one of them. A hand-written list of what to inspect goes stale the same way
- * a hand-written list of what to detect does; this campaign has been caught by
- * that shape repeatedly (F3, F13-03, F15-E3, F16-03). Every config module is
- * scanned, and a new one is covered the day it is added.
+ * Two separate lessons are baked in here.
+ *
+ * (1) Default roots are DERIVED, not listed. The first version named
+ *     `project-config/miyoshi.js` by hand and therefore missed the manual
+ *     input-mode config's shipped publicDescription entirely (FP-01) -- the
+ *     lint claimed to inspect publicDescription and did not inspect one of
+ *     them. A hand-written list of what to inspect goes stale the same way a
+ *     hand-written list of what to detect does (F3, F13-03, F15-E3, F16-03).
+ *
+ * (2) The scan is recursive. The previous version used a single flat
+ *     readdirSync, and so did its test, so neither could see a config module
+ *     one directory down (QD-J23). That is measured, not asserted:
+ *     `tools/verification/experiments/lint-discovery-depth.mjs` plants three
+ *     publication-facing values one level down -- one of them tripping a HARD
+ *     rule -- and observes discovery finding zero of them while the suite
+ *     stays green. Flat discovery also contradicted this function's own
+ *     documented promise that "a new config module is covered the day it is
+ *     added"; a subdirectory broke that promise silently.
+ *
+ * The failure modes are not symmetric, which is what decides the contract.
+ * Scanning one module too many costs a false advisory that a human dismisses.
+ * Scanning one too few costs a value that must never be published going
+ * unseen. This lint exists to prevent the second, so it over-includes.
+ *
+ * Deliberate properties, each pinned by a test:
+ *   - recursive, unbounded depth
+ *   - symlinks are NOT followed (no cycles, no escaping the tree)
+ *   - order is sorted, so the report is deterministic
+ *   - a module that fails to load THROWS; inspecting fewer values quietly is
+ *     the exact failure this function was rewritten to remove
+ *
+ * Returned names are POSIX-relative to `dir` with `.js` stripped, so a nested
+ * module reports as `sub/probe.publicDescription` and a human can find it.
  */
-export function defaultRoots() {
-  const dir = ROOT + 'project-config';
+export function discoverConfigModules(dir) {
+  const base = dir || ROOT + CONFIG_DIR_NAME;
+  const found = [];
+  // Explicit stack descent rather than readdirSync's own `recursive` option:
+  // the independent oracle in the test uses `git ls-files`, a different
+  // mechanism entirely, so the two cannot share a walker bug.
+  const stack = [''];
+  while (stack.length > 0) {
+    const relDir = stack.pop();
+    const absDir = relDir === '' ? base : base + '/' + relDir;
+    for (const entry of readdirSync(absDir, { withFileTypes: true })) {
+      const rel = relDir === '' ? entry.name : relDir + '/' + entry.name;
+      // A symlink is not descended and not loaded: following one can loop
+      // forever or leave the configuration tree. Measured caveat -- this line
+      // is defence in depth, not the mechanism. `withFileTypes` reports a
+      // symlink with isDirectory() AND isFile() both false, so the two checks
+      // below already exclude it; removing this line produced byte-identical
+      // output on a tree holding a file symlink, a directory symlink and a
+      // cyclic one (mutant K2-03, classified EQUIVALENT by that measurement,
+      // not by inspection). Kept because the exclusion is then stated rather
+      // than relied upon as a side effect of Dirent semantics.
+      if (entry.isSymbolicLink()) continue;
+      if (entry.isDirectory()) { stack.push(rel); continue; }
+      if (entry.isFile() && rel.endsWith('.js')) found.push(rel);
+    }
+  }
+  return found.sort();
+}
+
+export function defaultRoots(dir) {
+  const base = dir || ROOT + CONFIG_DIR_NAME;
   const sources = {};
-  for (const file of readdirSync(dir).filter((f) => f.endsWith('.js')).sort()) {
+  for (const rel of discoverConfigModules(base)) {
     // A module that fails to load is a tooling problem, not a clean inventory:
     // surface it rather than silently inspecting fewer values.
-    sources[file.replace(/\.js$/, '')] = require(dir + '/' + file);
+    sources[rel.replace(/\.js$/, '')] = require(posixPath.join(base, rel));
   }
   return sources;
 }
 
+/**
+ * Collect publication-facing values.
+ *
+ * A publication-facing KEY makes everything beneath it publication-facing. The
+ * first version required the value to be a string at the key itself, so
+ *
+ *     publicDescription: ['C:\\Users\\...\\plan.pdf を参照']
+ *     publicDescription: { ja: '...', en: '...' }
+ *
+ * were both walked and then collected from nowhere: the array's members have no
+ * key, and `ja` / `en` are not publication-facing names. An independent verifier
+ * demonstrated the consequence with a tracked config module — a Windows
+ * absolute path inside an array-wrapped publicDescription gave
+ * `inspected 12 / No advisory warnings`, exit 0, and 720 green tests, while the
+ * identical string unwrapped was rejected.
+ *
+ * A value under such a key that is neither a string nor a container is reported
+ * as an unreadable shape rather than skipped. This lint is a publication guard;
+ * a field it cannot read is a thing it cannot vouch for.
+ */
 export function collectInventory(roots) {
   const sources = roots || defaultRoots();
   const found = [];
-  const seen = new Set();
-  const walk = (node, path) => {
-    if (!node || typeof node !== 'object' || seen.has(node)) return;
-    seen.add(node);
+  const unreadable = [];
+  // Keyed by node AND by the field context, because the same object reached
+  // from inside a publication-facing subtree must still be collected from even
+  // if it was already walked from outside one.
+  const seen = new Map();
+  const visited = (node, field) => {
+    const fields = seen.get(node);
+    if (fields) {
+      if (fields.has(field || '')) return true;
+      fields.add(field || '');
+      return false;
+    }
+    seen.set(node, new Set([field || '']));
+    return false;
+  };
+  const note = (here, field, value) => {
+    if (typeof value === 'string') { found.push({ path: here, field, value }); return; }
+    unreadable.push({ path: here, field,
+      valueType: value === null ? 'null' : typeof value });
+  };
+  const walk = (node, path, field) => {
+    if (!node || typeof node !== 'object' || visited(node, field)) return;
     if (Array.isArray(node)) {
-      node.forEach((v, i) => walk(v, path + '[' + i + ']'));
+      node.forEach((v, i) => {
+        const here = path + '[' + i + ']';
+        if (v && typeof v === 'object') walk(v, here, field);
+        else if (field) note(here, field, v);
+      });
       return;
     }
     for (const [key, value] of Object.entries(node)) {
       const here = path + '.' + key;
-      if (typeof value === 'string' && PUBLICATION_FACING_FIELDS.includes(key)) {
-        found.push({ path: here, field: key, value });
-      } else if (value && typeof value === 'object') {
-        walk(value, here);
-      }
+      const isField = PUBLICATION_FACING_FIELDS.includes(key);
+      const inner = isField ? key : field;
+      if (value && typeof value === 'object') walk(value, here, inner);
+      else if (inner) note(here, inner, value);
     }
   };
-  for (const [name, root] of Object.entries(sources)) walk(root, name);
+  for (const [name, root] of Object.entries(sources)) walk(root, name, null);
+  found.unreadableShapes = unreadable;
   return found;
 }
 
@@ -112,8 +213,9 @@ export function analyse(inventory, evidenceModule) {
  * function to drop warnings and asserts the suite fails (Human Gate §18) --
  * that is what stops advisory lint from becoming three silent accepts.
  */
-export function formatReport(results) {
+export function formatReport(results, unreadableShapes) {
   const lines = [];
+  const unreadable = unreadableShapes || [];
   const withWarnings = results.filter((r) => r.warnings.length > 0);
   const withHardErrors = results.filter((r) => r.hardError);
 
@@ -122,6 +224,14 @@ export function formatReport(results) {
   lines.push('inspected ' + results.length + ' publication-facing value(s): ' +
     PUBLICATION_FACING_FIELDS.join(', '));
   lines.push('');
+
+  if (unreadable.length) {
+    lines.push('UNREADABLE SHAPES (a publication-facing field this lint cannot check):');
+    for (const u of unreadable) {
+      lines.push('  ' + u.path + '  (' + u.field + ' held a ' + u.valueType + ')');
+    }
+    lines.push('');
+  }
 
   if (withHardErrors.length) {
     lines.push('HARD RULE VIOLATIONS (these must not reach publication):');
@@ -161,14 +271,31 @@ export function formatReport(results) {
 export function runLint(options) {
   const inventory = (options && options.inventory) || collectInventory(options && options.roots);
   const results = analyse(inventory, options && options.evidenceModule);
-  const lines = formatReport(results);
-  return { results, lines, hardErrorCount: results.filter((r) => r.hardError).length };
+  const unreadableShapes = inventory.unreadableShapes || [];
+  const lines = formatReport(results, unreadableShapes);
+  // Inspecting nothing is not a clean result. Without this, `inspected 0 /
+  // No advisory warnings` exits 0 and a CI job reading only the exit code
+  // cannot tell "nothing unsafe" from "nothing inspected" -- the same shape
+  // browser-outcome.mjs classifies as ERROR rather than PASS, and the shape
+  // this file's own header warns about.
+  const inspectedNothing = results.length === 0;
+  if (inspectedNothing) {
+    lines.push('');
+    lines.push('ERROR: 0 publication-facing values were inspected. That is not a');
+    lines.push('clean result, it is a failure to measure. Check that the config');
+    lines.push('directory is present and that the modules load.');
+  }
+  return {
+    results, lines, inspectedNothing, unreadableShapes,
+    hardErrorCount: results.filter((r) => r.hardError).length
+  };
 }
 
 const invokedDirectly = process.argv[1] &&
   fileURLToPath(import.meta.url) === process.argv[1];
 if (invokedDirectly) {
-  const { lines, hardErrorCount } = runLint();
+  const { lines, hardErrorCount, inspectedNothing, unreadableShapes } = runLint();
   console.log(lines.join('\n'));
-  process.exitCode = hardErrorCount > 0 ? 1 : 0;
+  process.exitCode =
+    (hardErrorCount > 0 || inspectedNothing || unreadableShapes.length > 0) ? 1 : 0;
 }

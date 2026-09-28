@@ -15,6 +15,7 @@
 // "equivalent" by reasoning about it instead of running it.
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { childEnvironment, classifySuiteRun } from './suite-verdict.mjs';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -38,12 +39,11 @@ process.on('SIGINT', () => { restoreAll(); process.exit(130); });
 // Build the differential corpus once; only survivors need it.
 let CORPUS = null;
 const corpus = () => {
-  if (!CORPUS) {
-    const ev = JSON.parse(execFileSync(process.execPath,
-      ['-e', 'console.log(JSON.stringify(require("' + ROOT + 'project-config/evidence.js").PRIVATE_DOCUMENT_EXTENSION_SOURCE))'],
-      { encoding: 'utf8' }));
-    CORPUS = buildCorpus(ev);
-  }
+  // No production input: the corpus used to be built from the extension source
+  // of the module under mutation, so a mutant that shrank that constant also
+  // shrank the corpus used to judge it (P2K-F01). Reading it also meant
+  // spawning a child, which is one more place for the environment to matter.
+  if (!CORPUS) CORPUS = buildCorpus();
   return CORPUS;
 };
 
@@ -75,6 +75,23 @@ function divergences(rel, mutatedText) {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
+// A note on what SURVIVED means in this output, because the word is stronger
+// than the measurement behind it for some mutants.
+//
+// For a mutant in project-config/evidence.js the differential probe can tell
+// SURVIVED from EQUIVALENT by measurement. For a mutant in any other file it
+// cannot, and this harness then prints SURVIVED with the detail "not
+// differentiable by the guard probe". The correct reading of that line is
+// SURVIVED_OR_EQUIVALENT_UNDETERMINED (P2K-F15) -- it is NOT a claim that the
+// behaviour demonstrably changed.
+//
+// The label is left as SURVIVED deliberately: the Human Gate's Phase 2K
+// decision separates the two claims in verification-spec.json
+// (mutation-kill ADMISSIBLE / mutation-equivalence-analysis DIAGNOSTIC_ONLY)
+// and directs that mutate.mjs behaviour not be changed merely to support
+// naming. Consequence to know: because an undetermined mutant counts in
+// tally.SURVIVED, this command EXITS 1 whenever one exists, which is the
+// current state of the tree (K2-03).
 const tally = { KILLED: 0, SURVIVED: 0, EQUIVALENT: 0, 'PATCH-MISS': 0, 'HARNESS ERROR': 0 };
 const report = (m, verdict, detail) => {
   tally[verdict]++;
@@ -94,20 +111,25 @@ try {
     const mutated = source.replace(m.find, m.replace);
     writeFileSync(ROOT + rel, mutated);
 
-    let out = '', crashed = false;
-    try { out = execFileSync('npm', ['test'], { cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 28 }); }
-    catch (e) {
+    // The child's environment is sanitised: NODE_TEST_CONTEXT leaking in makes
+    // `node --test` print no summary and exit 0 even when tests fail, which
+    // this harness used to read as "no test failed" (P2K-F09, measured).
+    let out = '', exitCode = 0, threw = false;
+    try {
+      out = execFileSync('npm', ['test'], {
+        cwd: ROOT, encoding: 'utf8', maxBuffer: 1 << 28,
+        env: childEnvironment(process.env)
+      });
+    } catch (e) {
+      threw = true;
       out = (e.stdout || '') + (e.stderr || '');
-      // A non-zero exit with no TAP output at all is a harness problem, not a kill.
-      if (!/^# (pass|fail)/m.test(out)) crashed = true;
+      exitCode = typeof e.status === 'number' ? e.status : -1;
     }
     writeFileSync(ROOT + rel, source);
 
-    if (crashed) { report(m, 'HARNESS ERROR', 'suite produced no TAP output'); continue; }
-
-    const failing = [...new Set(out.split('\n').filter((l) => l.startsWith('not ok'))
-      .map((l) => (l.split('- ')[1] || '').split(':')[0].trim()))];
-    if (failing.length) { report(m, 'KILLED', 'by ' + failing.join(', ')); continue; }
+    const run = classifySuiteRun({ stdout: out, exitCode, threw });
+    if (run.kind === 'HARNESS_ERROR') { report(m, 'HARNESS ERROR', run.detail); continue; }
+    if (run.kind === 'KILLED') { report(m, 'KILLED', run.detail); continue; }
 
     // No test failed. Decide SURVIVED vs EQUIVALENT by measurement.
     if (rel !== DEFAULT_FILE) {

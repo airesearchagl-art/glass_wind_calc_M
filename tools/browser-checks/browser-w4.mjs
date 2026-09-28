@@ -1,4 +1,13 @@
-import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+// Playwright is RESOLVED, not hardcoded (P2K-F06). This file used to open with
+// an absolute path into one machine's global module root, which meant a fresh
+// verifier could not run it -- see resolve-playwright.mjs for the candidates
+// and why each is discovered rather than listed.
+//
+// The resolve-and-classify logic lives in harness.mjs, shared by all five
+// harnesses. It was inline here for one wave, which is precisely why the other
+// four never got it: a repair that exists as one copy gets applied to one file
+// and reported as done.
+import { openBrowser, finishRun } from './harness.mjs';
 import { fileURLToPath } from 'url';
 // リポジトルートは**このファイルの位置から**求める。
 // 絶対パスを埋め込むと、harness は自分が入っている tree ではなく
@@ -15,6 +24,9 @@ function check(id, cond, detail) {
   if (cond) { pass++; results.push(`  ok   ${id}  ${detail ?? ''}`); }
   else { fail++; results.push(`  FAIL ${id}  ${detail ?? ''}`); }
 }
+
+const { chromium, playwrightSource } =
+  await openBrowser('browser-w4', () => ({ checksRun: pass + fail, failures: fail }));
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
@@ -175,6 +187,10 @@ check('B-facts', facts.verifiedCases === 0 && facts.mode === 'sample_default' &&
   JSON.stringify(facts));
 
 console.log(results.join('\n'));
-console.log(`\nbrowser: ${pass} pass / ${fail} fail`);
 await browser.close();
-process.exit(fail ? 1 : 0);
+
+// The outcome is classified, not inferred from a boolean. Zero checks with zero
+// failures is an ERROR, not a pass: a run that measured nothing would otherwise
+// read exactly like a clean one.
+console.log(`\nbrowser: ${pass} pass / ${fail} fail`);
+finishRun('browser-w4', pass + fail, fail, { playwrightSource });

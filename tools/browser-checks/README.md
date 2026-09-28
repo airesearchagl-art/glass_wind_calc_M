@@ -36,20 +36,44 @@ consequence — a copy whose `containsHtmlLikeTag` had been replaced with
 `return false;` still reported "BYPASSES: 0". After the fix the same sabotage
 reports 19 bypasses, and the real tree still reports 0.
 
-Requires Playwright with Chromium. These import it by absolute path:
+Requires Playwright with Chromium. **Do not edit an import line to point at it.**
+Every harness resolves Playwright through `resolve-playwright.mjs`, which tries,
+in order:
 
-    /opt/node22/lib/node_modules/playwright/index.mjs
+1. `PLAYWRIGHT_MODULE` — set it to an `index.mjs` if your layout is unusual
+2. a bare `playwright` specifier, for a checkout that has it installed
+3. `npm root -g`
+4. a root derived from the running interpreter, needing no npm at all
 
-because the repo has no `node_modules` and no build step — a deliberate
-property of this project, not an oversight. On a machine where Playwright sits
-elsewhere, change that import line. The harnesses are otherwise dependency-free
-and read `index.html` over `file://`.
+The repo has no `node_modules` and no build step, which is a deliberate property
+of this project. Through Wave 4 these files imported one machine's absolute path
+instead, and `browser-w4.mjs` was the only one converted — the other four were
+found still hardcoded by an independent verifier while the finding was recorded
+as closed. All five now share `harness.mjs`.
+
+The harnesses are otherwise dependency-free and read `index.html` over `file://`.
+
+## Exit codes
+
+They do **not** simply "exit non-zero on failure". Four outcomes are distinct,
+because §18 requires that "nothing was measured" never be reported as a result:
+
+| exit | outcome | meaning |
+|---|---|---|
+| 0 | `PASS` | measured, everything passed |
+| 1 | `FAIL` | measured, something failed |
+| 3 | `UNVERIFIED` | could not start — no Playwright, no browser. **Nothing was measured.** |
+| 4 | `ERROR` | started and then broke, or ran zero checks |
+
+Zero checks with zero failures is `ERROR`, not `PASS`. Each harness also prints a
+JSON object naming its `outcome`, `checksRun` and `failures`, so a caller does
+not have to infer any of this from the exit status alone.
 
 ## Reading the numbers
 
-These are harnesses, not a framework — they exit non-zero on failure and print
-a count. Two traps cost real debugging time in this phase, both recorded so the
-next reader does not repeat them:
+These are harnesses, not a framework. See **Exit codes** above for what a
+non-zero status actually means. Two traps cost real debugging time in this phase,
+both recorded so the next reader does not repeat them:
 
 - `div.innerHTML` silently drops table-scoped tags (`<td>`), so "0 elements"
   does not mean "not a tag". `parser-boundary.mjs` parses in both a `div` and a

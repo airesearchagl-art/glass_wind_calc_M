@@ -237,15 +237,24 @@ test('Evidence: verified valueにはevidence.level==="primary"かつevidence.che
   assert.doesNotThrow(() =>
     MiyoshiProjectConfig.assertEvidenceConsistency('verified', { level: 'primary', checkedAt: '2026-09-17' })
   );
+  // P2K-F08 REQUIRED_FIX (found by the final independent review, which showed my
+  // own triage had labelled the third one BENIGN on a justification that was
+  // wrong twice: the input is `null`, not a valid fixture with one field broken,
+  // and another failure IS reachable). Measured: with the
+  // `evidence metadata is required` guard disabled, this call throws
+  // `evidence must be a plain object` from assertOrdinaryObject on the very
+  // next line, and the whole file stayed green at 51 pass / 0 fail. Each
+  // assertion now names the guard it is about.
   assert.throws(() =>
-    MiyoshiProjectConfig.assertEvidenceConsistency('verified', { level: 'indirect', checkedAt: '2026-09-17' })
-  );
+    MiyoshiProjectConfig.assertEvidenceConsistency('verified', { level: 'indirect', checkedAt: '2026-09-17' }),
+    /requires evidence\.level === "primary"/, 'level の guard');
   assert.throws(() =>
-    MiyoshiProjectConfig.assertEvidenceConsistency('verified', { level: 'primary', checkedAt: null })
-  );
+    MiyoshiProjectConfig.assertEvidenceConsistency('verified', { level: 'primary', checkedAt: null }),
+    /requires evidence\.checkedAt to be set/, 'checkedAt の guard');
   assert.throws(() =>
-    MiyoshiProjectConfig.assertEvidenceConsistency('verified', null)
-  );
+    MiyoshiProjectConfig.assertEvidenceConsistency('verified', null),
+    /evidence metadata is required/,
+    'null は metadata guard で落ちる——assertOrdinaryObject ではなく');
 });
 
 test('Evidence: unverifiedなdimensionはprimary evidenceなしでも成立する', () => {
@@ -566,10 +575,17 @@ test('RF-02: assertPublicSafeEvidenceText() が既知の非公開パターン（
 
 test('RF-02: assertPublicSafeEvidenceText() は非空文字列かつ既知パターンを含まないテキストを受理する', () => {
   assert.doesNotThrow(() => MiyoshiProjectConfig.assertPublicSafeEvidenceText('社内資料により確認済み（固有名詞・URLなし）', 'test'));
-  assert.throws(() => MiyoshiProjectConfig.assertPublicSafeEvidenceText('', 'test'));
-  assert.throws(() => MiyoshiProjectConfig.assertPublicSafeEvidenceText(null, 'test'));
-  assert.throws(() => MiyoshiProjectConfig.assertPublicSafeEvidenceText(undefined, 'test'));
-  assert.throws(() => MiyoshiProjectConfig.assertPublicSafeEvidenceText(123, 'test'));
+  // P2K-F08. The final independent review measured that for null / undefined /
+  // 123 a TypeError is also reachable once the non-empty-string guard is gone
+  // (`… of null (reading 'length')`, `text.replace is not a function`). No
+  // verification gap results, because the '' case in the same block stops
+  // throwing and fails the test — but the triage cell claiming "no other
+  // reachable failure" was wrong, so these are pinned explicitly.
+  for (const bad of ['', null, undefined, 123]) {
+    assert.throws(() => MiyoshiProjectConfig.assertPublicSafeEvidenceText(bad, 'test'),
+      /test must be a non-empty string/,
+      '非文字列・空文字列の guard: ' + JSON.stringify(bad));
+  }
 });
 
 test('RF-02: makeEvidence() はpublicDescriptionへの既知の非公開パターン混入を例外で拒否する（factory入口でのpublic-safe boundary）', () => {

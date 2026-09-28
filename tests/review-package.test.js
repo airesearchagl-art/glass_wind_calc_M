@@ -300,12 +300,14 @@ test('Q: 優劣を自動判定する語を持たない', () => {
 // ── R / S ────────────────────────────────────────────────────
 test('R: Review JSON は Workspace として取り込めない', () => {
   const rev = Review.buildReviewPackage({ workspace: makeWorkspace() });
-  assert.throws(() => Workspace.deserializeWorkspace(JSON.stringify(rev)));
+  assert.throws(() => Workspace.deserializeWorkspace(JSON.stringify(rev)),
+    /unexpected field/, 'Review JSON は Workspace として拒否される'); // P2K-F08 AMBIGUOUS→特定化
 });
 
 test('S: Review JSON は Project Input Package としても取り込めない', () => {
   const rev = Review.buildReviewPackage({ workspace: makeWorkspace() });
-  assert.throws(() => ProjectInput.deserialize(JSON.stringify(rev)));
+  assert.throws(() => ProjectInput.deserialize(JSON.stringify(rev)),
+    /unknown field/, 'Review JSON は Project Input として拒否される'); // P2K-F08
 });
 
 test('§17: import系のAPIを一切exportしない', () => {
@@ -844,8 +846,10 @@ test('W3-8 / W3-9 / W3-10: Review JSON は入力へ戻れない', () => {
   const rev = Review.buildReviewPackage({ workspace: makeWorkspace() });
   const json = Review.serializeReviewPackage(rev);
 
-  assert.throws(() => Workspace.deserializeWorkspace(json));
-  assert.throws(() => ProjectInput.deserialize(json));
+  assert.throws(() => Workspace.deserializeWorkspace(json),
+    /unexpected field/, 'Review JSON は Workspace へ戻らない'); // P2K-F08
+  assert.throws(() => ProjectInput.deserialize(json),
+    /unknown field/, 'Review JSON は Project Input へ戻らない'); // P2K-F08
   // parseして戻しても、canonical exporterは受け取らない
   assert.throws(() => Review.serializeReviewPackage(JSON.parse(json)),
     /requires a Review Package created by buildReviewPackage/);
