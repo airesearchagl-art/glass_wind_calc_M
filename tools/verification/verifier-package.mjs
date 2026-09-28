@@ -37,10 +37,99 @@ export const FORBIDDEN_PACKAGE_KEYS = Object.freeze([
 
 function fail(message) { throw new Error('verifier-package: ' + message); }
 
+/** A resolved content-tree SHA. Nothing else counts as one. */
+const TREE_SHA = /^[0-9a-f]{40}$/;
+
+/**
+ * The content-tree SHA of a revision, or null when it cannot be resolved.
+ *
+ * Content identity, not ancestry. A squash merge produces a different commit
+ * history carrying the same tree, so commit SHAs and parentage say nothing
+ * useful about whether the verifier is being handed different content. The
+ * tree is what it is being handed.
+ */
+export function resolveTreeSha(rev) {
+  try {
+    const out = execFileSync('git', ['rev-parse', '--verify', '--quiet', rev + '^{tree}'],
+      { cwd: ROOT, encoding: 'utf8' }).trim();
+    return TREE_SHA.test(out) ? out : null;
+  } catch (e) { return null; }
+}
+
+/**
+ * CLEAN, DIRTY, or UNAVAILABLE. Three states, because two would repeat the
+ * defect: `git()` below collapses "succeeded and printed nothing" into
+ * UNAVAILABLE, and a clean tree prints nothing. Everything this package says
+ * about content is about COMMITTED content, so a verifier standing in a
+ * modified checkout needs to be told that rather than left to infer it.
+ */
+export function workingTreeStatus() {
+  try {
+    const out = execFileSync('git', ['status', '--porcelain'],
+      { cwd: ROOT, encoding: 'utf8' });
+    return out.trim() === '' ? 'CLEAN' : 'DIRTY';
+  } catch (e) { return UNAVAILABLE; }
+}
+
+/**
+ * Decide whether an empty changed-file list may be reported. Pure, so the
+ * decision is testable without constructing a git history for every case.
+ *
+ * Three states, kept mechanically distinct (§24):
+ *
+ *   files > 0                           the changed files
+ *   files = 0 and target tree = base    [] is the truth: the target's content
+ *                                       IS the selected base's content
+ *   files = 0 and trees differ/unknown  hard error. An empty list here would
+ *                                       report a real content delta, or a
+ *                                       comparison that did not happen, as
+ *                                       "nothing changed"
+ *
+ * The original guard rejected every empty list, on the premise that the branch
+ * under verification is known to carry changes. That premise holds on a live
+ * feature branch and is false on a merged main, where the target IS the base
+ * and [] is the correct answer — which is how a green branch turned main red
+ * the moment it merged. The safety property the guard existed for is kept: a
+ * failed lookup still never reaches a verifier disguised as an empty list.
+ */
+export function validateChangedFiles(comparison) {
+  const c = comparison || {};
+  const files = c.files;
+  const against = c.baseRef === undefined || c.baseRef === null
+    ? '(unspecified base)' : String(c.baseRef);
+  if (!Array.isArray(files)) {
+    fail('changed-file list is not an array against ' + against +
+      '; refusing to guess what was compared');
+  }
+  if (files.length > 0) {
+    if (files.some((f) => typeof f !== 'string' || f.trim() === '')) {
+      fail('changed-file list contains a blank or non-string entry against ' +
+        against + '; a path that names nothing is not a changed file');
+    }
+    return files;
+  }
+  // Shape, not truthiness. `UNAVAILABLE` is the string 'unavailable': truthy,
+  // and equal to itself, so a truthiness test would have read two failed
+  // resolutions as "the trees match" -- the same empty-means-fine confusion
+  // this function exists to end, one level up.
+  if (!TREE_SHA.test(String(c.targetTreeSha)) || !TREE_SHA.test(String(c.baseTreeSha))) {
+    fail('changed-file list is empty against ' + against + ' and the content ' +
+      'trees could not be resolved, so a legitimate zero delta cannot be ' +
+      'told apart from a comparison that failed');
+  }
+  if (c.targetTreeSha !== c.baseTreeSha) {
+    fail('changed-file list is empty against ' + against + ' but the content ' +
+      'trees differ (target ' + c.targetTreeSha + ', base ' + c.baseTreeSha +
+      '); an empty list would report a real content delta as no change');
+  }
+  return [];
+}
+
 /**
  * Changed files versus the base. Resolved from git; a failure to resolve is
  * reported, never returned as an empty list (§24) — "nothing changed" and
- * "git could not be read" must not look identical to a verifier.
+ * "git could not be read" must not look identical to a verifier. An empty list
+ * survives only when the two content trees are identical.
  */
 export function resolveChangedFiles(baseRef) {
   let out;
@@ -52,9 +141,12 @@ export function resolveChangedFiles(baseRef) {
   }
   const files = out.split('\n').map((s) => s.trim()).filter(Boolean).sort();
   if (files.length === 0) {
-    fail('changed-file list is empty against ' + baseRef +
-      '; this branch is expected to carry Phase 2K changes, so an empty list ' +
-      'means the comparison is wrong rather than that nothing changed');
+    return validateChangedFiles({
+      files: files,
+      baseRef: baseRef,
+      targetTreeSha: resolveTreeSha('HEAD'),
+      baseTreeSha: resolveTreeSha(baseRef)
+    });
   }
   return files;
 }
@@ -72,6 +164,8 @@ export function buildVerifierPackage(options) {
 
   const targetSha = git(['rev-parse', 'HEAD']);
   const baseSha = git(['rev-parse', baseRef]);
+  const targetTreeSha = resolveTreeSha('HEAD');
+  const baseTreeSha = resolveTreeSha(baseRef);
   if (targetSha === UNAVAILABLE || baseSha === UNAVAILABLE) {
     fail('cannot resolve target or base SHA; refusing to emit a package that ' +
       'cannot say which tree it describes');
@@ -113,9 +207,28 @@ export function buildVerifierPackage(options) {
     branch: git(['rev-parse', '--abbrev-ref', 'HEAD']),
     targetSha: targetSha,
     baseSha: baseSha,
+    targetTreeSha: targetTreeSha === null ? UNAVAILABLE : targetTreeSha,
+    baseTreeSha: baseTreeSha === null ? UNAVAILABLE : baseTreeSha,
     taskPacketDigest: taskPacketDigest,
 
     changedFiles: resolveChangedFiles(baseRef),
+    workingTree: workingTreeStatus(),
+    // Emitted so that `changedFiles: []` is auditable rather than ambiguous.
+    // Reading an empty list alone, a verifier cannot tell "identical content"
+    // from "the comparison broke" — the same shape of unanswerable question
+    // this package exists to remove. The note names which comparison each
+    // field is, because they are not the same one and can disagree.
+    changedFilesNote:
+      'changedFiles is the merge-base (three-dot) delta of the committed ' +
+      'target against the base ref; targetTreeSha and baseTreeSha are the two ' +
+      'endpoints\' own content trees. They answer different questions, so a ' +
+      'non-empty list alongside identical trees is possible and is not a ' +
+      'contradiction. An empty changedFiles list means the committed target ' +
+      'content equals the committed base content, which is the ordinary state ' +
+      'once this work has been merged. It never means the comparison failed: ' +
+      'an unresolvable base, or an empty list whose content trees differ, is ' +
+      'a hard error and no package is emitted at all. Uncommitted changes are ' +
+      'outside every one of these comparisons; see workingTree.',
 
     verificationCommands: verificationCommands,
 

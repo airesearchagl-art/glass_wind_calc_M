@@ -46,35 +46,133 @@ test('P2K-V01: the package carries no expected or recommended verdict', async ()
   assert.match(pkg.verifierNote, /[Dd]isagree/);
 });
 
-test('P2K-V02: changed files come from git and an empty list is an error', async () => {
+test('P2K-V02: changed files come from git; [] survives only when the content trees match', async () => {
   const m = await load();
+  const cp = require('node:child_process');
+  const repoRoot = path.join(__dirname, '..');
+  const GIT_ENV = Object.assign({}, process.env, {
+    GIT_AUTHOR_NAME: 'p2k-test', GIT_AUTHOR_EMAIL: 'p2k@example.invalid',
+    GIT_COMMITTER_NAME: 'p2k-test', GIT_COMMITTER_EMAIL: 'p2k@example.invalid',
+    GIT_AUTHOR_DATE: '2026-09-28T00:00:00Z', GIT_COMMITTER_DATE: '2026-09-28T00:00:00Z'
+  });
+  const git = (args) => cp.execFileSync('git', args,
+    { cwd: repoRoot, encoding: 'utf8', env: GIT_ENV }).trim();
+  const treeOf = (rev) => git(['rev-parse', '--verify', rev + '^{tree}']);
+
   const pkg = m.buildVerifierPackage();
   assert.equal(Array.isArray(pkg.changedFiles), true);
-  assert.equal(pkg.changedFiles.length > 0, true);
   // Sorted, so the package is diffable (K1-12).
   assert.deepEqual(pkg.changedFiles, pkg.changedFiles.slice().sort());
 
-  // Positive control (§33): this branch is known to carry the Phase 2K Run
-  // Artifact, so a resolver that silently returned [] would fail here.
-  assert.equal(pkg.changedFiles.some((f) => f.indexOf('.agent-run/LR-20260927-GLASS-P2K/') === 0),
-    true, 'the Phase 2K Run Artifact must appear in changedFiles');
-  assert.equal(pkg.changedFiles.some((f) => f === '.agent-run/LR-20260927-GLASS-P2K/INSTRUMENT_INVENTORY.md'),
-    true, 'a specific known changed file must be present (K1-08)');
+  // NOT `changedFiles.length > 0`. That was asserted here as a universal
+  // invariant for three waves. It is a property of an unmerged feature branch,
+  // not of the package, and the moment Phase 2K merged it turned main red: on a
+  // merged main the target IS the base and [] is the correct answer. The real
+  // invariant is the contract -- the list is either non-empty, or empty BECAUSE
+  // the content is identical.
+  if (pkg.changedFiles.length === 0) {
+    // Checked against git directly, not against the package's own other field.
+    // `targetTreeSha === baseTreeSha` alone is tautological here -- the list is
+    // empty BECAUSE they are equal, so the two can only ever agree, which is
+    // the shape of self-agreement this campaign exists to stop.
+    assert.equal(pkg.targetTreeSha, treeOf('HEAD'),
+      'targetTreeSha must be the tree git reports for HEAD');
+    assert.equal(pkg.baseTreeSha, treeOf('origin/main'),
+      'baseTreeSha must be the tree git reports for the base');
+    assert.equal(pkg.targetTreeSha, pkg.baseTreeSha,
+      'an empty changedFiles list is legitimate only when the content trees match');
+  } else {
+    for (const f of pkg.changedFiles) {
+      assert.equal(typeof f, 'string');
+      assert.equal(f.length > 0, true, 'a changed-file entry must not be blank');
+    }
+  }
+  assert.match(pkg.changedFilesNote, /never means the comparison failed/i);
+  // Everything the package says about content is about COMMITTED content, so a
+  // verifier standing in a modified checkout has to be told rather than left to
+  // infer it. Three states, because a clean tree and a failed call both print
+  // nothing and collapsing them is the very defect this file is about.
+  assert.equal(['CLEAN', 'DIRTY', 'unavailable'].includes(pkg.workingTree), true,
+    'workingTree must be CLEAN / DIRTY / unavailable, got ' + JSON.stringify(pkg.workingTree));
+  assert.equal(m.workingTreeStatus(), pkg.workingTree);
 
-  // Two distinct failure modes, each pinned by its own message. Asserting only
-  // "it throws" let mutation K1-08 survive: removing the empty-list guard
-  // changed nothing, because the unresolvable-ref case throws earlier for a
-  // different reason and satisfied a loose regex.
-  //
-  //   (a) git SUCCEEDS and returns nothing -> the empty-list guard must fire.
-  //       HEAD...HEAD is the case that reaches it.
-  assert.throws(() => m.resolveChangedFiles('HEAD'),
-    /changed-file list is empty/,
-    'an empty-but-successful diff must be an error, never a silent [] (K1-08)');
-  //   (b) git FAILS -> a different, explicit error.
+  // --- Case A: a legitimate same-tree zero delta must not throw -------------
+  // This is the exact call that failed on merged main.
+  assert.deepEqual(m.resolveChangedFiles('HEAD'), [],
+    'a same-tree comparison must return [], not an error');
+  assert.equal(treeOf('HEAD'), m.resolveTreeSha('HEAD'));
+
+  // Same tree, DIFFERENT commit: the squash-merge shape, where ancestry and
+  // content disagree, and the reason the decision is made on trees rather than
+  // on commit SHAs. A dangling commit object; no ref is created or moved.
+  const sameTree = git(['commit-tree', treeOf('HEAD'), '-p', git(['rev-parse', 'HEAD']),
+    '-m', 'P2K-V02 same-tree control']);
+  assert.match(sameTree, /^[0-9a-f]{40}$/);
+  assert.notEqual(sameTree, git(['rev-parse', 'HEAD']),
+    'the control must be a different commit, or it tests nothing');
+  assert.equal(treeOf(sameTree), treeOf('HEAD'), 'the control must carry the same tree');
+  assert.deepEqual(m.resolveChangedFiles(sameTree), [],
+    'the same content under a different commit is still a legitimate zero delta');
+
+  // --- Case B: an unresolvable base is reported, never returned as [] -------
   assert.throws(() => m.resolveChangedFiles('refs/heads/definitely-not-a-real-ref-p2k'),
     /cannot resolve changed files/,
     'an unresolvable base must be reported as unresolvable, not as empty');
+
+  // --- Case C: a real content delta still comes back, sorted ---------------
+  const revs = git(['rev-list', '--max-count=40', 'HEAD']).split('\n').filter(Boolean);
+  const differing = revs.find((r) => treeOf(r) !== treeOf('HEAD'));
+  assert.ok(differing, 'no ancestor carries a differing tree: Case C could not be built');
+  const delta = m.resolveChangedFiles(differing);
+  assert.equal(delta.length > 0, true, 'a real content delta must not come back empty');
+  assert.deepEqual(delta, delta.slice().sort());
+
+  // --- Case D: an empty diff whose trees DISAGREE is a hard error -----------
+  // Measured against real git, not only the pure helper: a commit whose parent
+  // is HEAD but whose tree is an older one. `git diff X...HEAD` compares the
+  // merge base (HEAD) with HEAD, so the diff is empty while the content plainly
+  // differs. Returning [] here is the silent failure K1-08 exists to prevent,
+  // and it is the half of that guard this hotfix must not weaken.
+  const wrongTree = git(['commit-tree', treeOf(differing), '-p', git(['rev-parse', 'HEAD']),
+    '-m', 'P2K-V02 suspicious-empty control']);
+  assert.notEqual(treeOf(wrongTree), treeOf('HEAD'));
+  assert.equal(git(['diff', '--name-only', wrongTree + '...HEAD']), '',
+    'the control must actually produce an empty diff, or it proves nothing');
+  assert.throws(() => m.resolveChangedFiles(wrongTree),
+    /content trees differ/,
+    'an empty list whose content trees differ must be a hard error (K1-08)');
+
+  // --- The decision itself, isolated from git ------------------------------
+  const A = 'a'.repeat(40), B = 'b'.repeat(40);
+  assert.deepEqual(m.validateChangedFiles({ files: ['x'], baseRef: 'r' }), ['x']);
+  assert.deepEqual(m.validateChangedFiles(
+    { files: [], baseRef: 'r', targetTreeSha: A, baseTreeSha: A }), []);
+  assert.throws(() => m.validateChangedFiles(
+    { files: [], baseRef: 'r', targetTreeSha: A, baseTreeSha: B }),
+    /content trees differ/);
+  // An unknown tree must not be read as "identical" -- that would reintroduce
+  // the original defect under a new name.
+  assert.throws(() => m.validateChangedFiles(
+    { files: [], baseRef: 'r', targetTreeSha: null, baseTreeSha: A }),
+    /trees could not be resolved/);
+  assert.throws(() => m.validateChangedFiles(
+    { files: [], baseRef: 'r', targetTreeSha: A, baseTreeSha: null }),
+    /trees could not be resolved/);
+  assert.throws(() => m.validateChangedFiles({ files: null, baseRef: 'r' }),
+    /not an array/);
+  // A tree SHA is checked by shape, not by truthiness. UNAVAILABLE is the
+  // string 'unavailable' -- truthy, and equal to itself -- and this helper is
+  // exported one function away from the place that writes it, so a truthiness
+  // test would read two failed resolutions as "the trees match".
+  assert.throws(() => m.validateChangedFiles(
+    { files: [], baseRef: 'r', targetTreeSha: 'unavailable', baseTreeSha: 'unavailable' }),
+    /trees could not be resolved/,
+    'the UNAVAILABLE sentinel must not be readable as a resolved tree');
+  assert.throws(() => m.validateChangedFiles(
+    { files: [], baseRef: 'r', targetTreeSha: 'xyz', baseTreeSha: 'xyz' }),
+    /trees could not be resolved/, 'equal non-SHAs are not matching trees');
+  assert.throws(() => m.validateChangedFiles({ files: [''], baseRef: 'r' }),
+    /blank or non-string entry/, 'a path that names nothing is not a changed file');
 });
 
 test('P2K-V03: the package states which evidence is admissible', async () => {
