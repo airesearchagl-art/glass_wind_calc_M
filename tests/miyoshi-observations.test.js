@@ -241,7 +241,9 @@ test('P2L-A06: closure の件数を構造から導出し、結果と Human Gate 
   });
   assert.equal(byId.pane_visible_dimensions, 'BLOCKED');
 
-  // 8 case scope すべてが、ちょうど pane W/H の欠落だけで BLOCKED
+  // 8 case scope すべてが、ちょうど pane W/H の Observation 欠落だけで BLOCKED。
+  // これは closure の機械的な結果（2L-A では W/H を意図的に投入していない）であって、
+  // pane 寸法の一次資料が無いという意味ではない。
   r.caseReadiness.forEach((c) => {
     assert.equal(c.readinessStatus, 'BLOCKED', JSON.stringify(c.scope));
     assert.deepEqual(c.missingFactKeys.slice().sort(), ['pane_height_mm', 'pane_width_mm'],

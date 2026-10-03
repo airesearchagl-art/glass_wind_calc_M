@@ -21,7 +21,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 const Closure = require('../project-config/evidence-closure.js');
 const Evidence = require('../project-config/evidence.js');
@@ -758,23 +760,210 @@ test('P2J-C37: Evidence validator を複製していない', () => {
 // §27 / §36 現状は一切動かさない
 // ============================================================
 
-test('P2J-C38: 実案件Observationは指定の intake module にだけ存在する', () => {
+// ============================================================
+// Observation payload の所在（Phase 2L-A / RF-14-01）
+// ============================================================
+//
+// 「指定 module 以外に実案件 Observation が存在しない」を、ファイル名ではなく
+// 内容と export の形で判定する。初版の P2J-C38 はファイル名 /observation/i だけを
+// 見ており、別名の data module を素通りさせた。その状態で「2 つ目の Observation
+// ファイルは落ちる」と書いていたのは、実測より強い主張だった。
+//
+// 次のどちらかが立てば、その module を Observation payload の保持者とみなす。
+//
+//   export-shape : export を辿り、Observation そのものである object を探す。
+//                  observationType が canonical 値の object、または closure fact key と
+//                  payload 専用 field（observedValue）を併せ持つ object。type tag を
+//                  付けずに保持する形も拾う。
+//   contract-ref : source が payload 契約を参照している（observationType の値、
+//                  または observedValue）。関数の中で組み立てる builder は export の
+//                  形に現れないので、こちらで拾う。
+//
+// schema の定義元は data として扱わない。ただし免除は contract-ref に対してだけで、
+// 定義元が payload を export すれば export-shape で落ちる。定義元かどうかは名前でも
+// export の似姿でもなく、**この test が Closure として読み込んだ module object そのもの**
+// かどうかで決める。OBSERVATION_TYPE と normalizeObservationSet を真似た decoy は
+// 免除されない（P2J-C38b）。
+//
+// 限界: 静的な検査なので、field 名を実行時に組み立てる等の意図的な難読化は越えられる。
+// その場合でも runtime の consumer は空集合しか評価しない（P2L-A12）。
+const DESIGNATED_INTAKE = 'project-config/miyoshi-observations.js';
+const OBSERVATION_PAYLOAD_FIELD = 'observedValue';
+
+function observationExportHits(moduleExports) {
+  const hits = [];
+  const seen = new WeakSet();
+  (function walk(node, at) {
+    if (!node || typeof node !== 'object' || seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) { node.forEach((v, i) => walk(v, at + '[' + i + ']')); return; }
+    const own = (k) => Object.prototype.hasOwnProperty.call(node, k);
+    const tagged = own('observationType') && node.observationType === Closure.OBSERVATION_TYPE;
+    const shaped = own('factKey') && Closure.CLOSURE_FACT_KEYS.includes(node.factKey) &&
+      own(OBSERVATION_PAYLOAD_FIELD);
+    if (tagged || shaped) hits.push(at);
+    Object.keys(node).forEach((k) => walk(node[k], at + '.' + k));
+  }(moduleExports, 'exports'));
+  return hits;
+}
+
+function scanObservationPayloads(baseDir, relFiles) {
+  return relFiles.map((rel) => {
+    const abs = path.join(baseDir, rel);
+    const moduleExports = require(abs);
+    const src = fs.readFileSync(abs, 'utf8');
+    const exportHits = observationExportHits(moduleExports).length;
+    const contractRef = src.includes(Closure.OBSERVATION_TYPE) ||
+      src.includes(OBSERVATION_PAYLOAD_FIELD);
+    const schemaOwner = moduleExports === Closure;
+    return {
+      file: rel, exportHits, contractRef, schemaOwner,
+      holdsPayload: exportHits > 0 || (contractRef && !schemaOwner)
+    };
+  });
+}
+
+/** git の index から機械的に列挙する。repo 直下の JS と project-config 以下。 */
+function trackedShippedJs(repoRoot) {
+  return execFileSync('git', ['ls-files', '-z', '--', '*.js'], { cwd: repoRoot, encoding: 'utf8' })
+    .split('\0')
+    .filter(Boolean)
+    .filter((f) => !f.includes('/') || f.startsWith('project-config/'))
+    .sort();
+}
+
+test('P2J-C38: 実案件Observation payload は指定の intake module にだけ存在する（内容で判定）', () => {
   // Phase 2J はここで「実案件Observationのデータファイルを置かない」を固定していた。
-  // Phase 2L-A で一次資料に基づく Observation の取り込みが Human Gate により承認されたため、
-  // 不変条件を「存在しない」から「指定の 1 ファイルにだけ存在する」へ移す。
-  // ファイル名を変えてこの検査を避けることはしない。2 つ目の Observation ファイルは
-  // 依然としてここで落ちる。
+  // Phase 2L-A の取り込みが Human Gate で承認されたため、不変条件を
+  // 「指定の 1 module にだけ存在する」へ移す。判定は内容と export の形で行う。
   const repoRoot = path.join(__dirname, '..');
-  const suspicious = fs.readdirSync(repoRoot)
+  const files = trackedShippedJs(repoRoot);
+
+  // oracle の健全性: 列挙が壊れていれば以下の検査は空虚になる
+  [DESIGNATED_INTAKE, 'project-config/evidence-closure.js', 'project-config/miyoshi.js',
+    'project-config/evidence.js', 'calc.js'].forEach((f) => {
+    assert.equal(files.includes(f), true, 'tracked population に ' + f + ' が無い——列挙が壊れている');
+  });
+
+  const scan = scanObservationPayloads(repoRoot, files);
+  assert.deepEqual(scan.filter((r) => r.holdsPayload).map((r) => r.file), [DESIGNATED_INTAKE],
+    'Observation payload を持つ module が指定の intake module 以外にある: ' +
+    JSON.stringify(scan.filter((r) => r.holdsPayload)));
+
+  // 検出器が payload を実際に見ている対照: 指定 module の全件が export-shape で拾える
+  const designated = scan.find((r) => r.file === DESIGNATED_INTAKE);
+  assert.equal(designated.exportHits, require('../' + DESIGNATED_INTAKE).observations.length);
+  assert.equal(designated.exportHits > 0, true);
+
+  // schema の定義元は data 扱いしない。免除が実際に効いている対照（契約は参照している）
+  const owners = scan.filter((r) => r.schemaOwner);
+  assert.equal(owners.length, 1, 'canonical schema module が population に 1 つだけあること');
+  assert.equal(owners[0].exportHits, 0, 'schema の定義元が payload を export している');
+  assert.equal(owners[0].contractRef, true);
+  assert.equal(owners[0].holdsPayload, false);
+
+  // ファイル名で逃げないこと（初版の検査も残す。上の内容検査を置き換えるものではない）
+  const byName = fs.readdirSync(repoRoot)
     .concat(fs.readdirSync(path.join(repoRoot, 'project-config')).map((f) => 'project-config/' + f))
     .filter((f) => /observation/i.test(f));
-  assert.deepEqual(suspicious, ['project-config/miyoshi-observations.js'],
-    '実案件Observationのデータは指定の intake module 以外に置かない');
-  // moduleが現行値をObservationとして埋め込んでいないこと
+  assert.deepEqual(byName, [DESIGNATED_INTAKE]);
+
+  // closure module は現行値を Observation として埋め込んでいない
   [1297, 1525, 1695, 1729, 918, 1122].forEach((v) => {
     assert.equal(CLOSURE_SRC.includes(String(v)), false,
       '現行圧力値 ' + v + ' が closure module に現れてはならない');
   });
+});
+
+test('P2J-C38b: 名前に observation を含まない decoy を内容で検出する（負の対照）', () => {
+  // 値は明らかに人工的なもの（987 / 2345）を使う。実案件の値を fixture にしない。
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'p2j-c38b-'));
+  const DECOYS = {
+    // export-shape だけで立つ: source に type の literal も observedValue も書かない
+    'pressure-facts.js': [
+      "var t = ['evidence', 'closure', 'observation'].join('_');",
+      "var v = ['observed', 'Value'].join('');",
+      "var o = { schemaVersion: 1, observationType: t, factKey: 'positive_pressure',",
+      "  scope: { floor: '2' }, unit: 'N/m2', sourceReference: null };",
+      'o[v] = 2345;',
+      'module.exports = { rows: [o] };'
+    ].join('\n'),
+    // export-shape の「type tag」規則だけで立つ: 現行 schema に無い fact key を
+    // Observation と名乗って持つ形。Phase 2L-B 以前に pane を開口ごとに持ち込もうとすると
+    // この形になる。observedValue も type の literal も source に書かない。
+    'opening-panes.js': [
+      "var t = ['evidence', 'closure', 'observation'].join('_');",
+      "module.exports = { panes: [{ observationType: t, factKey: 'pane_size_by_opening',",
+      '  widthMm: 987, heightMm: 2345 }] };'
+    ].join('\n'),
+    // export-shape の「type tag 無し」規則だけで立つ: observationType を持たず、
+    // source に literal も observedValue も書かない
+    'height-table.js': [
+      "var v = ['observed', 'Value'].join('');",
+      "var row = { factKey: 'evaluation_height', scope: { floor: '2' } };",
+      'row[v] = 12.345;',
+      'module.exports = { heights: [row] };'
+    ].join('\n'),
+    // contract-ref だけで立つ: 関数の中で組み立て、export には payload が無い
+    'wind-notes.js': [
+      'module.exports = {',
+      '  build: function () {',
+      '    var C = globalThis.EvidenceClosure;',
+      "    return [{ observationType: C.OBSERVATION_TYPE, factKey: 'negative_pressure',",
+      "      scope: { zone: 'corner' }, observedValue: 987 }];",
+      '  }',
+      '};'
+    ].join('\n'),
+    // 指定 module を別名にしただけのもの: 名前を変えても逃げられない
+    'renamed-intake.js': fs.readFileSync(path.join(__dirname, '..', DESIGNATED_INTAKE), 'utf8'),
+    // schema の定義元の export を真似る: 免除は名前でも似姿でも得られない
+    'fake-schema.js': [
+      "var TYPE = 'evidence_closure_observation';",
+      'module.exports = {',
+      '  OBSERVATION_TYPE: TYPE,',
+      '  normalizeObservationSet: function (x) { return x; },',
+      "  seed: function () { return [{ observationType: TYPE, factKey: 'pane_width_mm', observedValue: 987 }]; }",
+      '};'
+    ].join('\n')
+  };
+  // 過検出しない対照: factKey という名の field を持つ普通の config
+  const CONTROL = {
+    'plain-config.js': [
+      "module.exports = { factKey: 'positive_pressure',",
+      "  wind: { positivePressureByFloor: { '2': { value: 2345, unit: 'N/m2' } } } };"
+    ].join('\n')
+  };
+  const all = Object.assign({}, DECOYS, CONTROL);
+  try {
+    Object.entries(all).forEach(([name, src]) => fs.writeFileSync(path.join(dir, name), src));
+    Object.keys(all).forEach((name) => assert.equal(/observation/i.test(name), false, name));
+
+    const scan = scanObservationPayloads(dir, Object.keys(all).sort());
+    const by = Object.fromEntries(scan.map((r) => [r.file, r]));
+
+    assert.deepEqual(scan.filter((r) => r.holdsPayload).map((r) => r.file).sort(),
+      Object.keys(DECOYS).sort(), 'decoy の検出結果: ' + JSON.stringify(scan));
+
+    // 各信号が単独で効くこと
+    assert.equal(by['pressure-facts.js'].exportHits > 0, true);
+    assert.equal(by['pressure-facts.js'].contractRef, false);
+    assert.equal(by['opening-panes.js'].exportHits > 0, true);
+    assert.equal(by['opening-panes.js'].contractRef, false);
+    assert.equal(by['height-table.js'].exportHits > 0, true);
+    assert.equal(by['height-table.js'].contractRef, false);
+    assert.equal(by['wind-notes.js'].exportHits, 0);
+    assert.equal(by['wind-notes.js'].contractRef, true);
+    // 別名にした本物は両方で立つ
+    assert.equal(by['renamed-intake.js'].exportHits, 10);
+    assert.equal(by['renamed-intake.js'].contractRef, true);
+    // 似姿は定義元ではない
+    assert.equal(by['fake-schema.js'].schemaOwner, false);
+    // 過検出しない
+    assert.equal(by['plain-config.js'].holdsPayload, false);
+  } finally {
+    Object.keys(all).forEach((name) => { delete require.cache[path.join(dir, name)]; });
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('P2J-C39: Observation正規化は現案件のfactを一切変更しない', () => {
