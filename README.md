@@ -488,6 +488,21 @@ explicit_unverified_items: 4
 4. 各階評価高さ Z と preset の対応
 ```
 
+> **Phase 2L-A（2026-10-03）での変化。** 2〜4 について、案件用の一次資料で直接確認した値を
+> Evidence Closure Observation として `project-config/miyoshi-observations.js` に**記録**しました
+> （階別正圧 4 件・部位別負圧の大きさ 2 件・階→評価高さ 4 件）。canonical path
+> （`EvidenceClosure.evaluateClosure`）で評価すると、階別正圧・部位別負圧・階↔Z 対応の
+> 3 カテゴリが `READY_CANDIDATE` になります（件数は `tests/miyoshi-observations.test.js` の
+> P2L-A06 が構造から導出して確認しています）。
+>
+> **昇格はしていません。** preset の値・`verificationStatus`・V0=34 m/s は変更しておらず、
+> Promotion Candidate は生成されず、`verifiedCases` は空のままです。この記録は runtime へ
+> 配線していないため、UI の Closure Matrix と `project-state-probe` は引き続き空の
+> Observation 集合を評価します。
+>
+> 1（ガラス1枚の実見付 W / H）は**未解決のまま**です。一次資料には建具ごとに複数の実寸があり、
+> 現行の単一 W/H の契約では表現できないためです。表現方法は Phase 2L-B で決めます。
+
 ### Evidence Request Matrix — 何があれば昇格できるか
 
 以下が得られれば、上記のPromotion Gateを通して昇格できます。

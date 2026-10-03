@@ -758,12 +758,18 @@ test('P2J-C37: Evidence validator を複製していない', () => {
 // §27 / §36 現状は一切動かさない
 // ============================================================
 
-test('P2J-C38: リポジトリに実案件Observationが存在しない', () => {
+test('P2J-C38: 実案件Observationは指定の intake module にだけ存在する', () => {
+  // Phase 2J はここで「実案件Observationのデータファイルを置かない」を固定していた。
+  // Phase 2L-A で一次資料に基づく Observation の取り込みが Human Gate により承認されたため、
+  // 不変条件を「存在しない」から「指定の 1 ファイルにだけ存在する」へ移す。
+  // ファイル名を変えてこの検査を避けることはしない。2 つ目の Observation ファイルは
+  // 依然としてここで落ちる。
   const repoRoot = path.join(__dirname, '..');
   const suspicious = fs.readdirSync(repoRoot)
     .concat(fs.readdirSync(path.join(repoRoot, 'project-config')).map((f) => 'project-config/' + f))
     .filter((f) => /observation/i.test(f));
-  assert.deepEqual(suspicious, [], '実案件Observationのデータファイルを置かない');
+  assert.deepEqual(suspicious, ['project-config/miyoshi-observations.js'],
+    '実案件Observationのデータは指定の intake module 以外に置かない');
   // moduleが現行値をObservationとして埋め込んでいないこと
   [1297, 1525, 1695, 1729, 918, 1122].forEach((v) => {
     assert.equal(CLOSURE_SRC.includes(String(v)), false,
