@@ -285,12 +285,12 @@
     },
     {
       "id": "closure-blocked",
-      "statement": "closure remains BLOCKED with 0 observations",
+      "statement": "runtime closure remains BLOCKED with 0 runtime-wired observations (index.html and project-state-probe evaluate an empty set; the Phase 2L-A intake module is not wired to runtime)",
       "source": "project-state-probe project.closureStatus === 'BLOCKED'"
     },
     {
       "id": "slot-counts",
-      "statement": "0/12 ready slots, 0/4 categories, 0/8 case scopes",
+      "statement": "runtime closure: 0/12 ready slots, 0/4 categories, 0/8 case scopes",
       "source": "project-state-probe project.*Count"
     },
     {

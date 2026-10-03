@@ -203,6 +203,21 @@ test('FP-01: 出荷済みの公開面値を literal で固定する（walker の
   // A config change fails this test, and updating it is the deliberate act.
   const EXPECTED_PATHS = [
     'manual.identity.evidence.publicDescription',
+    // Phase 2L-A: the primary-source intake module. Every prose field in it is a
+    // publicDescription on purpose, so this lint inspects all of it.
+    'miyoshi-observations.deferral.publicDescription',
+    'miyoshi-observations.negativePressureConvention.publicDescription',
+    'miyoshi-observations.observations[0].evidence.publicDescription',
+    'miyoshi-observations.observations[1].evidence.publicDescription',
+    'miyoshi-observations.observations[2].evidence.publicDescription',
+    'miyoshi-observations.observations[3].evidence.publicDescription',
+    'miyoshi-observations.observations[4].evidence.publicDescription',
+    'miyoshi-observations.observations[5].evidence.publicDescription',
+    'miyoshi-observations.observations[6].evidence.publicDescription',
+    'miyoshi-observations.observations[7].evidence.publicDescription',
+    'miyoshi-observations.observations[8].evidence.publicDescription',
+    'miyoshi-observations.observations[9].evidence.publicDescription',
+    'miyoshi-observations.sourceScope.publicDescription',
     'miyoshi.dimensions.defaultH.evidence.publicDescription',
     'miyoshi.dimensions.defaultW.evidence.publicDescription',
     'miyoshi.identity.evidence.publicDescription',

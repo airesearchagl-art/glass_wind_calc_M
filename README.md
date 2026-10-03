@@ -488,6 +488,28 @@ explicit_unverified_items: 4
 4. 各階評価高さ Z と preset の対応
 ```
 
+> **Phase 2L-A（2026-10-03）での変化。** 2〜4 について、案件用の一次資料で直接確認した値を
+> Evidence Closure Observation として `project-config/miyoshi-observations.js` に**記録**しました
+> （階別正圧 4 件・部位別負圧の大きさ 2 件・階→評価高さ 4 件）。canonical path
+> （`EvidenceClosure.evaluateClosure`）で評価すると、階別正圧・部位別負圧・階↔Z 対応の
+> 3 カテゴリが `READY_CANDIDATE` になります（件数は `tests/miyoshi-observations.test.js` の
+> P2L-A06 が構造から導出して確認しています）。
+>
+> **昇格はしていません。** preset の値・`verificationStatus`・V0=34 m/s は変更しておらず、
+> Promotion Candidate は生成されず、`verifiedCases` は空のままです。この記録は runtime へ
+> 配線していないため、UI の Closure Matrix と `project-state-probe` は引き続き空の
+> Observation 集合を評価します。
+>
+> 1（ガラス1枚の実見付 W / H）は、**一次資料は存在しますが、取り込みを保留しています**。
+> 一次資料には建具ごとに複数の実寸があり、現行の単一 W/H の契約では表現できないためです。
+> 1 枚を代表に選ぶことも、複数を 1 つの W/H へ潰すことも、1250×2050 を確認済みとすることも
+> しません。表現方法は Phase 2L-B で決めます。2 つの層を混同しないでください:
+>
+> - **Closure の機械的な結果** — pane の 2 slot は `MISSING_OBSERVATION`。2L-A では W/H の
+>   Observation を意図的に投入していないので、closure はそう報告します。
+> - **案件の実態** — pane 寸法の一次資料は存在します。足りないのは Evidence ではなく、
+>   複数の pane を表現できる schema です。
+
 ### Evidence Request Matrix — 何があれば昇格できるか
 
 以下が得られれば、上記のPromotion Gateを通して昇格できます。
