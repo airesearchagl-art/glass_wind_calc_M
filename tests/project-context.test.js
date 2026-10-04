@@ -359,8 +359,8 @@ test('P2L-S2A-16: legacy — 架空の pane / case / 告示算定入力を作ら
 });
 
 test('P2L-S2A-17: legacy adapter は registry の built-in だけを受け付ける', () => {
-  assert.throws(() => PC.fromLegacyPreset('unknown-project'), /unknown projectId/);
-  assert.throws(() => PC.fromLegacyPreset(Registry.getPreset(LEGACY_ID)), /unknown projectId|built-in/);
+  assert.throws(() => PC.fromLegacyPreset('unknown-project'), /not a repository built-in preset/);
+  assert.throws(() => PC.fromLegacyPreset(Registry.getPreset(LEGACY_ID)), /not a repository built-in preset/);
   assert.throws(() => PC.fromLegacyPreset(undefined), Error);
   assert.equal(PC.fromLegacyPreset.length, 1);
 });
@@ -606,4 +606,114 @@ test('P2L-S2A-42: network / storage / filesystem / DOM に依存せず、案件�
   Object.values(Miyoshi.wind.negativePressureByZone).forEach((v) => real.push(v.value));
   real.push(Miyoshi.dimensions.defaultW.value, Miyoshi.dimensions.defaultH.value, Miyoshi.wind.V0.value);
   real.forEach((v) => assert.equal(new RegExp('\\b' + v + '\\b').test(CTX_SRC), false, String(v)));
+});
+
+// ============================================================
+// RF-16-01: built-in の trust は registry にあることではなく、built-in の provenance から来る
+// ============================================================
+//
+// 以下の test は既定 registry へ合成の偽 preset を登録する（process 内で残る）。
+// そのため file の最後に置く。
+
+const FAKE_ID = 'synthetic-fake-builtin';
+
+/** 形の上では legacy adapter をすべて満たす、合成の偽 preset（実案件ではない）。 */
+function syntheticFakePreset(projectId) {
+  const ev = (level, checkedAt, priv) => ({ level, checkedAt,
+    publicDescription: '合成テスト用の偽 preset（実案件ではない）', privateReferenceAvailable: priv });
+  const strong = ev('primary', '2026-03-04', true);
+  const val = (value, unit, status, evidence) => ({ value, unit, verificationStatus: status, evidence, sourceReference: null });
+  const floors = { 1: 1111, 2: 1222, R: 1333 };
+  const zones = { general: 1444, corner: 1555 };
+  const cfg = {
+    projectId,
+    hasFixedPreset: true,
+    identity: { publicLabel: 'Synthetic Fake Preset', verificationStatus: 'verified', disclosureStatus: 'redacted', evidence: strong },
+    dimensions: {
+      mode: 'sample_default',
+      defaultW: val(901, 'mm', 'verified', strong),
+      defaultH: val(1901, 'mm', 'verified', strong),
+      status: 'verified'
+    },
+    wind: {
+      positivePressureByFloor: {},
+      negativePressureByZone: {},
+      V0: val(31, 'm/s', 'verified', strong),
+      roughnessCategory: val('II', null, 'verified', strong),
+      status: 'verified'
+    },
+    verifiedCases: [],
+    getPublicLabel() { return this.identity.publicLabel; },
+    getPositivePressure(f) { return this.wind.positivePressureByFloor[f].value; },
+    getNegativePressure(z) { return this.wind.negativePressureByZone[z].value; }
+  };
+  Object.keys(floors).forEach((f) => { cfg.wind.positivePressureByFloor[f] = val(floors[f], P, 'verified', strong); });
+  Object.keys(zones).forEach((z) => { cfg.wind.negativePressureByZone[z] = val(zones[z], P, 'verified', strong); });
+  return cfg;
+}
+
+test('P2L-S2A-50: 陽性対照——built-in 境界は bootstrap で捕まえた instance そのものを返す', () => {
+  const builtIn = Registry.getBuiltInPreset(LEGACY_ID);
+  assert.equal(builtIn, Miyoshi, 'module instance と同一でない');
+  assert.equal(builtIn, Registry.getPreset(LEGACY_ID));
+  assert.equal(Registry.getBuiltInPreset(LEGACY_ID), builtIn, '呼ぶたびに同じ instance');
+  // 形が同じだけの写しは built-in の同一性を持たない
+  const lookAlike = Object.assign({}, builtIn);
+  assert.notEqual(lookAlike, builtIn);
+  assert.equal(PC.fromLegacyPreset(LEGACY_ID).trust, 'built_in_current');
+});
+
+test('P2L-S2A-51: 公開 registerPreset() で登録した偽 preset は built_in_current にならない', () => {
+  const fake = syntheticFakePreset(FAKE_ID);
+  // 既存の registry 契約はそのまま: 登録でき、getPreset で引ける
+  assert.equal(Registry.registerPreset(fake), FAKE_ID);
+  assert.equal(Registry.hasPreset(FAKE_ID), true);
+  assert.equal(Registry.getPreset(FAKE_ID), fake);
+  assert.equal(Registry.listPresets().some((p) => p.projectId === FAKE_ID), true);
+  // built-in 境界からは引けない
+  assert.throws(() => Registry.getBuiltInPreset(FAKE_ID), /not a repository built-in preset/);
+  assert.throws(() => PC.fromLegacyPreset(FAKE_ID), /not a repository built-in preset/);
+  // 偽 preset は adapter の他の検査をすべて満たす形にしてある。落ちた理由が provenance だけで
+  // あることは、provenance 検査を外す mutation（getBuiltInPreset → getPreset）でこの test が
+  // 失敗することで確かめる（negative control M1）。
+  // 本物の built-in は引き続き通る
+  const ctx = PC.fromLegacyPreset(LEGACY_ID);
+  assert.equal(ctx.trust, 'built_in_current');
+  assert.equal(ctx.origin.registryProjectId, LEGACY_ID);
+  // built-in の id を偽で上書きすることはできない（重複登録は既存契約で拒否）
+  assert.throws(() => Registry.registerPreset(syntheticFakePreset(LEGACY_ID)), /duplicate projectId/);
+  assert.equal(Registry.getBuiltInPreset(LEGACY_ID), Miyoshi);
+});
+
+test('P2L-S2A-52: BUILT_IN_PRESET_IDS を書き換えても写しても trust は増えない', () => {
+  assert.equal(Object.isFrozen(Registry.BUILT_IN_PRESET_IDS), true);
+  assert.equal(Object.isFrozen(Registry), true);
+  assert.throws(() => Registry.BUILT_IN_PRESET_IDS.push(FAKE_ID), TypeError);
+  assert.throws(() => { Registry.BUILT_IN_PRESET_IDS = [LEGACY_ID, FAKE_ID]; }, TypeError);
+  assert.throws(() => { Registry.getBuiltInPreset = () => syntheticFakePreset(FAKE_ID); }, TypeError);
+  assert.deepEqual(Array.from(Registry.BUILT_IN_PRESET_IDS), [LEGACY_ID]);
+  // 写しに足しても権威にはならない
+  const copy = Registry.BUILT_IN_PRESET_IDS.slice();
+  copy.push(FAKE_ID);
+  assert.throws(() => Registry.getBuiltInPreset(FAKE_ID), /not a repository built-in preset/);
+  assert.throws(() => PC.fromLegacyPreset(FAKE_ID), /not a repository built-in preset/);
+  // project-context は built-in 境界を読み込み時に掴んでいる（後から global を差し替えても使わない）
+  assert.match(CTX_SRC, /var getBuiltInPreset = Registry\.getBuiltInPreset;/);
+  assert.equal(/Registry\.getPreset\(/.test(CTX_SRC), false, 'project-context が getPreset() を使っている');
+});
+
+test('P2L-S2A-53: RF-16-01 後も trust の退行が無い（pack は pack_unreviewed、legacy は built-in の写しだけ）', () => {
+  MODES.forEach((mode) => {
+    const ctx = packContext(mode, true);
+    assert.equal(ctx.trust, 'pack_unreviewed');
+    objectsOf(ctx).forEach(([n, at]) => assert.equal(Evidence.canPromoteToVerified(n), false, mode + ' ' + at));
+  });
+  const legacy = PC.fromLegacyPreset(LEGACY_ID);
+  assert.equal(PC.isProjectContext(legacy), true);
+  assert.equal(PC.isProjectContext(clone(legacy)), false);
+  const capable = objectsOf(legacy).filter(([n]) => !Array.isArray(n) && Evidence.canPromoteToVerified(n));
+  capable.forEach(([, at]) => assert.match(at, /^\$\.capabilities\.builtInEvidence\./));
+  // 偽 preset の Evidence はどの context にも入らない
+  const labels = new Set(objectsOf(legacy).map(([n]) => n.publicDescription).filter(Boolean));
+  assert.equal(labels.has('合成テスト用の偽 preset（実案件ではない）'), false);
 });

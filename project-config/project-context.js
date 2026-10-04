@@ -92,6 +92,13 @@
   var Pack = resolveDependency('ProjectPack', './project-pack.js', 'project-config/project-pack.js');
   var Wind = resolveDependency('WindPressure', '../wind-pressure.js', 'wind-pressure.js');
 
+  // built-in の trust は「registry にあること」ではなく、registry が bootstrap で捕まえた
+  // built-in instance であることから来る（RF-16-01）。その境界を読み込み時に 1 度だけ掴む。
+  var getBuiltInPreset = Registry.getBuiltInPreset;
+  if (typeof getBuiltInPreset !== 'function') {
+    throw new Error('project-context.js: PresetRegistry.getBuiltInPreset() is required (built-in provenance boundary)');
+  }
+
   // ============================================================
   // Contract
   // ============================================================
@@ -637,12 +644,14 @@
   }
 
   /**
-   * repository の built-in preset を registry から引き、context へ写す。
-   * 呼び出し側から config object を受け取らない（registry が持つものだけが built-in）。
+   * repository の built-in preset を context へ写す。
+   * 引くのは PresetRegistry.getBuiltInPreset()（bootstrap で捕まえた built-in instance）だけで、
+   * getPreset() ではない。後から registerPreset() で登録された config は、形が正しくても
+   * built_in_current にならない。呼び出し側から config object も受け取らない。
    * pane registry / glazing case / 告示算定入力は作らない（legacy preset に無いため）。
    */
   function fromLegacyPreset(projectId) {
-    var config = Registry.getPreset(projectId);
+    var config = getBuiltInPreset(projectId);
     if (!config || config.hasFixedPreset !== true || config.projectId !== projectId) {
       fail('legacy preset ' + show(projectId), 'is not a built-in registered preset');
     }

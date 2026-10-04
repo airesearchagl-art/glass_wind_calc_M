@@ -219,7 +219,12 @@ designPressure = max(abs(positivePressure), abs(negativePressure))
 | `hasPreset(projectId)` | 真偽値 |
 | `listPresets()` | `[{ projectId, publicLabel }]`。ラベルは `getPublicLabel()` 境界のみを経由 |
 | `createRegistry()` | 独立したregistryインスタンス（テスト用途等） |
+| `getBuiltInPreset(projectId)` | repository の built-in preset だけを返す（bootstrap で捕まえた module instance そのもの）。後から `registerPreset()` で登録した config は返さず例外（Phase 2L-B2 RF-16-01） |
 
+- **registry にあることは、repository の built-in であることと同じではありません。** `registerPreset()` は
+  形の要件（`hasFixedPreset === true`・`getPublicLabel()` 等）を満たす config を後からでも登録できます。
+  built-in の trust が必要な境界（`ProjectContext.fromLegacyPreset()`）は `getBuiltInPreset()` を使います。
+  `BUILT_IN_PRESET_IDS` は参照用の凍結した写しで、trust の判定には使いません。registry の export object も凍結しています。
 - 登録できるのは `hasFixedPreset === true` を持つbuilt-in案件configだけです。手入力（`manual.js`、`hasFixedPreset: false`）は**trusted presetとして登録できません**。
 - 公開ラベルは各configの `getPublicLabel()` のみを経由します（内部呼称 `projectName` へフォールバックしません）。
 
@@ -902,7 +907,7 @@ fixture はすべて合成値です（`tests/project-pack.test.js` が、reposit
 
 | adapter | 入力 | sourceKind | trust |
 |---|---|---|---|
-| `fromLegacyPreset(projectId)` | registry が持つ built-in preset（呼び出し側から config object は受け取らない） | `legacy_builtin` | `built_in_current` |
+| `fromLegacyPreset(projectId)` | `PresetRegistry.getBuiltInPreset()` が返す built-in preset だけ（後から登録された preset・呼び出し側の config object は受け取らない） | `legacy_builtin` | `built_in_current` |
 | `fromProjectPack(validated)` | `validateProjectPack()` の出力（trust は `pack_unreviewed` だけ） | `project_pack_unreviewed` | `pack_unreviewed` |
 
 trust は sourceKind からだけ決まり、呼び出し側からも pack からも渡せません。
