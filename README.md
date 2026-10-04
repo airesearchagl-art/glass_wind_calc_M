@@ -814,6 +814,83 @@ Phase 2H はEvidence Phaseではありません。`verifiedCases` は `[]` の�
 BIM・Revit連携 / DWG・PDF解析 / メーカー製品DB / 検証済みプロファイル /
 registered preset作成UI / 階→評価高さの自動変換 / Production反映。
 
+## Project Pack v1 — 契約のみ（Phase 2L-B1）
+
+`project-config/project-pack.js` は、案件ごとの入力を 1 つにまとめる**新しい format**
+`glass_wind_project_pack`（`schemaVersion: 1`）の schema と validator です。
+目標とする構成は「**汎用の public core** ＋ **private / local に置く Project Pack**」で、
+実案件の値は pack 側に置き、public repository へは置かない方向です。
+**この PR はその契約を定義しただけです。** 既存の案件 preset・Observation は main に残ったままで、
+案件依存の除去（Miyoshi removal）は完了していません。
+
+### 既存 format を置き換えません
+
+Project Input Package（Phase 2D）・Workspace Package（2G）・Profile Package（2H）・
+Review Package（2I）はそのままです。Project Pack はこれらと統合しません
+（Project Input Package の importer は pack を拒否し、pack の validator も `packType` の無い入力を拒否します）。
+
+### runtime へはまだ配線していません
+
+`validateProjectPack(pack)` は pure function です（network / storage / filesystem / DOM に触れません）。
+`index.html`・registry・Evidence Closure・probe からは参照されず、file picker / drag-drop / paste の
+UI もありません。画面の挙動と Closure の集計は main と同じです。
+
+### 形
+
+```
+{ schemaVersion: 1, packType: "glass_wind_project_pack",
+  projectMetadata: { publicLabel }, pressureModel: { mode },
+  windConditions, panes, glazingCases, evidence }
+```
+
+- 未知の key はどの階層でも拒否します（`trust`・`verificationStatus`・private mapping を含む）。
+- 集合は ID 付きの配列です（JSON の重複 key は黙って後勝ちになるため、map にしません）。
+- ID は中立形だけを受け付けます: pane `P001`、case `G001`、出典範囲 `S01`、階 `1`〜`99`・`B1`〜`B9`・`R`・`PH`。
+  建具記号・図面番号・ファイル名・path 風の ID は拒否します。実建具との対応表は schema に入れません。
+- 1 枚の pane の寸法は `panes` の 1 か所にだけ置き、case は `paneId` で参照します。
+- 量は `{ value, unit }` で、単位は 1 つに固定です（mm / N/m² / m / m/s）。単位変換はしません。
+- 圧力量（case の `designPressure`、正圧・負圧 map、対応する records）の上限は、Project Input Package と同じ
+  `MAX_PRESSURE`（1,000,000 N/m²）です。値は `project-input.js` から export して共有し、pack 側で重複定義しません。
+- `glassType` は case の入力です。Evidence の fact ではありません。
+
+### pressureModel の 3 mode（曖昧な fallback なし）
+
+| mode | 風圧の出どころ | case に必要なもの |
+|---|---|---|
+| `notification1458` | 告示式で算定（V0・粗度区分・建物高さ・階ごとの評価高さ）。規則は `wind-pressure.js` に委ねます | `floor`・`zone` |
+| `project_pressure_map` | 案件の階別正圧・部位別負圧（絶対値） | `floor`・`zone`（map に存在すること） |
+| `case_direct` | case ごとの `designPressure` | `designPressure`（`floor`・`zone` は任意で、無ければ推測しません） |
+
+mode に属さない field は拒否します。`notification1458` や `project_pressure_map` の case が
+`designPressure` を持つと「二重の真実」として fail closed します。
+
+### trust は常に `pack_unreviewed`
+
+pack が何を名乗っても（全出典 primary、`verified` / `reviewed` の field など）trust は上がりません。
+AC-05（取り込んだものは未検証）は緩めていません。レビュー済み pack の attestation は後続 stage（S5）です。
+
+出典の情報は canonical Evidence ではなく**申告（sourceClaim）**として持ちます:
+
+```
+{ sourceScopeId: "S01",
+  sourceClaim: { claimedLevel, claimedCheckedAt, publicDescription, claimedPrivateReferenceAvailable } }
+```
+
+field 名を canonical Evidence（`level` / `checkedAt` / `privateReferenceAvailable`）とわざと違えてあるので、
+入力にも検証結果にも Promotion Gate（`assertPromotionGate('verified', …)`）を通る object がありません。
+top-level の `trust` を見落とした consumer がいても、未 review の pack から verified は作れません。
+申告を canonical Evidence へ変換する adapter は、pack の trust を確かめる後続 stage でだけ作ります（この PR にはありません）。
+
+### 設計値と evidence は別、そして限界
+
+`evidence.records` は「この出典範囲がこの対象についてこう述べている」という記録で、
+Evidence Closure の Observation ではありません（変換は後続 stage）。validator は records と設計値を
+突き合わせず、どちらかを黙って選ぶこともしません。
+**pack の作成者が同じ値を設計値と record の両方へ書き写すことを、tool は検出できません。**
+一致は出典確認の証拠にならず、ここは Human Review の範囲です。
+
+fixture はすべて合成値です（`tests/project-pack.test.js` が、repository の案件値と 1 つも一致しないことを確認します）。
+
 ## 設計定数
 
 ### 設計風圧（正圧・負圧）＝「みよし案件プリセット」値
@@ -920,7 +997,8 @@ glass_wind_calc_M/
 │   ├── miyoshi.js                # 「みよし案件」固有プリセット（設計風圧・初期寸法）＋検証状況・Evidenceメタデータ
 │   ├── manual.js                 # 「手入力 / Generic」モードの入力契約（Phase 2C）。miyoshi.jsに非依存
 │   ├── registry.js               # generic preset registry（Phase 2D）。built-in presetのみ登録可・unknownはfail closed
-│   └── project-input.js          # versioned Project Input Package（Phase 2D〜2E）。v2でwindInputを保持
+│   ├── project-input.js          # versioned Project Input Package（Phase 2D〜2E）。v2でwindInputを保持
+│   └── project-pack.js           # Project Pack v1 の schema / validator（Phase 2L-B1）。契約のみ・runtime未配線
 ├── tests/
 │   ├── calc.test.js              # 汎用計算コアの known-answer test + core purity（node:test）
 │   ├── project-config.test.js    # project-config分離の整合性・Evidence契約・代表ケース回帰テスト
@@ -934,7 +1012,8 @@ glass_wind_calc_M/
 │   ├── batch-ui.test.js          # Batch UIの契約テスト（Single既定・textContent境界・診断配線）（Phase 2G）
 │   ├── project-profile.test.js   # プロファイル契約・resolver等価性・snapshot・Matrix cap・canonical gate（Phase 2H）
 │   ├── review-package.test.js    # Review Package契約・値の一致・exporter gate・redaction・継承値遮断（Phase 2I）
-│   └── review-ui.test.js         # Review UIの契約テスト（activeReview単一source・鮮度再計算・印刷関門）（Phase 2I）
+│   ├── review-ui.test.js         # Review UIの契約テスト（activeReview単一source・鮮度再計算・印刷関門）（Phase 2I）
+│   └── project-pack.test.js      # Project Pack v1 契約・3 mode・trust境界・合成fixture（Phase 2L-B1）
 ├── package.json
 └── README.md                     # このファイル
 ```

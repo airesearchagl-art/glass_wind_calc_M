@@ -673,6 +673,7 @@
     IMPORTED_PUBLIC_LABEL: IMPORTED_PUBLIC_LABEL,
     NOTIFICATION_PUBLIC_LABEL: NOTIFICATION_PUBLIC_LABEL,
     MAX_DIMENSION_MM: MAX_DIMENSION_MM,
+    MAX_PRESSURE: MAX_PRESSURE,
     assertPaneDimensionMm: assertPaneDimensionMm,
     assertExtraFactor: assertExtraFactor,
     computeDesignPressure: computeDesignPressure,
