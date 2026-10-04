@@ -867,6 +867,18 @@ mode に属さない field は拒否します。`notification1458` や `project_
 pack が何を名乗っても（全出典 primary、`verified` / `reviewed` の field など）trust は上がりません。
 AC-05（取り込んだものは未検証）は緩めていません。レビュー済み pack の attestation は後続 stage（S5）です。
 
+出典の情報は canonical Evidence ではなく**申告（sourceClaim）**として持ちます:
+
+```
+{ sourceScopeId: "S01",
+  sourceClaim: { claimedLevel, claimedCheckedAt, publicDescription, claimedPrivateReferenceAvailable } }
+```
+
+field 名を canonical Evidence（`level` / `checkedAt` / `privateReferenceAvailable`）とわざと違えてあるので、
+入力にも検証結果にも Promotion Gate（`assertPromotionGate('verified', …)`）を通る object がありません。
+top-level の `trust` を見落とした consumer がいても、未 review の pack から verified は作れません。
+申告を canonical Evidence へ変換する adapter は、pack の trust を確かめる後続 stage でだけ作ります（この PR にはありません）。
+
 ### 設計値と evidence は別、そして限界
 
 `evidence.records` は「この出典範囲がこの対象についてこう述べている」という記録で、

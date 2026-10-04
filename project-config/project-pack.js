@@ -32,10 +32,27 @@
  * 読み込んだ Project Pack の trust は常に `pack_unreviewed` である。pack が自分を
  * verified / reviewed / primary と名乗っても trust は上がらない。trust・
  * verificationStatus 等を宣言する field は schema に存在せず、書けば未知 key として
- * 拒否される。evidence の level（primary 等）は「出典についての申告」として受け取る
- * だけで、昇格判定（promotion gate）はここでは行わない。
- * 外部から取り込んだものを verified にしない既存の取り込み規約（Project Input Package の
- * imported_unverified）を緩めない。review 済み pack の attestation は後続 stage。
+ * 拒否される。外部から取り込んだものを verified にしない既存の取り込み規約
+ * （Project Input Package の imported_unverified）を緩めない。review 済み pack の
+ * attestation は後続 stage。
+ *
+ * ── source claim は canonical Evidence ではない ──────────────
+ *
+ * 出典ごとの「出典が何を主張しているか」は sourceClaim として受け取り、そのまま返す:
+ *
+ *   { sourceScopeId, sourceClaim: { claimedLevel, claimedCheckedAt,
+ *                                   publicDescription, claimedPrivateReferenceAvailable } }
+ *
+ * field 名を canonical Evidence（level / checkedAt / privateReferenceAvailable）と
+ * **わざと違えてある**。canonical な形のまま返すと、primary + checkedAt +
+ * privateReferenceAvailable: true の申告は ProjectEvidence.assertPromotionGate('verified')
+ * を単独で通ってしまい、top-level の trust を見落とした後続 consumer が未 review の
+ * pack から verified を作れる。それを規約（「trust を見てから使え」）ではなく構造で塞ぐ。
+ * 入力も同じ形なので、生の pack から canonical Evidence を拾うこともできない。
+ *
+ * 入力検証では ProjectEvidence.makeEvidence() を一時的な validator として再利用するが、
+ * その戻り値は保存しない。sourceClaim → canonical Evidence の変換は、pack の trust を
+ * 確かめる adapter が後続 stage でだけ明示的に行う。この phase にその adapter は無い。
  *
  * ── design value と evidence を混ぜない ──────────────────
  *
@@ -145,6 +162,13 @@
     maxSourceScopes: 99,
     maxRecords: 5000
   };
+
+  /**
+   * evidence.sourceScopes[].sourceClaim の field。canonical Evidence の field 名
+   * （level / checkedAt / privateReferenceAvailable）とは意図的に違えてある（冒頭の説明を参照）。
+   */
+  var SOURCE_CLAIM_KEYS = ['claimedLevel', 'claimedCheckedAt', 'publicDescription',
+    'claimedPrivateReferenceAvailable'];
 
   var TOP_LEVEL_KEYS = [
     'schemaVersion', 'packType', 'projectMetadata', 'pressureModel',
@@ -585,23 +609,29 @@
     var scopes = ev.sourceScopes.map(function (s, i) {
       var at = scopeWhere + '[' + i + ']';
       requireObject(s, at);
-      exactKeys(s, ['sourceScopeId', 'evidence'], [], at);
+      exactKeys(s, ['sourceScopeId', 'sourceClaim'], [], at);
       var id = readId(s.sourceScopeId, 'sourceScope', at + '.sourceScopeId');
       rejectDuplicate(seenScope, id, at, 'sourceScopeId');
-      var e = requireObject(s.evidence, at + '.evidence');
-      exactKeys(e, ['level', 'checkedAt', 'publicDescription', 'privateReferenceAvailable'], [],
-        at + '.evidence');
-      // level / checkedAt / public-safe prose / boolean は canonical な Evidence 契約が検証する。
-      var evidence = Evidence.makeEvidence(e.level, e.checkedAt, e.publicDescription,
-        e.privateReferenceAvailable);
-      collectAdvisories(evidence.publicDescription, at + '.evidence.publicDescription', advisories);
+      var claimWhere = at + '.sourceClaim';
+      var c = requireObject(s.sourceClaim, claimWhere);
+      exactKeys(c, SOURCE_CLAIM_KEYS, [], claimWhere);
+      // level / checkedAt / public-safe prose / boolean の検証は canonical な Evidence 契約に
+      // 委ねる（規則を写さない）。戻り値は promotion gate を通りうる canonical Evidence なので、
+      // 検証にだけ使って捨てる。返すのは claimed* の名前を持つ申告だけである。
+      try {
+        Evidence.makeEvidence(c.claimedLevel, c.claimedCheckedAt, c.publicDescription,
+          c.claimedPrivateReferenceAvailable);
+      } catch (e) {
+        fail(claimWhere, 'is not a valid source claim: ' + e.message);
+      }
+      collectAdvisories(c.publicDescription, claimWhere + '.publicDescription', advisories);
       return {
         sourceScopeId: id,
-        evidence: {
-          level: evidence.level,
-          checkedAt: evidence.checkedAt,
-          publicDescription: evidence.publicDescription,
-          privateReferenceAvailable: evidence.privateReferenceAvailable
+        sourceClaim: {
+          claimedLevel: c.claimedLevel,
+          claimedCheckedAt: c.claimedCheckedAt,
+          publicDescription: c.publicDescription,
+          claimedPrivateReferenceAvailable: c.claimedPrivateReferenceAvailable
         }
       };
     });
@@ -735,6 +765,7 @@
     WIND_FIELDS: WIND_FIELDS,
     CASE_FIELDS: CASE_FIELDS,
     RECORD_SUBJECTS: RECORD_SUBJECTS,
+    SOURCE_CLAIM_KEYS: SOURCE_CLAIM_KEYS,
     validateProjectPack: validateProjectPack
   });
 });

@@ -45,10 +45,10 @@ function syntheticEvidence(mode) {
   }
   return {
     sourceScopes: [
-      { sourceScopeId: 'S01', evidence: { level: 'primary', checkedAt: '2026-01-15',
-        publicDescription: '合成テスト用の出典（実案件ではない）', privateReferenceAvailable: true } },
-      { sourceScopeId: 'S02', evidence: { level: 'indirect', checkedAt: '2026-01-16',
-        publicDescription: '合成テスト用の参考資料（実案件ではない）', privateReferenceAvailable: false } }
+      { sourceScopeId: 'S01', sourceClaim: { claimedLevel: 'primary', claimedCheckedAt: '2026-01-15',
+        publicDescription: '合成テスト用の出典（実案件ではない）', claimedPrivateReferenceAvailable: true } },
+      { sourceScopeId: 'S02', sourceClaim: { claimedLevel: 'indirect', claimedCheckedAt: '2026-01-16',
+        publicDescription: '合成テスト用の参考資料（実案件ではない）', claimedPrivateReferenceAvailable: false } }
     ],
     records
   };
@@ -368,7 +368,9 @@ test('P2L-B1-15: project_pressure_map は自分の map を要求する', () => {
 test('P2L-B1-16: pack は自分を verified へ昇格できない', () => {
   // 全出典を primary + private reference ありにしても trust は変わらない
   const strong = syntheticPack('case_direct');
-  strong.evidence.sourceScopes.forEach((s) => { s.evidence.level = 'primary'; s.evidence.privateReferenceAvailable = true; });
+  strong.evidence.sourceScopes.forEach((s) => {
+    s.sourceClaim.claimedLevel = 'primary'; s.sourceClaim.claimedPrivateReferenceAvailable = true;
+  });
   const out = Pack.validateProjectPack(strong);
   assert.equal(out.trust, 'pack_unreviewed');
   assert.deepEqual(Pack.TRUST_LEVELS, ['pack_unreviewed']);
@@ -385,12 +387,16 @@ test('P2L-B1-16: pack は自分を verified へ昇格できない', () => {
     (p) => { p.projectMetadata.verificationStatus = 'verified'; },
     (p) => { p.panes[0].verified = true; },
     (p) => { p.glazingCases[0].verificationStatus = 'verified'; },
-    (p) => { p.evidence.sourceScopes[0].evidence.verificationStatus = 'verified'; },
+    (p) => { p.evidence.sourceScopes[0].sourceClaim.verificationStatus = 'verified'; },
+    (p) => { p.evidence.sourceScopes[0].verified = true; },
     (p) => { p.evidence.reviewed = true; },
-    (p) => { p.evidence.sourceScopes[0].evidence.level = 'verified'; },
-    (p) => { p.pressureModel.trust = 'pack_reviewed'; }
+    (p) => { p.evidence.sourceScopes[0].sourceClaim.claimedLevel = 'verified'; },
+    (p) => { p.pressureModel.trust = 'pack_reviewed'; },
+    (p) => { p.verified = true; },
+    (p) => { p.reviewed = true; },
+    (p) => { p.trust = 'pack_unreviewed'; }
   ];
-  claims.forEach((mutate, i) => { const p = syntheticPack('case_direct'); mutate(p); rejects(p, /Project Pack|makeEvidence/, 'claim #' + i); });
+  claims.forEach((mutate, i) => { const p = syntheticPack('case_direct'); mutate(p); rejects(p, /Project Pack/, 'claim #' + i); });
   // 正規化結果を入力へ戻して trust を持ち込むこともできない
   rejects(clone(out), /unexpected field "trust"/);
 });
@@ -476,8 +482,8 @@ test('P2L-B1-20: 公開面の advisory は捨てずに返し、hard rule は拒�
   hard.projectMetadata.publicLabel = 'see https://example.invalid/x';
   rejects(hard, /publicLabel/);
   const desc = syntheticPack('case_direct');
-  desc.evidence.sourceScopes[0].evidence.publicDescription = 'C:\\private\\source.pdf';
-  rejects(desc, /makeEvidence/);
+  desc.evidence.sourceScopes[0].sourceClaim.publicDescription = 'C:\\private\\source.pdf';
+  rejects(desc, /sourceClaim: is not a valid source claim: .*windows-absolute-path/);
 });
 
 test('P2L-B1-21: runtime へは配線しない（既存 format も置き換えない）', () => {
@@ -496,4 +502,117 @@ test('P2L-B1-21: runtime へは配線しない（既存 format も置き換え�
   assert.deepEqual(Array.from(ProjectInput.SUPPORTED_SCHEMA_VERSIONS), [1, 2]);
   assert.throws(() => ProjectInput.deserialize(JSON.stringify(syntheticPack('case_direct'))));
   rejects({ schemaVersion: 1, projectId: 'synthetic', label: 'Synthetic' }, /Project Pack/);
+});
+
+// ── RF-15-01: 未 review の pack の申告は、promotion gate を通る canonical Evidence にならない ──
+//
+// 後続 consumer が top-level の trust を見落としても、正規化結果（と生の入力）のどこからも
+// verified へ昇格できる object を取り出せないことを、規約ではなく構造として確かめる。
+const Evidence = require('../project-config/evidence.js');
+const Ledger = require('../project-config/evidence-ledger.js');
+
+/** 最も強い申告: 全出典が primary + checkedAt + private reference あり。 */
+function strongestClaimPack(mode) {
+  const pack = syntheticPack(mode);
+  pack.evidence.sourceScopes.forEach((s) => {
+    s.sourceClaim.claimedLevel = 'primary';
+    s.sourceClaim.claimedCheckedAt = '2026-01-15';
+    s.sourceClaim.claimedPrivateReferenceAvailable = true;
+  });
+  return pack;
+}
+
+/** 素朴な adapter（trust を確かめずに canonical へ詰め替える）。陽性対照にだけ使う。 */
+function naiveCanonical(claim) {
+  return { level: claim.claimedLevel, checkedAt: claim.claimedCheckedAt,
+    publicDescription: claim.publicDescription, privateReferenceAvailable: claim.claimedPrivateReferenceAvailable };
+}
+
+test('P2L-B1-22: 陽性対照——同じ申告を canonical へ詰め替えれば gate は通る（gate は生きている）', () => {
+  // これが通らないなら、以下の「通らない」test は gate が死んでいるだけかもしれない。
+  const out = Pack.validateProjectPack(strongestClaimPack('case_direct'));
+  out.evidence.sourceScopes.forEach((s) => {
+    assert.equal(Evidence.canPromoteToVerified(naiveCanonical(s.sourceClaim)), true, s.sourceScopeId);
+  });
+});
+
+test('P2L-B1-23: 最強の申告を validate しても、出力に promotion-capable な object が 1 つも無い', () => {
+  MODES.forEach((mode) => {
+    const input = strongestClaimPack(mode);
+    const out = Pack.validateProjectPack(input);
+    assert.equal(out.trust, 'pack_unreviewed');
+    let objects = 0;
+    // 出力だけでなく生の入力も: 生の pack から canonical Evidence を拾えても同じ穴になる
+    [['out', out], ['input', input]].forEach(([name, root]) => {
+      walk(root, (node, at) => {
+        if (!node || typeof node !== 'object' || Array.isArray(node)) return;
+        objects++;
+        assert.equal(Evidence.canPromoteToVerified(node), false, mode + ' ' + name + ' ' + at);
+        assert.equal(Evidence.canPromoteToVerified(node, {}), false, mode + ' ' + name + ' ' + at);
+        ['level', 'checkedAt', 'privateReferenceAvailable'].forEach((k) => {
+          assert.equal(Object.prototype.hasOwnProperty.call(node, k), false,
+            mode + ' ' + name + ' ' + at + ' が canonical field ' + k + ' を持つ');
+        });
+      });
+    });
+    assert.equal(objects > 20, true, 'walk が object を見ていない');
+  });
+});
+
+test('P2L-B1-24: sourceClaim そのものは promotion gate を通らない（構造不足で fail）', () => {
+  const out = Pack.validateProjectPack(strongestClaimPack('case_direct'));
+  const claim = out.evidence.sourceScopes[0].sourceClaim;
+  assert.equal(claim.claimedLevel, 'primary');
+  assert.equal(claim.claimedPrivateReferenceAvailable, true);
+  assert.equal(Evidence.canPromoteToVerified(claim), false);
+  assert.throws(() => Evidence.assertPromotionGate('verified', claim), /evidence\.level must be one of/);
+  assert.throws(() => Evidence.assertEvidenceConsistency('verified', claim), /evidence\.level must be one of/);
+  assert.throws(() => Evidence.verifiedValue(987, 'mm', 'verified', claim, 'synthetic'), /evidence\.level must be one of/);
+  // 複製・展開しても形は canonical にならない
+  assert.equal(Evidence.canPromoteToVerified(Object.assign({}, claim)), false);
+  assert.equal(Evidence.canPromoteToVerified(JSON.parse(JSON.stringify(claim))), false);
+});
+
+test('P2L-B1-25: canonical な field 名・旧 shape での入力は拒否（申告は claimed* でしか書けない）', () => {
+  const variants = [
+    ['old evidence key', (sc) => { sc.evidence = naiveCanonical(sc.sourceClaim); delete sc.sourceClaim; }, /unexpected field "evidence"/],
+    ['canonical level', (sc) => { sc.sourceClaim.level = 'primary'; }, /unexpected field "level"/],
+    ['canonical checkedAt', (sc) => { sc.sourceClaim.checkedAt = '2026-01-15'; }, /unexpected field "checkedAt"/],
+    ['canonical privateReferenceAvailable', (sc) => { sc.sourceClaim.privateReferenceAvailable = true; }, /unexpected field "privateReferenceAvailable"/],
+    ['both shapes', (sc) => { sc.evidence = naiveCanonical(sc.sourceClaim); }, /unexpected field "evidence"/],
+    ['claim says verified', (sc) => { sc.sourceClaim.claimedLevel = 'verified'; }, /not a valid source claim/],
+    ['claim verificationStatus', (sc) => { sc.sourceClaim.verificationStatus = 'verified'; }, /unexpected field "verificationStatus"/],
+    ['scope trust', (sc) => { sc.trust = 'pack_reviewed'; }, /unexpected field "trust"/],
+    ['claim missing field', (sc) => { delete sc.sourceClaim.claimedCheckedAt; }, /missing required field "claimedCheckedAt"/],
+    ['non-boolean private ref', (sc) => { sc.sourceClaim.claimedPrivateReferenceAvailable = 'yes'; }, /not a valid source claim/],
+    ['bad date', (sc) => { sc.sourceClaim.claimedCheckedAt = '2026-02-30'; }, /not a valid source claim/]
+  ];
+  variants.forEach(([name, mutate, re]) => {
+    const pack = strongestClaimPack('case_direct');
+    mutate(pack.evidence.sourceScopes[0]);
+    rejects(pack, re, name);
+  });
+  assert.deepEqual(Array.from(Pack.SOURCE_CLAIM_KEYS),
+    ['claimedLevel', 'claimedCheckedAt', 'publicDescription', 'claimedPrivateReferenceAvailable']);
+});
+
+test('P2L-B1-26: trust を無視する consumer でも、申告を Promotion Gate / Ledger へそのまま渡せない', () => {
+  // 将来の不注意な consumer を模す: trust を一切見ずに、目につく object を gate へ流し込む
+  const out = Pack.validateProjectPack(strongestClaimPack('project_pressure_map'));
+  const careless = [];
+  out.evidence.sourceScopes.forEach((s) => { careless.push(s.sourceClaim, s); });
+  careless.push(out.evidence, out);
+  careless.forEach((candidate, i) => {
+    assert.throws(() => Evidence.assertPromotionGate('verified', candidate), Error, 'candidate #' + i);
+    assert.throws(() => Ledger.createEntry({ factKey: 'pane_width_mm', value: 987, unit: 'mm',
+      verificationStatus: 'verified', evidence: candidate }), Error, 'ledger candidate #' + i);
+  });
+  // 陽性対照: 同じ Ledger 呼び出しに canonical な詰め替えを渡すと通る（Ledger の gate も生きている）
+  const canonical = naiveCanonical(out.evidence.sourceScopes[0].sourceClaim);
+  assert.doesNotThrow(() => Ledger.createEntry({ factKey: 'pane_width_mm', value: 987, unit: 'mm',
+    verificationStatus: 'verified', evidence: canonical }));
+  // この phase に sourceClaim → canonical の adapter は無い（後続 stage で trust を確かめて作る）
+  Object.keys(Pack).forEach((k) => {
+    assert.equal(/canonical|adapter|toEvidence|promot/i.test(k), false, 'export ' + k);
+  });
 });
