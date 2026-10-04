@@ -119,6 +119,14 @@
   var GlassCalc = resolveDependency('GlassCalc', '../calc.js', 'calc.js');
   var Wind = resolveDependency('WindPressure', '../wind-pressure.js', 'wind-pressure.js');
 
+  // 圧力の安全上限は Project Input Package と同じ値を使う（重複定義しない）。読み込み時に
+  // 1 度だけ値を確定させる: ProjectInput の export object は freeze されていないので、
+  // 呼び出しのたびに読むと、後から書き換えられた上限で検証してしまう。
+  var MAX_PRESSURE = ProjectInput.MAX_PRESSURE;
+  if (typeof MAX_PRESSURE !== 'number' || !isFinite(MAX_PRESSURE) || MAX_PRESSURE <= 0) {
+    throw new Error('project-pack.js: ProjectInput.MAX_PRESSURE must be a finite positive number');
+  }
+
   // ============================================================
   // Contract
   // ============================================================
@@ -374,6 +382,10 @@
     }
     if (value.value <= 0) {
       fail(where + '.value', 'must be greater than 0 (negative pressure is stored as a magnitude)');
+    }
+    if (unit === UNITS.pressure && value.value > MAX_PRESSURE) {
+      fail(where + '.value', 'exceeds the allowed pressure maximum (' + MAX_PRESSURE + ' ' + UNITS.pressure +
+        ', shared with Project Input Package)');
     }
     return { value: value.value, unit: unit };
   }

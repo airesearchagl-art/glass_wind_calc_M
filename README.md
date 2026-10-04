@@ -849,6 +849,8 @@ UI もありません。画面の挙動と Closure の集計は main と同じ�
   建具記号・図面番号・ファイル名・path 風の ID は拒否します。実建具との対応表は schema に入れません。
 - 1 枚の pane の寸法は `panes` の 1 か所にだけ置き、case は `paneId` で参照します。
 - 量は `{ value, unit }` で、単位は 1 つに固定です（mm / N/m² / m / m/s）。単位変換はしません。
+- 圧力量（case の `designPressure`、正圧・負圧 map、対応する records）の上限は、Project Input Package と同じ
+  `MAX_PRESSURE`（1,000,000 N/m²）です。値は `project-input.js` から export して共有し、pack 側で重複定義しません。
 - `glassType` は case の入力です。Evidence の fact ではありません。
 
 ### pressureModel の 3 mode（曖昧な fallback なし）

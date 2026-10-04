@@ -616,3 +616,37 @@ test('P2L-B1-26: trust を無視する consumer でも、申告を Promotion Gat
     assert.equal(/canonical|adapter|toEvidence|promot/i.test(k), false, 'export ' + k);
   });
 });
+
+// ── Optional hardening: 圧力の安全上限は Project Input Package と共有する ──────────
+test('P2L-B1-27: 圧力の上限は ProjectInput.MAX_PRESSURE を再利用し、すべての圧力量に効く', () => {
+  const ProjectInput = require('../project-config/project-input.js');
+  const MAX = ProjectInput.MAX_PRESSURE;
+  assert.equal(MAX, 1000000);
+  // pack 側に同じ値を書き写していない
+  assert.equal(/1000000|1e6|1_000_000/.test(PACK_SRC), false);
+
+  const sites = [
+    ['case_direct designPressure', 'case_direct', (p, v) => { p.glazingCases[0].designPressure.value = v; }],
+    ['positive pressure', 'project_pressure_map', (p, v) => { p.windConditions.positivePressures[0].pressure.value = v; }],
+    ['negative magnitude', 'project_pressure_map', (p, v) => { p.windConditions.negativePressures[0].magnitude.value = v; }],
+    ['case_design_pressure record', 'case_direct', (p, v) => { p.evidence.records[2].quantity.value = v; }],
+    ['positive_pressure record', 'project_pressure_map', (p, v) => { p.evidence.records[2].quantity.value = v; }],
+    ['negative_pressure_magnitude record', 'project_pressure_map', (p, v) => { p.evidence.records[3].quantity.value = v; }]
+  ];
+  sites.forEach(([name, mode, set]) => {
+    const atMax = syntheticPack(mode); set(atMax, MAX);
+    assert.doesNotThrow(() => Pack.validateProjectPack(atMax), name + ' = MAX');
+    const over = syntheticPack(mode); set(over, MAX + 1);
+    rejects(over, /exceeds the allowed pressure maximum/, name + ' = MAX + 1');
+  });
+
+  // 上限は読み込み時に確定している: 後から export を書き換えても緩まない
+  const saved = ProjectInput.MAX_PRESSURE;
+  try {
+    ProjectInput.MAX_PRESSURE = Infinity;
+    const over = syntheticPack('case_direct'); over.glazingCases[0].designPressure.value = MAX + 1;
+    rejects(over, /exceeds the allowed pressure maximum \(1000000 /);
+  } finally {
+    ProjectInput.MAX_PRESSURE = saved;
+  }
+});
