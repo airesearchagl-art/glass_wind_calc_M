@@ -80,6 +80,14 @@ function withSyntheticRegistry(fn) {
       }
       return preset;
     },
+    // この合成 registry では合成 preset が bootstrap built-in の役を担う（S2-A.5 で closure は
+    // getBuiltInPreset() だけを使う）。
+    getBuiltInPreset: function (id) {
+      if (id !== preset.projectId) {
+        throw new Error('getBuiltInPreset(): not a repository built-in preset: ' + JSON.stringify(id));
+      }
+      return preset;
+    },
     hasPreset: function (id) { return id === preset.projectId; },
     listPresets: function () { return []; }
   };

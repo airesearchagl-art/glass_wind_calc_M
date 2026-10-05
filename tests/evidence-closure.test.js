@@ -751,7 +751,9 @@ test('P2J-C37: Evidence validator を複製していない', () => {
   assert.match(CLOSURE_SRC, /Evidence\.canonicalizeSourceReference\(/);
   assert.match(CLOSURE_SRC, /Evidence\.assertOrdinaryObject\(/);
   assert.match(CLOSURE_SRC, /Ledger\.KNOWN_FACT_KEYS/);
-  assert.match(CLOSURE_SRC, /Registry\.getPreset\(/);
+  // preset は registry の built-in 境界からだけ引く（S2-A.5: getPreset() は built-in を保証しない）
+  assert.match(CLOSURE_SRC, /Registry\.getBuiltInPreset\b/);
+  assert.equal(/Registry\.getPreset\(/.test(CLOSURE_SRC), false, 'getPreset() で current truth を引かない');
   assert.equal(/require\(['"]\.\/miyoshi\.js['"]\)/.test(CLOSURE_SRC), false,
     '案件moduleを直接requireしない');
 });
@@ -1043,6 +1045,14 @@ function withSyntheticRegistry(fn) {
     getPreset: function (id) {
       if (id !== preset.projectId) {
         throw new Error('getPreset(): unknown projectId: ' + JSON.stringify(id));
+      }
+      return preset;
+    },
+    // この合成 registry では合成 preset が bootstrap built-in の役を担う（S2-A.5 で closure は
+    // getBuiltInPreset() だけを使う）。
+    getBuiltInPreset: function (id) {
+      if (id !== preset.projectId) {
+        throw new Error('getBuiltInPreset(): not a repository built-in preset: ' + JSON.stringify(id));
       }
       return preset;
     },
@@ -1570,7 +1580,8 @@ test('P2J-C59: Wave 3 も既存contractを呼び、判定を複製しない', ()
   assert.match(CLOSURE_SRC, /Ledger\.reconcileFact\(/);
   assert.match(CLOSURE_SRC, /Ledger\.evaluateCasePromotion\(/);
   assert.match(CLOSURE_SRC, /Ledger\.createLedger\(/);
-  assert.match(CLOSURE_SRC, /Registry\.getPreset\(/);
+  assert.match(CLOSURE_SRC, /Registry\.getBuiltInPreset\b/);
+  assert.equal(/Registry\.getPreset\(/.test(CLOSURE_SRC), false);
 
   // case critical fact の一覧を自前で持たない
   assert.equal(/CASE_TYPE_CRITICAL_FACTS\s*=/.test(CLOSURE_SRC), false);

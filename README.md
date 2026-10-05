@@ -223,7 +223,11 @@ designPressure = max(abs(positivePressure), abs(negativePressure))
 
 - **registry にあることは、repository の built-in であることと同じではありません。** `registerPreset()` は
   形の要件（`hasFixedPreset === true`・`getPublicLabel()` 等）を満たす config を後からでも登録できます。
-  built-in の trust が必要な境界（`ProjectContext.fromLegacyPreset()`）は `getBuiltInPreset()` を使います。
+  built-in の trust が必要な境界は `getBuiltInPreset()` を使います（Phase 2L-B2 S2-A.5 で収束）:
+  `ProjectInput.fromPreset()` と `registered_preset` の `sourceId` 検証、Evidence Closure の
+  scope contract と現在の主張（`createProjectScopeContract()` / `evaluateClosure()`）、
+  `ProjectContext.fromLegacyPreset()`。後から登録した preset は、これらのどれからも
+  `registered_preset`・closure の対象・`built_in_current` になりません。
   `BUILT_IN_PRESET_IDS` は参照用の凍結した写しで、trust の判定には使いません。registry の export object も凍結しています。
 - 登録できるのは `hasFixedPreset === true` を持つbuilt-in案件configだけです。手入力（`manual.js`、`hasFixedPreset: false`）は**trusted presetとして登録できません**。
 - 公開ラベルは各configの `getPublicLabel()` のみを経由します（内部呼称 `projectName` へフォールバックしません）。

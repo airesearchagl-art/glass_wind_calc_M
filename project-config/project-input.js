@@ -185,6 +185,28 @@
     throw new Error('ProjectInput: PresetRegistry (project-config/registry.js) is required but not available');
   }
 
+  /**
+   * repository の built-in preset（registry が bootstrap で捕まえた instance）を返す。
+   * built-in でなければ null（fail closed）。
+   *
+   * Phase 2L-B2 S2-A.5: 「registry にあること」は built-in であることを意味しない。
+   * registerPreset() は公開されており、形の要件を満たす config を後からでも登録できる。
+   * `registered_preset` を名乗れるかどうかは getPreset() / hasPreset() ではなく、
+   * getBuiltInPreset() の同一性だけで決める。getBuiltInPreset() を持たない registry では
+   * 何も built-in と見なさない。
+   */
+  function resolveBuiltInPreset(projectId) {
+    var registry = resolveRegistry();
+    if (typeof registry.getBuiltInPreset !== 'function') {
+      return null;
+    }
+    try {
+      return registry.getBuiltInPreset(projectId);
+    } catch (e) {
+      return null;
+    }
+  }
+
   // ------------------------------------------------------------
   // 原始的なvalidator
   // ------------------------------------------------------------
@@ -306,8 +328,9 @@
         throw new Error('registered_preset requires a non-empty string sourceId');
       }
       assertPublicSafeString(raw.sourceId, 'sourceId');
-      // registryに登録されていないprojectIdは `registered_preset` を名乗れない。
-      if (!resolveRegistry().hasPreset(raw.sourceId)) {
+      // repository の built-in preset でない projectId は `registered_preset` を名乗れない
+      // （後から registerPreset() で登録された preset も名乗れない）。
+      if (!resolveBuiltInPreset(raw.sourceId)) {
         throw new Error(
           'registered_preset requires a sourceId registered in the built-in preset registry: ' +
             JSON.stringify(raw.sourceId)
@@ -456,14 +479,14 @@
     if (!presetConfig || typeof presetConfig !== 'object' || presetConfig.hasFixedPreset !== true) {
       throw new Error('fromPreset(): a built-in registered preset config is required');
     }
-    // hasFixedPresetマーカーの自称だけでは足りない。registryが保持している
+    // hasFixedPresetマーカーの自称だけでは足りない。registryが bootstrap で捕まえた
     // built-in preset object *そのもの* であることを同一性で確認する
     // （`registered_preset` を名乗る偽装objectを構造的に排除する）。
-    var registry = resolveRegistry();
+    // getPreset() の同一性では足りない: 後から registerPreset() で登録した config も
+    // getPreset() からは自分自身が返る（S2-A.5）。
     if (
       typeof presetConfig.projectId !== 'string' ||
-      !registry.hasPreset(presetConfig.projectId) ||
-      registry.getPreset(presetConfig.projectId) !== presetConfig
+      resolveBuiltInPreset(presetConfig.projectId) !== presetConfig
     ) {
       throw new Error('fromPreset(): a built-in registered preset config is required');
     }
