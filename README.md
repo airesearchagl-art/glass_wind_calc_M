@@ -203,6 +203,10 @@ designPressure = max(abs(positivePressure), abs(negativePressure))
 ### 信頼モデル（trust model）
 
 - `registered_preset` の検証状況を持てるのは、**repository内のbuilt-in config だけ**です。registryは外部入力からpresetを登録する経路を一切持ちません。
+- `registered_preset` の package は、その built-in **そのもの**に結びつきます（Phase 2L-B2 RF-17-01）。
+  本物の built-in の `sourceId` を名乗っても、正圧・負圧はその preset の階別正圧・部位別負圧に実在する値でなければ拒否されます。
+  `provenance` の `publicLabel` / `verificationStatus` / `note` は呼び出し側の値を採らず、built-in から導きます
+  （`verificationStatus` は `wind.status`。未知の値は `unverified`）。
 - `manual` / `imported_unverified` は `verificationStatus: "unverified"` 以外を名乗れません（validatorが拒否します）。
 - したがって、外部から取り込んだデータが案件の検証済みprovenanceを偽装することはできません。
 

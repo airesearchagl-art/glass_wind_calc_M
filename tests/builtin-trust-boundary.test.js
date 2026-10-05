@@ -101,9 +101,10 @@ function presetInput() {
   return (cfg) => ({ floorKey: keyOf(cfg.wind.positivePressureByFloor), zoneKey: keyOf(cfg.wind.negativePressureByZone),
     widthMm: 900, heightMm: 1800, glassType: 'fl_single' });
 }
-function claimedPackage(sourceId, status) {
+function claimedPackage(sourceId, status, pressures) {
+  pressures = pressures || { pos: 1111, neg: 1444 };
   return { schemaVersion: 2, sourceKind: 'registered_preset', sourceId, widthMm: 900, heightMm: 1800,
-    positivePressure: 1111, negativePressure: 1444, designPressure: 0, glassType: 'fl_single', extraFactor: 1,
+    positivePressure: pressures.pos, negativePressure: pressures.neg, designPressure: 0, glassType: 'fl_single', extraFactor: 1,
     provenance: { publicLabel: 'Synthetic Fake Preset', verificationStatus: status, note: '' }, windInput: null };
 }
 function closureSummary(r) {
@@ -152,7 +153,10 @@ attempt('builtInFromPreset', () => {
   return { sourceKind: p.sourceKind, status: p.provenance.verificationStatus, expectedStatus: builtIn.wind.status,
     pos: p.positivePressure, expectedPos: builtIn.getPositivePressure(input(builtIn).floorKey) };
 });
-attempt('builtInCreate', () => PI.createProjectInput(claimedPackage(BUILT_IN_ID, builtIn.wind.status)).sourceKind);
+// RF-17-01: registered_preset の圧力は built-in が持つ値でなければならないので、陽性対照は built-in の値を使う
+const firstOf = (map) => map[Object.keys(map)[0]].value;
+attempt('builtInCreate', () => PI.createProjectInput(claimedPackage(BUILT_IN_ID, builtIn.wind.status,
+  { pos: firstOf(builtIn.wind.positivePressureByFloor), neg: firstOf(builtIn.wind.negativePressureByZone) })).sourceKind);
 attempt('builtInScope', () => {
   const c = C.createProjectScopeContract(BUILT_IN_ID);
   return { floors: Array.from(c.floors), expected: Object.keys(builtIn.wind.positivePressureByFloor).sort() };
@@ -306,4 +310,110 @@ test('P2L-S2A5-05: trust-bearing module は getPreset() / hasPreset() / id 一�
       assert.equal(new RegExp("['\"]" + id + "['\"]").test(code), false, f + ' に案件 id ' + id + ' が書かれている');
     });
   });
+});
+
+// ============================================================
+// RF-17-01: registered_preset の payload は、本物の built-in の id ではなく built-in そのものに結びつく
+// ============================================================
+//
+// 以下は既定 registry を変更しない（実在する built-in を読むだけ）ので同じ process で実行する。
+// built-in の id と値は registry から実行時に読み、test に書き写さない。
+
+const Registry = require('../project-config/registry.js');
+const ProjectInput = require('../project-config/project-input.js');
+const Workspace = require('../workspace.js');
+
+const BUILT_IN_ID = Registry.BUILT_IN_PRESET_IDS[0];
+const BUILT_IN = Registry.getBuiltInPreset(BUILT_IN_ID);
+const valuesOf = (map) => Object.keys(map).map((k) => map[k].value);
+const POSITIVES = valuesOf(BUILT_IN.wind.positivePressureByFloor);
+const NEGATIVES = valuesOf(BUILT_IN.wind.negativePressureByZone);
+const FLOORS = Object.keys(BUILT_IN.wind.positivePressureByFloor);
+const ZONES = Object.keys(BUILT_IN.wind.negativePressureByZone);
+const EXPECTED_STATUS = ['verified', 'partially_verified', 'unverified'].indexOf(BUILT_IN.wind.status) === -1
+  ? 'unverified' : BUILT_IN.wind.status;
+/** preset のどの map にも無い値（合成）。 */
+const notIn = (values) => { let v = Math.max(...POSITIVES, ...NEGATIVES) + 7; while (values.includes(v)) v += 1; return v; };
+
+function rawRegistered(overrides, provenance) {
+  return Object.assign({
+    schemaVersion: 2, sourceKind: 'registered_preset', sourceId: BUILT_IN_ID,
+    widthMm: 1013, heightMm: 2111, positivePressure: POSITIVES[0], negativePressure: NEGATIVES[0],
+    designPressure: 0, glassType: 'fl_single', extraFactor: 1,
+    provenance: Object.assign({ publicLabel: BUILT_IN.getPublicLabel(), verificationStatus: EXPECTED_STATUS,
+      note: '' }, provenance || {}),
+    windInput: null
+  }, overrides || {});
+}
+const PRESSURE_REJECT = (label) => new RegExp('registered_preset ' + label + ' is not a value of the built-in preset');
+const BOTH = [['createProjectInput', (p) => ProjectInput.createProjectInput(p)],
+  ['validateProjectInput', (p) => ProjectInput.validateProjectInput(p)]];
+
+test('P2L-S2A5-06: (A)(B) 本物の built-in id でも、preset に無い圧力は registered_preset にならない', () => {
+  // 陽性対照: preset の値なら通る
+  BOTH.forEach(([name, fn]) => assert.equal(fn(rawRegistered()).sourceKind, 'registered_preset', name));
+  const cases = [
+    ['arbitrary both + verified', { positivePressure: notIn(POSITIVES), negativePressure: notIn(NEGATIVES) }, 'positivePressure'],
+    ['arbitrary positive', { positivePressure: notIn(POSITIVES) }, 'positivePressure'],
+    ['arbitrary negative', { negativePressure: notIn(NEGATIVES) }, 'negativePressure'],
+    // map を取り違えても通らない（正圧は正圧 map、負圧は負圧 map の値だけ）
+    ['positive taken from the negative map', { positivePressure: NEGATIVES.find((v) => !POSITIVES.includes(v)) }, 'positivePressure'],
+    ['negative taken from the positive map', { negativePressure: POSITIVES.find((v) => !NEGATIVES.includes(v)) }, 'negativePressure'],
+    ['negative with a flipped sign', { negativePressure: -NEGATIVES[0] }, 'negativePressure']
+  ];
+  cases.forEach(([what, overrides, label]) => {
+    BOTH.forEach(([name, fn]) => {
+      assert.throws(() => fn(rawRegistered(overrides, { verificationStatus: 'verified' })), PRESSURE_REJECT(label), name + ': ' + what);
+    });
+  });
+});
+
+test('P2L-S2A5-07: (C) 呼び出し側の verificationStatus は採らない（built-in の状況へ正規化、強い主張は残らない）', () => {
+  ['verified', 'partially_verified', 'unverified'].forEach((claimed) => {
+    BOTH.forEach(([name, fn]) => {
+      const pkg = fn(rawRegistered({}, { verificationStatus: claimed }));
+      assert.equal(pkg.provenance.verificationStatus, EXPECTED_STATUS, name + ' claimed ' + claimed);
+    });
+  });
+  if (EXPECTED_STATUS !== 'verified') {
+    BOTH.forEach(([name, fn]) => {
+      assert.notEqual(fn(rawRegistered({}, { verificationStatus: 'verified' })).provenance.verificationStatus, 'verified', name);
+    });
+  }
+  // 形式の検証は残る（未知の値は拒否）
+  assert.throws(() => ProjectInput.createProjectInput(rawRegistered({}, { verificationStatus: 'approved' })),
+    /unsupported provenance\.verificationStatus/);
+});
+
+test('P2L-S2A5-08: (D) 呼び出し側の publicLabel / note は trusted provenance にならない', () => {
+  const genuine = ProjectInput.fromPreset(BUILT_IN, { floorKey: FLOORS[0], zoneKey: ZONES[0],
+    widthMm: 1013, heightMm: 2111, glassType: 'fl_single' });
+  BOTH.forEach(([name, fn]) => {
+    const pkg = fn(rawRegistered({}, { publicLabel: 'SPOOFED PRESET LABEL', note: 'checked and verified by reviewer' }));
+    assert.equal(pkg.provenance.publicLabel, BUILT_IN.getPublicLabel(), name);
+    assert.equal(pkg.provenance.note, genuine.provenance.note, name);
+    assert.equal(pkg.sourceId, BUILT_IN.projectId, name);
+  });
+  // 公開文字列として不正な label は形式検証で拒否される
+  assert.throws(() => ProjectInput.createProjectInput(rawRegistered({}, { publicLabel: 'see https://example.invalid/x' })),
+    /publicLabel/);
+});
+
+test('P2L-S2A5-09: (E)(F) fromPreset の出力は全 floor × zone で preset 由来のまま、再検証・Workspace でも変わらない', () => {
+  const ws = Workspace.createWorkspace();
+  FLOORS.forEach((floorKey) => ZONES.forEach((zoneKey) => {
+    const pkg = ProjectInput.fromPreset(BUILT_IN, { floorKey, zoneKey, widthMm: 1013, heightMm: 2111,
+      glassType: 'lowe_fl', extraFactor: 0.9 });
+    assert.equal(pkg.sourceKind, 'registered_preset');
+    assert.equal(pkg.sourceId, BUILT_IN.projectId);
+    assert.equal(pkg.positivePressure, BUILT_IN.getPositivePressure(floorKey));
+    assert.equal(pkg.negativePressure, BUILT_IN.getNegativePressure(zoneKey));
+    assert.deepEqual(pkg.provenance, { publicLabel: BUILT_IN.getPublicLabel(), verificationStatus: EXPECTED_STATUS,
+      note: pkg.provenance.note });
+    // (F) 再検証は恒等（JSON round-trip を含む）
+    assert.deepEqual(ProjectInput.validateProjectInput(JSON.parse(JSON.stringify(pkg))), pkg, floorKey + '/' + zoneKey);
+    const caseId = ws.addCase(pkg);
+    assert.deepEqual(ws.getCase(caseId).inputPackage, pkg, 'workspace ' + floorKey + '/' + zoneKey);
+  }));
+  assert.equal(ws.listCases ? ws.listCases().length : FLOORS.length * ZONES.length, FLOORS.length * ZONES.length);
 });
