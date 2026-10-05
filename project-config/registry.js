@@ -16,6 +16,14 @@
  *   - 手入力（project-config/manual.js）はpresetではなく入力modeであり、
  *     trusted presetとして登録できない（`hasFixedPreset !== true` をrejectする）。
  *   - unknown projectId は fail closed（undefinedを返さず例外を投げる）。
+ *   - **registry にあること ≠ repository の built-in であること**（Phase 2L-B2 RF-16-01）。
+ *     registerPreset() は公開されており、形の要件を満たす config なら後からでも登録できる。
+ *     built-in であることは、bootstrap 時に BUILT_IN_PRESET_MODULES から捕まえた
+ *     module instance の**同一性**だけで決まり、getBuiltInPreset() がそれだけを返す。
+ *     後から登録した config は getPreset() では引けても、getBuiltInPreset() では引けない。
+ *     export する BUILT_IN_PRESET_IDS は参照用の凍結した写しで、権威ではない。
+ *     将来 built-in（合成 sample preset を含む）を足すときは、BUILT_IN_PRESET_MODULES に
+ *     source として追加する（review を通る経路だけが built-in を作る）。
  *
  * 静的HTML/JS構成・ビルド不要という制約を維持するため、UMD形式の
  * プレーンJSとして提供する（<script src> と require() の両対応）。
@@ -130,22 +138,50 @@
     return null;
   }
 
-  // 既定registryにbuilt-in presetを登録する。
+  // 既定registryにbuilt-in presetを登録し、同時にその module instance を捕まえる。
+  // builtInPresets はこの bootstrap でだけ書かれ、以後どの関数からも書き換えられない。
   var defaultRegistry = createRegistry();
+  var builtInPresets = Object.create(null);
   for (var i = 0; i < BUILT_IN_PRESET_MODULES.length; i++) {
     var entry = BUILT_IN_PRESET_MODULES[i];
     var cfg = resolveBuiltIn(entry);
     if (cfg) {
       defaultRegistry.registerPreset(cfg);
+      // 宣言した projectId と config 自身の projectId が一致するものだけを built-in とする
+      if (cfg.projectId === entry.projectId) {
+        builtInPresets[entry.projectId] = cfg;
+      }
     }
   }
 
-  return {
+  /**
+   * repository の built-in preset を返す（bootstrap で捕まえた module instance そのもの）。
+   * 後から registerPreset() で登録された config は返さない（fail closed）。
+   * built-in の trust を必要とする consumer はこの境界を使う。
+   */
+  function getBuiltInPreset(projectId) {
+    if (!isPlainString(projectId) || !Object.prototype.hasOwnProperty.call(builtInPresets, projectId)) {
+      throw new Error('getBuiltInPreset(): not a repository built-in preset: ' + JSON.stringify(projectId));
+    }
+    var builtIn = builtInPresets[projectId];
+    // registry は重複登録を拒否するので食い違わないはずだが、食い違えば信用しない
+    if (defaultRegistry.getPreset(projectId) !== builtIn) {
+      throw new Error('getBuiltInPreset(): registry entry for ' + JSON.stringify(projectId) +
+        ' is not the captured built-in instance');
+    }
+    return builtIn;
+  }
+
+  // export object も凍結する: 後から getBuiltInPreset や BUILT_IN_PRESET_IDS を差し替えて
+  // built-in の判定を変えることはできない。
+  return Object.freeze({
     createRegistry: createRegistry,
     registerPreset: function (config) { return defaultRegistry.registerPreset(config); },
     getPreset: function (projectId) { return defaultRegistry.getPreset(projectId); },
     hasPreset: function (projectId) { return defaultRegistry.hasPreset(projectId); },
     listPresets: function () { return defaultRegistry.listPresets(); },
-    BUILT_IN_PRESET_IDS: BUILT_IN_PRESET_MODULES.map(function (e) { return e.projectId; })
-  };
+    getBuiltInPreset: getBuiltInPreset,
+    // 参照用の凍結した写し。trust の判定には使わない（getBuiltInPreset() を使う）。
+    BUILT_IN_PRESET_IDS: Object.freeze(BUILT_IN_PRESET_MODULES.map(function (e) { return e.projectId; }))
+  });
 });

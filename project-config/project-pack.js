@@ -697,10 +697,16 @@
       var subjectKey = kind + (spec.refField === null ? '' : '|' + normalizedSubject[spec.refField]);
       // 1 つの対象に複数の record を置くには、どれを採るかの明示的な設計が要る。黙って選ばない。
       rejectDuplicate(seenSubject, subjectKey, at, 'record subject');
+      var quantity = readQuantity(r.quantity, spec.unit, at + '.quantity');
+      // pane 寸法の record にも panes と同じ canonical 上限をかける。上限は書き写さず、
+      // readPanes() と同じ ProjectInput の契約を呼ぶ（mm の record は pane 寸法だけ）。
+      if (spec.unit === UNITS.length) {
+        ProjectInput.assertPaneDimensionMm(quantity.value, at + '.quantity.value');
+      }
       return {
         sourceScopeId: scopeId,
         subject: normalizedSubject,
-        quantity: readQuantity(r.quantity, spec.unit, at + '.quantity')
+        quantity: quantity
       };
     });
 

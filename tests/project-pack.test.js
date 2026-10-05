@@ -650,3 +650,26 @@ test('P2L-B1-27: 圧力の上限は ProjectInput.MAX_PRESSURE を再利用し、
     ProjectInput.MAX_PRESSURE = saved;
   }
 });
+
+// ── S2-A focused hardening: pane 寸法の record にも panes と同じ canonical 上限 ──────
+test('P2L-B1-28: pane_width / pane_height の record は ProjectInput の寸法上限を共有する', () => {
+  const ProjectInput = require('../project-config/project-input.js');
+  const MAX = ProjectInput.MAX_DIMENSION_MM;
+  assert.equal(MAX, 100000);
+  // pack 側に同じ値を書き写していない
+  assert.equal(/100000|1e5|100_000/.test(PACK_SRC), false);
+  [['pane_width', 0], ['pane_height', 1]].forEach(([kind, idx]) => {
+    MODES.forEach((mode) => {
+      const atMax = syntheticPack(mode);
+      atMax.evidence.records[idx].quantity.value = MAX;
+      assert.doesNotThrow(() => Pack.validateProjectPack(atMax), mode + ' ' + kind + ' = MAX');
+      const over = syntheticPack(mode);
+      over.evidence.records[idx].quantity.value = MAX + 1;
+      rejects(over, /records\[\d+\]\.quantity\.value exceeds the allowed maximum \(100000\)/, mode + ' ' + kind + ' = MAX + 1');
+    });
+  });
+  // panes 側と同じ上限・同じ文言（同じ契約を呼んでいる）
+  const pane = syntheticPack('case_direct');
+  pane.panes[0].widthMm.value = MAX + 1;
+  rejects(pane, /widthMm\.value exceeds the allowed maximum \(100000\)/);
+});

@@ -219,7 +219,12 @@ designPressure = max(abs(positivePressure), abs(negativePressure))
 | `hasPreset(projectId)` | 真偽値 |
 | `listPresets()` | `[{ projectId, publicLabel }]`。ラベルは `getPublicLabel()` 境界のみを経由 |
 | `createRegistry()` | 独立したregistryインスタンス（テスト用途等） |
+| `getBuiltInPreset(projectId)` | repository の built-in preset だけを返す（bootstrap で捕まえた module instance そのもの）。後から `registerPreset()` で登録した config は返さず例外（Phase 2L-B2 RF-16-01） |
 
+- **registry にあることは、repository の built-in であることと同じではありません。** `registerPreset()` は
+  形の要件（`hasFixedPreset === true`・`getPublicLabel()` 等）を満たす config を後からでも登録できます。
+  built-in の trust が必要な境界（`ProjectContext.fromLegacyPreset()`）は `getBuiltInPreset()` を使います。
+  `BUILT_IN_PRESET_IDS` は参照用の凍結した写しで、trust の判定には使いません。registry の export object も凍結しています。
 - 登録できるのは `hasFixedPreset === true` を持つbuilt-in案件configだけです。手入力（`manual.js`、`hasFixedPreset: false`）は**trusted presetとして登録できません**。
 - 公開ラベルは各configの `getPublicLabel()` のみを経由します（内部呼称 `projectName` へフォールバックしません）。
 
@@ -851,6 +856,8 @@ UI もありません。画面の挙動と Closure の集計は main と同じ�
 - 量は `{ value, unit }` で、単位は 1 つに固定です（mm / N/m² / m / m/s）。単位変換はしません。
 - 圧力量（case の `designPressure`、正圧・負圧 map、対応する records）の上限は、Project Input Package と同じ
   `MAX_PRESSURE`（1,000,000 N/m²）です。値は `project-input.js` から export して共有し、pack 側で重複定義しません。
+- pane 寸法の records（`pane_width` / `pane_height`）にも、`panes` と同じ寸法上限
+  （`ProjectInput.assertPaneDimensionMm()`、100,000 mm）をかけます（Phase 2L-B2 / S2-A）。
 - `glassType` は case の入力です。Evidence の fact ではありません。
 
 ### pressureModel の 3 mode（曖昧な fallback なし）
@@ -890,6 +897,53 @@ Evidence Closure の Observation ではありません（変換は後続 stage�
 一致は出典確認の証拠にならず、ここは Human Review の範囲です。
 
 fixture はすべて合成値です（`tests/project-pack.test.js` が、repository の案件値と 1 つも一致しないことを確認します）。
+
+## ProjectContext — 契約と adapter（Phase 2L-B2 / S2-A）
+
+`project-config/project-context.js` は、generic core が案件データを**どの源から来たかによらず
+同じ境界から**受け取るための契約と adapter です。**まだ runtime から使われていません**
+（`index.html`・registry の runtime selection・Evidence Closure・probe・browser UI は読みません）。
+画面の挙動・probe の値・Closure の集計は変わりません。案件 preset の削除もしていません。
+
+| adapter | 入力 | sourceKind | trust |
+|---|---|---|---|
+| `fromLegacyPreset(projectId)` | `PresetRegistry.getBuiltInPreset()` が返す built-in preset だけ（後から登録された preset・呼び出し側の config object は受け取らない） | `legacy_builtin` | `built_in_current` |
+| `fromProjectPack(validated)` | `validateProjectPack()` の出力（trust は `pack_unreviewed` だけ） | `project_pack_unreviewed` | `pack_unreviewed` |
+
+trust は sourceKind からだけ決まり、呼び出し側からも pack からも渡せません。
+adapter が発行した context だけが `assertProjectContext()` を通ります（形を真似た object は通りません）。
+context は deep-frozen で、呼び出し側の object を共有しません。
+
+### variant を同じ形へ潰さず、capability で表します
+
+| capability | legacy preset | Project Pack |
+|---|---|---|
+| `projectPressureMap`（階別正圧・部位別負圧） | ✓ | mode が `project_pressure_map` のとき |
+| `notificationCalculation`（告示算定の風条件） | — | mode が `notification1458` のとき |
+| `caseDirectPressure`（case ごとの設計風圧） | — | mode が `case_direct` のとき |
+| `declaredPanes` / `declaredGlazingCases` | — | ✓（中立 ID のまま） |
+| `evidenceClaims`（`pack_unreviewed_claim`） | — | ✓ |
+| `sampleDefaultDimensions`（初期寸法） | ✓ | — |
+| `builtInEvidence`（`built_in_canonical`） | ✓ | — |
+
+- 持っていない capability を要求すると fail closed します（代わりの値を作りません）。
+- legacy preset に pane / glazing case は無いので、架空の `P001` / `G001` は作りません。
+  初期寸法は sample default であって pane ではありません。
+- legacy の V0 / 粗度区分は Evidence 表示用の built-in 値で、告示算定の入力（`notificationCalculation`）にはしません。
+- pressure の源は mode と 1 対 1 で、1 つだけです。`case_direct` の設計風圧は `caseDirectPressure` にだけ置き、
+  case 自体は風圧を持ちません。`case_direct` で zone を推測しません。
+- context は計算をしません。値は後段の `ProjectInput` / `WindPressure` / `GlassCalc` へ渡すだけです。
+
+### Evidence は 2 つの別の型です
+
+- `built_in_canonical`: registry の built-in preset が持つ canonical Evidence の写し。legacy context の
+  `builtInEvidence` の中にだけあります。昇格も降格もしません。
+- `pack_unreviewed_claim`: pack の `sourceClaim`（`claimed*` field）。canonical Evidence ではありません。
+
+pack 由来の context には、`ProjectEvidence.canPromoteToVerified()` や
+`EvidenceLedger.createEntry(… verified …)` を通る object が 1 つもありません。adapter は申告を
+canonical Evidence へ変換せず、発行前の形の検証が、pack context に昇格可能な object があれば
+context を作らせません。review 済み pack の attestation は S5 です。
 
 ## 設計定数
 
@@ -998,7 +1052,8 @@ glass_wind_calc_M/
 │   ├── manual.js                 # 「手入力 / Generic」モードの入力契約（Phase 2C）。miyoshi.jsに非依存
 │   ├── registry.js               # generic preset registry（Phase 2D）。built-in presetのみ登録可・unknownはfail closed
 │   ├── project-input.js          # versioned Project Input Package（Phase 2D〜2E）。v2でwindInputを保持
-│   └── project-pack.js           # Project Pack v1 の schema / validator（Phase 2L-B1）。契約のみ・runtime未配線
+│   ├── project-pack.js           # Project Pack v1 の schema / validator（Phase 2L-B1）。契約のみ・runtime未配線
+│   └── project-context.js        # ProjectContext 契約 + legacy / pack adapter（Phase 2L-B2 / S2-A）。runtime未配線
 ├── tests/
 │   ├── calc.test.js              # 汎用計算コアの known-answer test + core purity（node:test）
 │   ├── project-config.test.js    # project-config分離の整合性・Evidence契約・代表ケース回帰テスト
@@ -1013,7 +1068,8 @@ glass_wind_calc_M/
 │   ├── project-profile.test.js   # プロファイル契約・resolver等価性・snapshot・Matrix cap・canonical gate（Phase 2H）
 │   ├── review-package.test.js    # Review Package契約・値の一致・exporter gate・redaction・継承値遮断（Phase 2I）
 │   ├── review-ui.test.js         # Review UIの契約テスト（activeReview単一source・鮮度再計算・印刷関門）（Phase 2I）
-│   └── project-pack.test.js      # Project Pack v1 契約・3 mode・trust境界・合成fixture（Phase 2L-B1）
+│   ├── project-pack.test.js      # Project Pack v1 契約・3 mode・trust境界・合成fixture（Phase 2L-B1）
+│   └── project-context.test.js   # ProjectContext 契約・adapter・trust不変条件・runtime parity（Phase 2L-B2 / S2-A）
 ├── package.json
 └── README.md                     # このファイル
 ```
