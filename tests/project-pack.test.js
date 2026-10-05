@@ -488,8 +488,13 @@ test('P2L-B1-20: 公開面の advisory は捨てずに返し、hard rule は拒�
 
 test('P2L-B1-21: runtime へは配線しない（既存 format も置き換えない）', () => {
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-  assert.equal(html.includes('project-pack.js'), false, 'index.html が Project Pack を読み込んでいる');
-  assert.equal(html.includes('ProjectPack'), false);
+  // S2-B: project-pack.js は project-context.js の依存として読み込まれるだけで、runtime は
+  // Project Pack を選択・読込しない（validator も pack adapter も呼ばない）。
+  const packAt = html.indexOf('<script src="project-config/project-pack.js"></script>');
+  const ctxAt = html.indexOf('<script src="project-config/project-context.js"></script>');
+  assert.equal(packAt !== -1 && ctxAt > packAt, true, 'project-pack.js は project-context.js の依存としてだけ読み込む');
+  assert.equal(/ProjectPack\.|validateProjectPack|fromProjectPack/.test(html), false,
+    'index.html が Project Pack を runtime で扱っている');
   ['project-config/registry.js', 'project-config/evidence-closure.js', 'project-config/project-input.js',
     'workspace.js', 'project-profile.js', 'review-package.js', 'tools/verification/project-state-probe.mjs']
     .forEach((f) => {

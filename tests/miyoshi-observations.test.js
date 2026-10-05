@@ -394,7 +394,9 @@ test('P2L-A12: runtime へは配線しない（UI と probe は引き続き空�
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
   assert.equal(html.includes('miyoshi-observations'), false, 'index.html が intake を読み込んでいる');
   assert.equal(html.includes('MiyoshiObservations'), false, 'index.html が intake を参照している');
-  assert.match(html, /evaluateClosure\(\s*MiyoshiProjectConfig\.projectId\s*,\s*\[\s*\]\s*\)/);
+  // S2-B: UI は active ProjectContext の registryProjectId で、空の Observation 集合を評価する
+  assert.match(html, /evaluateClosure\(\s*closureProjectId\s*,\s*\[\s*\]\s*\)/);
+  assert.match(html, /closureProjectId = requireActiveProjectContext\(\)\.origin\.registryProjectId/);
 
   const probe = fs.readFileSync(
     path.join(ROOT, 'tools', 'verification', 'project-state-probe.mjs'), 'utf8');

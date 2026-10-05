@@ -328,6 +328,39 @@ test('P2L-S2A-13: legacy — sample default と検証状況は preset のまま�
   });
 });
 
+test('P2L-S2A-13b: legacy — 圧力 map 全 scope の built-in Evidence を機械的に写す（S2-B）', () => {
+  const ctx = PC.fromLegacyPreset(LEGACY_ID);
+  const pe = PC.requireCapability(ctx, 'builtInEvidence').pressureEvidence;
+  const map = PC.requireCapability(ctx, 'projectPressureMap');
+  // 順序と集合は projectPressureMap と同じ（代表 scope を選ばない）
+  assert.deepEqual(pe.positive.map((e) => e.floor), map.positivePressures.map((r) => r.floor));
+  assert.deepEqual(pe.negative.map((e) => e.zone), map.negativePressures.map((r) => r.zone));
+  // 検証状況と Evidence は preset の各 scope の写し（値は持たない）
+  pe.positive.forEach((e) => {
+    const src = Miyoshi.wind.positivePressureByFloor[e.floor];
+    assert.equal(e.evidenceKind, 'built_in_canonical');
+    assert.equal(e.verificationStatus, src.verificationStatus, e.floor);
+    assert.deepEqual({ ...e.evidence }, { ...src.evidence }, e.floor);
+    assert.equal(Object.prototype.hasOwnProperty.call(e, 'value'), false);
+  });
+  pe.negative.forEach((e) => {
+    const src = Miyoshi.wind.negativePressureByZone[e.zone];
+    assert.equal(e.verificationStatus, src.verificationStatus, e.zone);
+    assert.deepEqual({ ...e.evidence }, { ...src.evidence }, e.zone);
+  });
+  // 形の検証: scope の欠落・追加・並べ替え・型の取り違えを拒否する
+  const missing = clone(ctx); missing.capabilities.builtInEvidence.pressureEvidence.positive.pop();
+  assert.throws(() => PC.assertProjectContextShape(missing), /must list exactly the \d+ pressure-map scope/);
+  const reordered = clone(ctx); reordered.capabilities.builtInEvidence.pressureEvidence.negative.reverse();
+  assert.throws(() => PC.assertProjectContextShape(reordered), /same order as projectPressureMap/);
+  const wrongKind = clone(ctx); wrongKind.capabilities.builtInEvidence.pressureEvidence.positive[0].evidenceKind = 'pack_unreviewed_claim';
+  assert.throws(() => PC.assertProjectContextShape(wrongKind), /must be "built_in_canonical"/);
+  const promoted = clone(ctx); promoted.capabilities.builtInEvidence.pressureEvidence.positive[0].verificationStatus = 'verified';
+  assert.throws(() => PC.assertProjectContextShape(promoted), /verified/);
+  const extra = clone(ctx); extra.capabilities.builtInEvidence.pressureEvidence.positive[0].value = 1;
+  assert.throws(() => PC.assertProjectContextShape(extra), /unexpected field "value"/);
+});
+
 test('P2L-S2A-14: legacy — verifiedCases は preset と同じ（追加しない）', () => {
   const ev = PC.requireCapability(PC.fromLegacyPreset(LEGACY_ID), 'builtInEvidence');
   assert.deepEqual(clone(ev.verifiedCases), clone(Miyoshi.verifiedCases));
@@ -582,15 +615,23 @@ test('P2L-S2A-40: context を作っても runtime / probe の状態は変わら�
   assert.equal(state.hasPromotionCandidate, false);
 });
 
-test('P2L-S2A-41: runtime consumer は 0（index.html・registry・Closure・probe・browser harness は読まない）', () => {
-  const files = ['index.html', 'project-config/registry.js', 'project-config/evidence-closure.js',
+test('P2L-S2A-41: runtime consumer は index.html だけで、legacy adapter だけを使う（S2-B）', () => {
+  // S2-B で index.html が唯一の runtime consumer になった。pack adapter は runtime から呼ばない。
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  assert.match(html, /ProjectContext\.fromLegacyPreset\(/);
+  assert.equal(/fromProjectPack|validateProjectPack/.test(html), false, 'index.html が Project Pack を runtime で扱っている');
+  // それ以外の runtime module・probe は読まない
+  const files = ['project-config/registry.js', 'project-config/evidence-closure.js',
     'project-config/project-input.js', 'project-config/project-pack.js', 'project-config/miyoshi.js',
     'tools/verification/project-state-probe.mjs', 'workspace.js', 'project-profile.js', 'review-package.js'];
-  fs.readdirSync(path.join(ROOT, 'tools/browser-checks')).filter((f) => /\.m?js$/.test(f))
-    .forEach((f) => files.push('tools/browser-checks/' + f));
   files.forEach((f) => {
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
     assert.equal(/project-context|ProjectContext/.test(src), false, f + ' が ProjectContext を参照している');
+  });
+  // browser harness は観測するだけ（pack adapter を呼ばない）
+  fs.readdirSync(path.join(ROOT, 'tools/browser-checks')).filter((f) => /\.m?js$/.test(f)).forEach((f) => {
+    const src = fs.readFileSync(path.join(ROOT, 'tools/browser-checks', f), 'utf8');
+    assert.equal(/fromProjectPack|validateProjectPack/.test(src), false, f + ' が Project Pack を扱っている');
   });
 });
 

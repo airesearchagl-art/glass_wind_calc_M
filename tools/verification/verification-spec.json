@@ -27,6 +27,28 @@
       "reason": "UNVERIFIED is about the TARGET, not the instrument: this repository carries no browser measurement for an arbitrary head, so a verifier must run it at theirs. Wave 4 made that possible anywhere — Playwright is discovered (PLAYWRIGHT_MODULE, bare specifier, npm root -g, interpreter-relative) instead of imported from one machine's absolute path (P2K-F06) — and made the result readable by mapping each outcome to its own exit code (PASS->0, FAIL->1, UNVERIFIED->3, ERROR->4), with zero checks and zero failures classified ERROR rather than PASS. Wave 6 extended both halves to the other four harnesses, which Wave 4 had left on the absolute path."
     },
     {
+      "id": "context-runtime",
+      "command": "node tools/browser-checks/context-runtime.mjs",
+      "evidenceClass": "observational",
+      "admissibility": "UNVERIFIED",
+      "target": "the preset-mode UI reads its label, floor/zone options, initial dimensions, calculation, comparison, Evidence panels and Closure from the active ProjectContext, in the real tree and in substituted trees (synthetic built-in, module global replaced after bootstrap, ProjectContext unavailable, two built-ins)",
+      "oracle": "real Chromium",
+      "sharedDependencies": [
+        "expected values for the real tree are computed by requiring the same project-config modules under Node (registry, project-context, project-input, evidence-closure); the synthetic tree's expectations come from the synthetic preset written by the harness"
+      ],
+      "positiveControl": "the real tree must show the context's own label, topology and values, and the synthetic tree must show the synthetic ones (different label, floor set and order, zone order, dimensions, pressures and Evidence levels)",
+      "negativeControl": "mutants N1-N12 (direct module reads, hard-coded options/dimensions/ids, fallback on failure, ambiguous auto-selection, broken load order) each fail at least one check here or in tests/s2b-runtime-context.test.js",
+      "proves": "how index.html wires the built-in preset through ProjectContext in a real browser for the head measured",
+      "doesNotProve": "anything about an unmeasured head, or about Project Pack runtime use, which does not exist yet",
+      "instrumentFiles": [
+        "tools/browser-checks/context-runtime.mjs",
+        "tools/browser-checks/resolve-playwright.mjs",
+        "tools/browser-checks/browser-outcome.mjs"
+      ],
+      "finding": null,
+      "reason": "no browser measurement exists for the current target head; a verifier must run it at theirs"
+    },
+    {
       "id": "failopen-w4",
       "command": "node tools/browser-checks/failopen-w4.mjs",
       "evidenceClass": "observational",
@@ -320,6 +342,11 @@
     }
   ],
   "browserAssertions": [
+    {
+      "id": "preset-ui-from-project-context",
+      "statement": "the preset-mode UI is derived from the active ProjectContext: options, labels, dimensions, calculation, comparison, Evidence panels and Closure follow a substituted synthetic built-in, ignore a replaced module global, and fail closed (no fallback, no first-entry choice) when ProjectContext is unavailable or two built-ins exist",
+      "instrument": "context-runtime"
+    },
     {
       "id": "matrix-renders",
       "statement": "the Evidence Closure Matrix renders 12 rows, all BLOCKED, all Observation absent",
