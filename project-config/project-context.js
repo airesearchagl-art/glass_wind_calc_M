@@ -16,9 +16,10 @@
  *
  * ── これは何でないか ─────────────────────────────────────
  *
- * この phase では runtime に接続しない（runtime consumer 0）。index.html・registry の
- * runtime selection・Evidence Closure・probe・browser UI はこの module を読まない。
- * 案件 preset の削除・sample の移行もしない。
+ * runtime（index.html）は Phase 2L-B2 S2-B から fromLegacyPreset() だけを使い、built-in 案件
+ * preset の表示・入力・Evidence UI をこの context から読む。fromProjectPack() は runtime から
+ * 呼ばれない（Project Pack の読み込みはまだ無い）。registry・Evidence Closure・probe は
+ * この module を読まない。案件 preset の削除・sample の移行もしない。
  *
  * 計算をしない。ガラス強度式・風圧式・設計風圧の再計算はここに無い。context は
  * 入力データを保持し、後段の ProjectInput / WindPressure / GlassCalc へ渡すだけである。
@@ -29,6 +30,7 @@
  * capability として明示する。持っていない capability は**作らない**:
  *
  *   legacy_builtin           : projectPressureMap / sampleDefaultDimensions / builtInEvidence
+ *                              （builtInEvidence.pressureEvidence に圧力 map 全 scope の検証状況）
  *   project_pack_unreviewed  : (pressure 源 1 つ) / declaredPanes / declaredGlazingCases / evidenceClaims
  *
  * legacy preset に pane registry や glazing case は無い。架空の P001 / G001 を作らない。
@@ -440,8 +442,41 @@
     requireQuantity(cap.heightMm, LENGTH_UNIT, where + '.heightMm');
   }
 
-  function checkBuiltInEvidence(cap, where) {
-    exactKeys(cap, ['fields', 'groupStatus', 'verifiedCases'], [], where);
+  /**
+   * builtInEvidence.pressureEvidence の 1 側（positive / negative）。
+   * 圧力 map の scope と同じ順序・同じ集合でなければならない（一部だけ・余分な scope を許さない）。
+   */
+  function checkPressureEvidenceSide(list, scopeField, expectedScopes, where) {
+    requireArray(list, where, 0);
+    if (list.length !== expectedScopes.length) {
+      fail(where, 'must list exactly the ' + expectedScopes.length + ' pressure-map scope(s)');
+    }
+    list.forEach(function (e, i) {
+      var at = where + '[' + i + ']';
+      requireObject(e, at);
+      exactKeys(e, [scopeField, 'evidenceKind', 'verificationStatus', 'evidence'], ['sourceReference'], at);
+      if (e[scopeField] !== expectedScopes[i]) {
+        fail(at + '.' + scopeField, 'must be ' + show(expectedScopes[i]) + ' (same order as projectPressureMap)');
+      }
+      if (e.evidenceKind !== EVIDENCE_KIND_BUILT_IN) {
+        fail(at + '.evidenceKind', 'must be ' + show(EVIDENCE_KIND_BUILT_IN) + ' (got ' + show(e.evidenceKind) + ')');
+      }
+      requireObject(e.evidence, at + '.evidence');
+      exactKeys(e.evidence, CANONICAL_EVIDENCE_KEYS, [], at + '.evidence');
+      Evidence.assertEvidenceConsistency(e.verificationStatus, e.evidence, at);
+    });
+  }
+
+  function checkBuiltInEvidence(cap, where, pressureMap) {
+    exactKeys(cap, ['fields', 'groupStatus', 'verifiedCases', 'pressureEvidence'], [], where);
+    // 圧力 map の各 scope の検証状況・Evidence（built-in の写し）。UI がこれを推測で埋めない。
+    requireObject(cap.pressureEvidence, where + '.pressureEvidence');
+    exactKeys(cap.pressureEvidence, ['positive', 'negative'], [], where + '.pressureEvidence');
+    if (!pressureMap) fail(where + '.pressureEvidence', 'requires projectPressureMap');
+    checkPressureEvidenceSide(cap.pressureEvidence.positive, 'floor',
+      pressureMap.positivePressures.map(function (r) { return r.floor; }), where + '.pressureEvidence.positive');
+    checkPressureEvidenceSide(cap.pressureEvidence.negative, 'zone',
+      pressureMap.negativePressures.map(function (r) { return r.zone; }), where + '.pressureEvidence.negative');
     requireArray(cap.fields, where + '.fields', BUILT_IN_FIELDS.length);
     if (cap.fields.length !== BUILT_IN_FIELDS.length) fail(where + '.fields', 'must list exactly the built-in fields');
     cap.fields.forEach(function (f, i) {
@@ -558,7 +593,10 @@
     if (hasOwn(caps, 'caseDirectPressure')) checkCaseDirectPressure(caps.caseDirectPressure, at + 'caseDirectPressure', caseIds);
     if (hasOwn(caps, 'evidenceClaims')) checkEvidenceClaims(caps.evidenceClaims, at + 'evidenceClaims');
     if (hasOwn(caps, 'sampleDefaultDimensions')) checkSampleDefaultDimensions(caps.sampleDefaultDimensions, at + 'sampleDefaultDimensions');
-    if (hasOwn(caps, 'builtInEvidence')) checkBuiltInEvidence(caps.builtInEvidence, at + 'builtInEvidence');
+    if (hasOwn(caps, 'builtInEvidence')) {
+      checkBuiltInEvidence(caps.builtInEvidence, at + 'builtInEvidence',
+        hasOwn(caps, 'projectPressureMap') ? caps.projectPressureMap : null);
+    }
 
     checkPromotionInvariant(ctx);
     return true;
@@ -639,6 +677,25 @@
     return out;
   }
 
+  /** 圧力 map の 1 scope の built-in Evidence（値は持たない。値は projectPressureMap にある）。 */
+  function pressureEvidenceEntry(scopeField, scope, source, where) {
+    if (!source || typeof source !== 'object' || !source.evidence) {
+      fail(where, 'has no built-in Evidence');
+    }
+    var out = {};
+    out[scopeField] = scope;
+    out.evidenceKind = EVIDENCE_KIND_BUILT_IN;
+    out.verificationStatus = source.verificationStatus;
+    out.evidence = {
+      level: source.evidence.level,
+      checkedAt: source.evidence.checkedAt,
+      publicDescription: source.evidence.publicDescription,
+      privateReferenceAvailable: source.evidence.privateReferenceAvailable
+    };
+    if (hasOwn(source, 'sourceReference')) out.sourceReference = copyData(source.sourceReference);
+    return out;
+  }
+
   function readPath(obj, dotted) {
     return dotted.split('.').reduce(function (o, k) { return o ? o[k] : undefined; }, obj);
   }
@@ -694,7 +751,18 @@
             return builtInField(spec, readPath(config, spec.fieldKey), spec.fieldKey);
           }),
           groupStatus: { wind: wind.status, dimensions: dims.status },
-          verifiedCases: copyData(config.verifiedCases)
+          verifiedCases: copyData(config.verifiedCases),
+          // 圧力 map の全 scope を機械的に写す（代表 scope を選ばない・値は projectPressureMap にだけある）
+          pressureEvidence: {
+            positive: Object.keys(wind.positivePressureByFloor).map(function (floor) {
+              return pressureEvidenceEntry('floor', floor, wind.positivePressureByFloor[floor],
+                'positivePressureByFloor.' + floor);
+            }),
+            negative: Object.keys(wind.negativePressureByZone).map(function (zone) {
+              return pressureEvidenceEntry('zone', zone, wind.negativePressureByZone[zone],
+                'negativePressureByZone.' + zone);
+            })
+          }
         }
       }
     });

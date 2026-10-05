@@ -21,6 +21,8 @@ const load = () => import(MODULE);
 // deliberate act that must update this list (set identity, not a count).
 const EXPECTED_INSTRUMENT_IDS = [
   'browser-w4', 'failopen-w4', 'guard-diff', 'independent-review',
+  // Phase 2L-B2 S2-B: the preset UI is wired through ProjectContext
+  'context-runtime',
   // Human Gate, Phase 2K final: the single 'mutation' entry was split, because
   // one label could not honestly carry both claims at once.
   'mutation-kill', 'mutation-equivalence-analysis',
@@ -231,6 +233,7 @@ test('P2K-M09: 全 instrument の class と admissibility を literal で固定�
   // itself; this table keeps every classification a deliberate edit.
   const EXPECTED = [
     ['browser-w4', 'UNVERIFIED', 'observational'],
+    ['context-runtime', 'UNVERIFIED', 'observational'],
     ['failopen-w4', 'UNVERIFIED', 'observational'],
     ['guard-diff', 'ADMISSIBLE', 'regression'],
     ['independent-review', 'UNVERIFIED', 'independent'],

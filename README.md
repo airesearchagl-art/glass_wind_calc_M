@@ -909,9 +909,25 @@ fixture はすべて合成値です（`tests/project-pack.test.js` が、reposit
 ## ProjectContext — 契約と adapter（Phase 2L-B2 / S2-A）
 
 `project-config/project-context.js` は、generic core が案件データを**どの源から来たかによらず
-同じ境界から**受け取るための契約と adapter です。**まだ runtime から使われていません**
-（`index.html`・registry の runtime selection・Evidence Closure・probe・browser UI は読みません）。
-画面の挙動・probe の値・Closure の集計は変わりません。案件 preset の削除もしていません。
+同じ境界から**受け取るための契約と adapter です。
+
+### runtime（index.html）は active ProjectContext から読みます（Phase 2L-B2 / S2-B）
+
+- 案件プリセット mode の表示名・階／部位の選択肢・初期 W/H・Evidence status・Verified Case・
+  Evidence照合・Evidence Closure は、`fromLegacyPreset()` で作った**1 つの active ProjectContext** から読みます。
+  UI は案件 module を直接読みません。案件 id・階・部位・寸法を HTML / コードに持ちません。
+- built-in の候補は `PresetRegistry.BUILT_IN_PRESET_IDS` で見つけますが、これは trust の根ではありません。
+  preset selector はまだ無いため、built-in が**ちょうど 1 件**のときだけ自動選択し、0 件・2 件以上は fail closed します。
+- `ProjectInput.fromPreset()` と Evidence Closure は canonical な built-in instance を要求するので、
+  `context.origin.registryProjectId` → `PresetRegistry.getBuiltInPreset()` の compatibility bridge を使います。
+- context を作れなかったときは、案件プリセット mode を明示エラーにします（案件 module へ fallback しません）。
+  手入力・告示風圧計算・取り込みデータの mode はそのまま使えます。
+- 階の初期選択だけは、`<select id="inp-floor" data-initial-value="2">` の UI 既定（その値が context にあれば選ぶ。
+  無ければ先頭）で、現在の初期表示を変えないために残しています。topology ではありません。
+- `mode-field-miyoshi` / `value="miyoshi"` は一時的な runtime mode token です（project identity ではありません）。
+- Project Pack はまだ runtime で選択・読込しません（`project-pack.js` は `project-context.js` の依存として読み込むだけ）。
+- 実ブラウザでの確認: `node tools/browser-checks/context-runtime.mjs`（合成 built-in への差し替え・
+  bootstrap 後の module global 差し替え・context 読込失敗・built-in 2 件を含む）。
 
 | adapter | 入力 | sourceKind | trust |
 |---|---|---|---|

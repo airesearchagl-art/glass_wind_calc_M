@@ -95,21 +95,20 @@ test('AC-02: runCalc()はProject Input Package経由で計算する（designPを
   assert.doesNotMatch(html, /designP\s*=\s*Math\.max\(posP,\s*negP\)/);
 });
 
-test('UI mode separation (RF-01): 静的HTML内の「みよし案件プリセット」表記は、mode selectorの選択肢名を除きmode-field-miyoshiでラップされている', () => {
+test('UI mode separation (RF-01): 静的HTMLに案件名は無く、案件プリセットの説明はmode-field-miyoshiでラップされている', () => {
   const html = readIndexHtml();
-  // <script>より前の静的HTML部分のみを対象とする（<script>内はJSレベルで
-  // mode==='miyoshi'のときのみ描画される、既にPlaywrightで検証済みの
-  // 別メカニズム）。
+  // <script>より前の静的HTML部分のみを対象とする。
   const staticPart = html.split('<script')[0];
-  // mode selectorの選択肢テキスト（Closure Waveの指示により除外対象）を取り除く
+  // S2-B: 案件名は active ProjectContext の publicLabel から実行時に表示する。静的HTMLに持たない。
+  assert.equal(/みよし|Miyoshi|三好/.test(staticPart), false, '静的HTMLに案件名が残っている');
   const withoutSelectOption = staticPart.replace(/<option value="miyoshi"[\s\S]*?<\/option>/, '');
 
   assert.ok(
-    withoutSelectOption.includes('みよし案件プリセット'),
-    'テスト前提が崩れている: 静的部分に「みよし案件プリセット」が出現するはず（mode-field-miyoshi内に存在するはず）'
+    withoutSelectOption.includes('現在の案件プリセット'),
+    'テスト前提が崩れている: 静的部分に「現在の案件プリセット」が出現するはず（mode-field-miyoshi内に存在するはず）'
   );
 
-  const regex = /みよし案件プリセット/g;
+  const regex = /現在の案件プリセット/g;
   let match;
   let count = 0;
   while ((match = regex.exec(withoutSelectOption)) !== null) {
@@ -119,7 +118,7 @@ test('UI mode separation (RF-01): 静的HTML内の「みよし案件プリセッ
     assert.match(
       precedingChunk,
       /mode-field-miyoshi/,
-      `「みよし案件プリセット」の出現箇所(${count}番目)がmode-field-miyoshiでラップされていない`
+      `「現在の案件プリセット」の出現箇所(${count}番目)がmode-field-miyoshiでラップされていない`
     );
   }
 });
@@ -301,12 +300,18 @@ test('AC-10: 参考比較は明示選択したときだけ表示される', () =
 test('AC-16: Evidence status表示はconfigのmetadataから導出し、UIに固定値を持たない', () => {
   const html = readIndexHtml();
   assert.match(html, /id="evidence-status-table"/);
-  // 検証状況はconfigから読む
-  assert.match(html, /config\.wind\.V0\.verificationStatus/);
-  assert.match(html, /config\.wind\.roughnessCategory\.verificationStatus/);
-  assert.match(html, /config\.identity\.verificationStatus/);
-  assert.match(html, /dims\.status/);
-  assert.match(html, /config\.wind\.status/);
+  // 検証状況は active ProjectContext の builtInEvidence から読む（S2-B）
+  const fnStart = html.indexOf('function renderEvidenceStatus');
+  const fn = html.slice(fnStart, html.indexOf('\n}', fnStart));
+  assert.match(fn, /builtInEvidenceField\(ctx, 'wind\.V0'\)/);
+  assert.match(fn, /builtInEvidenceField\(ctx, 'wind\.roughnessCategory'\)/);
+  assert.match(fn, /builtInEvidenceField\(ctx, 'identity'\)/);
+  assert.match(fn, /evidence\.groupStatus\.dimensions/);
+  assert.match(fn, /evidence\.groupStatus\.wind/);
+  assert.match(fn, /evidence\.pressureEvidence\.positive/);
+  assert.match(fn, /evidence\.pressureEvidence\.negative/);
+  // 圧力 map の Evidence level や scope 名を UI に書いて帳尻を合わせない
+  assert.equal(/'(indirect|primary|none)'|1F \/ 2F|一般部 \/ 隅角部|階 \/ /i.test(fn), false, 'renderEvidenceStatus に固定値がある');
   // UI側に検証状況をハードコードしていない
   assert.doesNotMatch(html, /'ガラス見付寸法',\s*'verified'/);
   assert.doesNotMatch(html, /V0[^\n]*'verified'/);
@@ -342,8 +347,10 @@ test('AC-15: UIはpresetの値をverifiedとしてLedgerへ登録しない', () 
   const fnStart = html.indexOf('function buildProjectEvidenceLedger');
   const fn = html.slice(fnStart, html.indexOf('\n}', fnStart));
   // 現在の検証状況をそのまま使い、'verified' を注入しない
-  assert.match(fn, /verificationStatus: dims\.defaultW\.verificationStatus/);
-  assert.match(fn, /verificationStatus: dims\.defaultH\.verificationStatus/);
+  assert.match(fn, /verificationStatus: widthField\.verificationStatus/);
+  assert.match(fn, /verificationStatus: heightField\.verificationStatus/);
+  assert.match(fn, /builtInEvidenceField\(ctx, 'dimensions\.defaultW'\)/);
+  assert.match(fn, /builtInEvidenceField\(ctx, 'dimensions\.defaultH'\)/);
   assert.doesNotMatch(fn, /verificationStatus: 'verified'/, 'verifiedを直接注入してはならない');
   assert.doesNotMatch(fn, /makeEvidence\('primary'/, 'primary evidenceを捏造してはならない');
 });

@@ -565,7 +565,7 @@
       <div class="form-group" style="margin-bottom:16px;">
         <label>入力モード</label>
         <select id="inp-mode">
-          <option value="miyoshi" selected>案件プリセット（みよし案件 / Miyoshi）</option>
+          <option value="miyoshi" selected>案件プリセット</option>
           <option value="manual">手入力 / Generic（Manual）</option>
           <option value="notification">告示風圧計算（Notification / Calculated）</option>
           <option value="imported">取り込みデータ（Imported / Unverified）</option>
@@ -633,7 +633,7 @@
       <div class="form-group">
         <label>ガラス幅 W（ガラス見付寸法）</label>
         <div class="input-unit">
-          <input type="number" id="inp-W" value="1250" min="100" max="10000" step="1">
+          <input type="number" id="inp-W" min="100" max="10000" step="1">
           <span class="unit-label">mm</span>
         </div>
       </div>
@@ -641,33 +641,29 @@
       <div class="form-group">
         <label>ガラス高さ H（ガラス見付寸法）</label>
         <div class="input-unit">
-          <input type="number" id="inp-H" value="2050" min="100" max="10000" step="1">
+          <input type="number" id="inp-H" min="100" max="10000" step="1">
           <span class="unit-label">mm</span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;">
           W・Hは<strong>ガラス1枚の見付寸法</strong>です。サッシ枠を含む建具全体寸法ではありません。<br>
-          初期値 1250×2050mm は本ツールの<strong>未検証な既定値（サンプル値）</strong>であり、特定案件の確定寸法ではありません。必ず案件図・メーカー資料で実寸を確認して入力してください。
+          初期表示の寸法は案件プリセットに登録された<strong>未検証な既定値（サンプル値）</strong>であり、特定案件の確定寸法ではありません。必ず案件図・メーカー資料で実寸を確認して入力してください。
         </div>
       </div>
 
       <div class="mode-field mode-field-miyoshi form-group">
         <label>設置階数</label>
-        <select id="inp-floor">
-          <option value="1">1階</option>
-          <option value="2" selected>2階</option>
-          <option value="3">3階</option>
-          <option value="R">R階</option>
-        </select>
+        <!-- 選択肢は active ProjectContext の projectPressureMap から生成する（HTML に階を持たない）。
+             data-initial-value は「その値が context にあれば初期選択にする」だけの UI 既定で、
+             topology ではない（context に無ければ無視し、先頭を選ぶ）。 -->
+        <select id="inp-floor" data-initial-value="2"></select>
       </div>
 
       <div class="mode-field mode-field-miyoshi form-group">
         <label>部位</label>
-        <select id="inp-zone">
-          <option value="general" selected>一般部</option>
-          <option value="corner">隅角部</option>
-        </select>
+        <!-- 選択肢は active ProjectContext の projectPressureMap から生成する（HTML に部位を持たない）。 -->
+        <select id="inp-zone"></select>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          正圧・負圧は<strong>「みよし案件プリセット」</strong>の設計風圧値です。告示から自動算定した値ではありません。他案件に流用する場合は妥当性を個別に確認してください。
+          正圧・負圧は<strong>現在の案件プリセット</strong>の設計風圧値です。告示から自動算定した値ではありません。他案件に流用する場合は妥当性を個別に確認してください。
         </div>
       </div>
 
@@ -849,7 +845,7 @@
       <strong>⚠ ご注意</strong><br>
       本ツールは平成12年建設省告示第1458号（4辺支持ガラスの構造計算）に基づく風圧検討を簡易的に行うためのものです。<br>
       複層ガラスは板硝子協会「4辺支持板ガラスの耐風圧強度計算法」の適用範囲（厚板/薄板 ≦ 2.5）を超える組合せを自動推奨から除外し、警告表示します。<br>
-      <span class="mode-field mode-field-miyoshi">階別正圧・部位別負圧は「みよし案件プリセット」であり、告示から自動算定した値ではありません。<br></span>
+      <span class="mode-field mode-field-miyoshi">階別正圧・部位別負圧は現在の案件プリセットの値であり、告示から自動算定した値ではありません。<br></span>
       <span class="mode-field mode-field-manual">このモードでは、現在画面に表示されているW/H/正圧/負圧をユーザー入力値として扱います。初期表示値も含め、案件原典で検証済みの値ではありません。<br></span>
       自重・衝撃・熱割れ・製作可否・サッシ納まり・支持条件の違い・法的適合性の最終判断は別途確認が必要です。<br>
       <strong>最終的な設計判断にはメーカー検討書または専門技術者による確認を優先してください。</strong>
@@ -1216,20 +1212,156 @@
 <script src="project-config/registry.js"></script>
 <script src="project-config/evidence-closure.js"></script>
 <script src="project-config/project-input.js"></script>
+<script src="project-config/project-pack.js"></script>
+<script src="project-config/project-context.js"></script>
 <script src="workspace.js"></script>
 <script src="project-profile.js"></script>
 <script src="review-package.js"></script>
 <script>
 /* ============================================================
    計算ロジックは calc.js（GlassCalc、案件非依存の汎用計算コア）に、
-   案件固有プリセットは project-config/miyoshi.js
-   （MiyoshiProjectConfig）に、「手入力 / Generic」入力契約は
-   project-config/manual.js（ManualProjectConfig）に、それぞれ
-   分離済み（Phase 2A / Phase 2C）。
+   案件プリセットのデータは repository の built-in preset（registry が
+   bootstrap で捕まえる）から ProjectContext.fromLegacyPreset() を通して
+   得る active ProjectContext に、「手入力 / Generic」入力契約は
+   project-config/manual.js（ManualProjectConfig）に、それぞれ分離済み。
    ここでは UI（入力取得・モード切替・DOM描画・各モジュールの橋渡し）
-   のみを扱う。manual.jsはmiyoshi.jsに一切依存しないため、Manual
-   モードでみよし案件プリセットの値が暗黙適用されることはない。
+   のみを扱う。UI は案件 module を直接読まない（Phase 2L-B2 S2-B）。
+   Manual モードで案件プリセットの値が暗黙適用されることはない。
 ============================================================ */
+
+/* ============================================================
+   Active ProjectContext（Phase 2L-B2 S2-B）
+
+   案件プリセットの表示・入力・Evidence UI は、この 1 つの context から読む。
+   - context は必ず ProjectContext.fromLegacyPreset() で作る（built-in の trust は
+     registry が捕まえた instance から来る。形を真似た object は通らない）。
+   - PresetRegistry.BUILT_IN_PRESET_IDS は「候補の発見」にだけ使う。trust の根ではない。
+     selector はまだ無いので、built-in が**ちょうど 1 件**のときだけ自動選択する。
+     0 件・2 件以上は先頭を選ばず fail closed。
+   - 失敗したら案件プリセット mode は明示エラーにする。案件 module へ fallback しない。
+     手入力・告示風圧計算・取り込みデータの mode は context に依存しない。
+   - 例外: ProjectInput.fromPreset() と Evidence Closure は canonical な built-in を
+     要求するので、context.origin.registryProjectId から getBuiltInPreset() を引く
+     compatibility bridge を使う。案件データの表示用 read source には使わない。
+============================================================ */
+
+var activeProjectContext = null;
+var activeProjectContextError = null;
+
+function initActiveProjectContext() {
+  activeProjectContext = null;
+  activeProjectContextError = null;
+  try {
+    if (typeof ProjectContext === 'undefined' || !ProjectContext) {
+      throw new Error('ProjectContext module is not available');
+    }
+    if (typeof PresetRegistry === 'undefined' || !PresetRegistry) {
+      throw new Error('PresetRegistry is not available');
+    }
+    // 候補の発見だけ。ここに載っていることは built-in であることの証明にならない
+    // （fromLegacyPreset() が registry の捕まえた instance で確かめる）。
+    var candidates = PresetRegistry.BUILT_IN_PRESET_IDS || [];
+    if (candidates.length !== 1) {
+      throw new Error('exactly one built-in preset is required for automatic selection (found ' +
+        candidates.length + '); a preset selector is not implemented yet');
+    }
+    activeProjectContext = ProjectContext.fromLegacyPreset(candidates[0]);
+  } catch (e) {
+    activeProjectContext = null;
+    activeProjectContextError = e;
+  }
+  return activeProjectContext;
+}
+
+function requireActiveProjectContext() {
+  if (!activeProjectContext) {
+    throw new Error('案件プリセットを読み込めませんでした（ProjectContext）' +
+      (activeProjectContextError && activeProjectContextError.message
+        ? ': ' + activeProjectContextError.message : ''));
+  }
+  return ProjectContext.assertProjectContext(activeProjectContext);
+}
+
+function contextCapability(ctx, name) {
+  return ProjectContext.requireCapability(ctx, name);
+}
+
+/* built-in Evidence の field を fieldKey で引く（見つからなければ fail closed）。 */
+function builtInEvidenceField(ctx, fieldKey) {
+  var fields = contextCapability(ctx, 'builtInEvidence').fields;
+  for (var i = 0; i < fields.length; i++) {
+    if (fields[i].fieldKey === fieldKey) return fields[i];
+  }
+  throw new Error('built-in Evidence field is missing: ' + fieldKey);
+}
+
+/* 階の表示名（generic）。1 → 1階 / B1 → B1階 / R → R階 / PH → PH。 */
+function floorDisplayLabel(floor) {
+  if (floor === 'PH') return 'PH';
+  return String(floor) + '階';
+}
+
+/* 部位の表示名。wind-pressure.js の generic zone 語彙に対応するものだけ。推測しない。 */
+var ZONE_DISPLAY_LABELS = { general: '一般部', corner: '隅角部' };
+function zoneDisplayLabel(zone) {
+  if (!Object.prototype.hasOwnProperty.call(ZONE_DISPLAY_LABELS, zone)) {
+    throw new Error('unknown zone (no display label): ' + JSON.stringify(zone));
+  }
+  return ZONE_DISPLAY_LABELS[zone];
+}
+
+/* select の選択肢を context の順序のまま作り直す（textContent のみ）。 */
+function fillContextSelect(select, values, labelOf) {
+  var initial = select.getAttribute('data-initial-value');
+  select.textContent = '';
+  values.forEach(function (v) {
+    var opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = labelOf(v);
+    select.appendChild(opt);
+  });
+  select.value = (initial !== null && values.indexOf(initial) !== -1) ? initial : values[0];
+}
+
+/* active context を案件プリセット mode の UI へ反映する。失敗時は明示エラー表示。 */
+function applyActiveProjectContextToUI() {
+  var modeOption = document.querySelector('#inp-mode option[value="miyoshi"]');
+  var nameLabel = document.getElementById('preset-name-label');
+  var identityNote = document.getElementById('preset-identity-note');
+  var floorSel = document.getElementById('inp-floor');
+  var zoneSel = document.getElementById('inp-zone');
+  if (!activeProjectContext) {
+    var msg = activeProjectContextError && activeProjectContextError.message
+      ? activeProjectContextError.message : 'unknown error';
+    if (modeOption) modeOption.textContent = '案件プリセット（読み込み失敗）';
+    if (nameLabel) nameLabel.textContent = '読み込めませんでした';
+    if (identityNote) {
+      identityNote.textContent = '⚠ 案件プリセットを読み込めませんでした（ProjectContext）: ' + msg +
+        '。案件プリセットの値は表示・計算しません。他の入力モードは利用できます。';
+    }
+    [floorSel, zoneSel].forEach(function (sel) {
+      if (sel) { sel.textContent = ''; sel.disabled = true; }
+    });
+    return;
+  }
+  var ctx = requireActiveProjectContext();
+  if (modeOption) modeOption.textContent = '案件プリセット（' + ctx.publicLabel + '）';
+  // 表示元は disclosure-safe な publicLabel だけ（内部呼称を表示しない）。
+  if (nameLabel) {
+    nameLabel.textContent = ctx.publicLabel + '（projectId: ' + ctx.origin.registryProjectId + '）';
+  }
+  var identity = builtInEvidenceField(ctx, 'identity');
+  if (identityNote && identity.verificationStatus !== 'verified') {
+    identityNote.textContent = '⚠ ' + (identity.evidence.publicDescription || '案件識別情報は未確認です。');
+  }
+  var map = contextCapability(ctx, 'projectPressureMap');
+  fillContextSelect(floorSel, map.positivePressures.map(function (r) { return r.floor; }), floorDisplayLabel);
+  fillContextSelect(zoneSel, map.negativePressures.map(function (r) { return r.zone; }), zoneDisplayLabel);
+  // 入力欄の既定値は context の sampleDefaultDimensions を正とする（HTML に既定値を持たない）。
+  var dims = contextCapability(ctx, 'sampleDefaultDimensions');
+  document.getElementById('inp-W').value = dims.widthMm.value;
+  document.getElementById('inp-H').value = dims.heightMm.value;
+}
 
 /* ============================================================
    入力モード切替
@@ -1265,51 +1397,73 @@ function statusClass(verificationStatus) {
 // **重要**: private Evidenceが利用できないため、verified entryは1件も作らない。
 // ここでpresetの値をverifiedとして登録すると、Evidence Gateを迂回したことになる。
 // 登録するのは「現在の検証状況そのまま」であり、昇格は行わない。
-function buildProjectEvidenceLedger(config) {
+function buildProjectEvidenceLedger(ctx) {
   var ledger = EvidenceLedger.createLedger();
-  var dims = config.dimensions;
+  var dims = contextCapability(ctx, 'sampleDefaultDimensions');
+  var widthField = builtInEvidenceField(ctx, 'dimensions.defaultW');
+  var heightField = builtInEvidenceField(ctx, 'dimensions.defaultH');
 
-  // 寸法: sample_default / unverified のまま
+  // 寸法: built-in の検証状況そのまま（sample_default / unverified のまま。昇格しない）
   ledger.add({
     factKey: 'pane_width_mm',
-    value: dims.defaultW.value,
-    unit: 'mm',
-    verificationStatus: dims.defaultW.verificationStatus,
-    evidence: dims.defaultW.evidence
+    value: dims.widthMm.value,
+    unit: dims.widthMm.unit,
+    verificationStatus: widthField.verificationStatus,
+    evidence: widthField.evidence
   });
   ledger.add({
     factKey: 'pane_height_mm',
-    value: dims.defaultH.value,
-    unit: 'mm',
-    verificationStatus: dims.defaultH.verificationStatus,
-    evidence: dims.defaultH.evidence
+    value: dims.heightMm.value,
+    unit: dims.heightMm.unit,
+    verificationStatus: heightField.verificationStatus,
+    evidence: heightField.evidence
   });
   return ledger;
 }
 
-function renderEvidenceStatus(config) {
+/* 圧力 map の各 scope の Evidence level を、重複を除いて context の順に並べる。 */
+function pressureEvidenceLevelLabel(entries) {
+  var seen = [];
+  entries.forEach(function (e) {
+    if (seen.indexOf(e.evidence.level) === -1) seen.push(e.evidence.level);
+  });
+  return seen.map(evidenceLevelLabel).join(' / ');
+}
+
+function renderEvidenceStatus(ctx) {
   var host = document.getElementById('evidence-status-table');
   if (!host) return;
 
-  var dims = config.dimensions;
+  var evidence = contextCapability(ctx, 'builtInEvidence');
+  var dims = contextCapability(ctx, 'sampleDefaultDimensions');
+  var map = contextCapability(ctx, 'projectPressureMap');
+  var identity = builtInEvidenceField(ctx, 'identity');
+  var v0 = builtInEvidenceField(ctx, 'wind.V0');
+  var roughness = builtInEvidenceField(ctx, 'wind.roughnessCategory');
+  var widthField = builtInEvidenceField(ctx, 'dimensions.defaultW');
+  // 列 3 は Evidence level の表示文字列。圧力 map は全 scope の level を context から集める。
   var rows = [
-    ['案件識別情報', config.identity.verificationStatus, config.identity.evidence.level,
+    ['案件識別情報', identity.verificationStatus, evidenceLevelLabel(identity.evidence.level),
      '公開リポジトリのため固有名詞は非表示（redacted）'],
-    ['基準風速 V0', config.wind.V0.verificationStatus, config.wind.V0.evidence.level,
-     config.wind.V0.value + ' ' + (config.wind.V0.unit || '')],
-    ['地表面粗度区分', config.wind.roughnessCategory.verificationStatus,
-     config.wind.roughnessCategory.evidence.level, String(config.wind.roughnessCategory.value)],
-    ['ガラス見付寸法', dims.status, dims.defaultW.evidence.level,
-     dims.defaultW.value + ' × ' + dims.defaultH.value + ' mm（' + dims.mode + '）'],
-    ['階別正圧プリセット', config.wind.status, 'indirect', '1F / 2F / 3F / RF'],
-    ['部位別負圧プリセット', config.wind.status, 'indirect', '一般部 / 隅角部']
+    ['基準風速 V0', v0.verificationStatus, evidenceLevelLabel(v0.evidence.level),
+     v0.value + ' ' + (v0.unit || '')],
+    ['地表面粗度区分', roughness.verificationStatus, evidenceLevelLabel(roughness.evidence.level),
+     String(roughness.value)],
+    ['ガラス見付寸法', evidence.groupStatus.dimensions, evidenceLevelLabel(widthField.evidence.level),
+     dims.widthMm.value + ' × ' + dims.heightMm.value + ' mm（' + dims.mode + '）'],
+    ['階別正圧プリセット', evidence.groupStatus.wind,
+     pressureEvidenceLevelLabel(evidence.pressureEvidence.positive),
+     map.positivePressures.map(function (r) { return floorDisplayLabel(r.floor); }).join(' / ')],
+    ['部位別負圧プリセット', evidence.groupStatus.wind,
+     pressureEvidenceLevelLabel(evidence.pressureEvidence.negative),
+     map.negativePressures.map(function (r) { return zoneDisplayLabel(r.zone); }).join(' / ')]
   ];
 
   var body = rows.map(function (r) {
     return '<tr>' +
       '<td>' + escHtml(r[0]) + '</td>' +
       '<td class="' + statusClass(r[1]) + '">' + escHtml(evidenceStatusLabel(r[1])) + '</td>' +
-      '<td>' + escHtml(evidenceLevelLabel(r[2])) + '</td>' +
+      '<td>' + escHtml(r[2]) + '</td>' +
       '<td style="font-size:11px;color:var(--text3);">' + escHtml(r[3]) + '</td>' +
       '</tr>';
   }).join('');
@@ -1318,23 +1472,25 @@ function renderEvidenceStatus(config) {
     '<table><thead><tr><th>項目</th><th>検証状況</th><th>Evidence</th><th>値 / 注記</th></tr></thead>' +
     '<tbody>' + body + '</tbody></table>' +
     '<div class="meta-chip" style="display:inline-block;margin-top:8px;">' +
-    'Verified Cases: <span>' + config.verifiedCases.length + '</span></div>';
+    'Verified Cases: <span>' + evidence.verifiedCases.length + '</span></div>';
 }
 
 // Verified Case selector は、caseが実在するときだけ描画する。
 // 0件のときにselectorを出すと「選べる何かがある」という誤解を生むため、
 // 見せかけのUIを作らない。
-function renderVerifiedCaseSelector(config) {
+function renderVerifiedCaseSelector(ctx) {
   var host = document.getElementById('verified-case-selector-area');
   if (!host) return;
-  if (!config.verifiedCases || config.verifiedCases.length === 0) {
+  // 唯一の source は context の builtInEvidence.verifiedCases（架空 case を作らない）
+  var verifiedCases = contextCapability(ctx, 'builtInEvidence').verifiedCases;
+  if (!verifiedCases || verifiedCases.length === 0) {
     host.innerHTML =
       '<div style="font-size:11px;color:var(--text3);margin-top:8px;">' +
       'Verified Case は現在 0 件です。案件一次資料によるEvidenceが未取得のため、' +
       'case selectorは表示しません（空のselectorを作りません）。</div>';
     return;
   }
-  var options = config.verifiedCases.map(function (c) {
+  var options = verifiedCases.map(function (c) {
     return '<option value="' + escHtml(c.caseId) + '">' + escHtml(c.caseId) + '</option>';
   }).join('');
   host.innerHTML =
@@ -1344,18 +1500,26 @@ function renderVerifiedCaseSelector(config) {
 
 // preset値とEvidenceの突き合わせ（read-only）。
 // presetを変更しない。数値一致を検証済みと読み替えない。
-function renderReconciliation(config) {
+function renderReconciliation(ctx) {
   var host = document.getElementById('reconciliation-area');
   if (!host) return;
 
-  var ledger = buildProjectEvidenceLedger(config);
+  var ledger = buildProjectEvidenceLedger(ctx);
+  var dims = contextCapability(ctx, 'sampleDefaultDimensions');
+  var map = contextCapability(ctx, 'projectPressureMap');
+  // 行は context の topology から作る（代表 scope を選ばない）。判定は EvidenceLedger に任せる。
   var items = [
-    ['ガラス見付幅', 'pane_width_mm', config.dimensions.defaultW.value],
-    ['ガラス見付高さ', 'pane_height_mm', config.dimensions.defaultH.value],
-    ['階別正圧（2F 一般部）', 'positive_pressure', config.getPositivePressure('2')],
-    ['部位別負圧（一般部）', 'negative_pressure', config.getNegativePressure('general')],
-    ['評価高さ Z / 階の対応', 'evaluation_height', null]
+    ['ガラス見付幅', 'pane_width_mm', dims.widthMm.value],
+    ['ガラス見付高さ', 'pane_height_mm', dims.heightMm.value]
   ];
+  map.positivePressures.forEach(function (r) {
+    items.push(['階別正圧（' + floorDisplayLabel(r.floor) + '）', 'positive_pressure', r.pressure.value]);
+  });
+  map.negativePressures.forEach(function (r) {
+    items.push(['部位別負圧（' + zoneDisplayLabel(r.zone) + '）', 'negative_pressure', r.magnitude.value]);
+  });
+  // 評価高さには現在の正（preset 値）が無い。値で埋めない。
+  items.push(['評価高さ Z / 階の対応', 'evaluation_height', null]);
 
   var body = items.map(function (it) {
     var result = EvidenceLedger.reconcileFact(it[2], ledger.find(it[1]));
@@ -1463,11 +1627,10 @@ function renderEvidenceClosureMatrix() {
         typeof EvidenceClosure.evaluateClosure !== 'function') {
       throw new Error('EvidenceClosure module is not available');
     }
-    if (typeof MiyoshiProjectConfig === 'undefined' || !MiyoshiProjectConfig) {
-      throw new Error('project preset is not available');
-    }
+    // closure の対象は active context の built-in（registryProjectId）。id を UI に書かない。
+    var closureProjectId = requireActiveProjectContext().origin.registryProjectId;
     // 実案件のObservationは0件である（Production UIに投入経路は無い）。
-    evaluation = EvidenceClosure.evaluateClosure(MiyoshiProjectConfig.projectId, []);
+    evaluation = EvidenceClosure.evaluateClosure(closureProjectId, []);
     if (!evaluation || !Array.isArray(evaluation.factResults)) {
       throw new Error('unexpected closure evaluation shape');
     }
@@ -1652,11 +1815,12 @@ function renderProjectEvidencePanels() {
 }
 
 function renderPhase2FEvidencePanels() {
-  if (typeof MiyoshiProjectConfig === 'undefined' || typeof EvidenceLedger === 'undefined') return;
+  if (typeof EvidenceLedger === 'undefined') return;
   try {
-    renderEvidenceStatus(MiyoshiProjectConfig);
-    renderVerifiedCaseSelector(MiyoshiProjectConfig);
-    renderReconciliation(MiyoshiProjectConfig);
+    var ctx = requireActiveProjectContext();
+    renderEvidenceStatus(ctx);
+    renderVerifiedCaseSelector(ctx);
+    renderReconciliation(ctx);
   } catch (e) {
     // F10: 計算機能は止めないが、**黙って消さない**。
     // Evidence contractやpromotion gateが失敗したとき、この panel が
@@ -1811,7 +1975,11 @@ function buildCurrentProjectInput() {
     });
   }
 
-  return ProjectInput.fromPreset(PresetRegistry.getPreset('miyoshi'), {
+  // compatibility bridge: ProjectInput.fromPreset() は canonical な built-in instance を要求する。
+  // id は active context から取り、getBuiltInPreset() で引く（getPreset() は使わない）。
+  // floor / zone は context から生成した selector の値。
+  var presetContext = requireActiveProjectContext();
+  return ProjectInput.fromPreset(PresetRegistry.getBuiltInPreset(presetContext.origin.registryProjectId), {
     floorKey: document.getElementById('inp-floor').value,
     zoneKey: document.getElementById('inp-zone').value,
     widthMm: W, heightMm: H,
@@ -1880,7 +2048,7 @@ function fmt(n, d = 0) {
    Wind Pressure Trace の表示（Phase 2E）
 
    丸めはこの表示層だけで行う。算定側（wind-pressure.js）は丸めない。
-   Miyoshi presetとの比較は**参考比較（diagnostic）**であり、
+   案件プリセットとの比較は**参考比較（diagnostic）**であり、
    presetの置換でも検証状況の昇格でもない。
 ============================================================ */
 
@@ -1908,24 +2076,27 @@ function fmtTrace(value, unit) {
   return fmt(value, 4);
 }
 
-// 既存Miyoshi presetとの参考比較（AC-10）。
-// presetを置換せず、差を可視のまま示す。
-function renderMiyoshiComparisonHtml(trace) {
+// 現在の案件プリセットとの参考比較（AC-10）。
+// presetを置換せず、差を可視のまま示す。値は active context の projectPressureMap から引く。
+function renderPresetComparisonHtml(trace) {
   if (!trace) return '';
   // 参考比較は明示的に選択されたときだけ表示する。
   // 無関係な建物の算定や、他者から取り込んだpackageに対して
   // 常に案件プリセットとの比較を出すのは適切でない。
   var compareSel = document.getElementById('inp-wind-compare');
   if (compareSel && compareSel.value !== 'on') return '';
-  var preset;
+  if (!activeProjectContext) return '';
+  var negatives;
   try {
-    preset = PresetRegistry.getPreset('miyoshi');
+    negatives = contextCapability(activeProjectContext, 'projectPressureMap').negativePressures;
   } catch (e) {
     return '';
   }
   var zoneKey = trace.inputs.zone;
-  var presetNeg = preset.getNegativePressure(zoneKey);
-  if (typeof presetNeg !== 'number') return '';
+  // context にその zone が無ければ比較を出さない（近い zone で代用しない）
+  var presetRow = negatives.filter(function (r) { return r.zone === zoneKey; })[0];
+  if (!presetRow) return '';
+  var presetNeg = presetRow.magnitude.value;
 
   var calcNeg = Math.abs(trace.negative.pressure);
   var presetAbs = Math.abs(presetNeg);
@@ -1942,7 +2113,7 @@ function renderMiyoshiComparisonHtml(trace) {
       <thead><tr><th>項目</th><th>案件プリセット</th><th>告示風圧計算（現在の入力）</th><th>差</th></tr></thead>
       <tbody>
         <tr>
-          <td>負圧（${zoneKey === 'general' ? '一般部' : '隅角部'}）</td>
+          <td>負圧（${zoneDisplayLabel(zoneKey)}）</td>
           <td>${fmt(presetAbs, 0)} N/m²</td>
           <td>${fmt(calcNeg, 1)} N/m²</td>
           <td class="${Math.abs(pct) < 5 ? '' : 'ng'}">${diff >= 0 ? '+' : ''}${fmt(diff, 1)} N/m²（${pct >= 0 ? '+' : ''}${fmt(pct, 2)}%）</td>
@@ -2002,7 +2173,7 @@ function renderWindTraceHtml(trace) {
     <div style="font-size:11px;color:var(--text3);margin-top:6px;">
       表示のみ丸めています。内部計算では丸めていません。
     </div>
-    ${renderMiyoshiComparisonHtml(trace)}`;
+    ${renderPresetComparisonHtml(trace)}`;
 }
 
 function renderResults(result) {
@@ -2014,8 +2185,8 @@ function renderResults(result) {
     isUnverifiedDefault
   } = result;
 
-  const floorLabel = floorKey === 'R' ? 'R階' : `${floorKey}階`;
-  const zoneLabel  = zoneKey === 'general' ? '一般部' : '隅角部';
+  const floorLabel = floorKey === null ? '' : floorDisplayLabel(floorKey);
+  const zoneLabel  = zoneKey === null ? '' : zoneDisplayLabel(zoneKey);
 
   // 判定バッジ
   const judgeHtml = best
@@ -2077,13 +2248,13 @@ function renderResults(result) {
     ? `正圧 ${fmt(posP, 0)} ≧ |負圧| ${fmt(negP, 0)}`
     : `|負圧| ${fmt(negP, 0)} ＞ 正圧 ${fmt(posP, 0)}`;
 
-  // 設計風圧プリセットの検証状況警告（Task 4、案件プリセットモードのみ）。
-  // V0=34m/s・地表面粗度区分IIIとの数値整合は確認済みだが、元の構造計算書・
-  // 各階評価高さZとの厳密な対応付けは未確認（wind.status !== 'verified'）。
+  // 設計風圧プリセットの検証状況警告（案件プリセットモードのみ）。
+  // 案件固有の値（V0・粗度区分など）は UI 文言に書かない。それらの検証状況は
+  // Evidence status 表に context から表示される。
   // 既存の「告示から自動算定した値ではない」という警告を弱めるものではなく、
   // 追加の注記として表示する。
   const windStatusWarningHtml = (mode === 'miyoshi' && windStatus !== 'verified') ? `
-      <div class="calc-line" style="margin-top:4px;color:var(--warn);">⚠ 設計風圧プリセット — 原典照合未完了（V0=34m/s・地表面粗度区分IIIとの数値整合は確認済みだが、元の構造計算書・各階評価高さZとの厳密な対応付けは未確認。verificationStatus: ${windStatus}）</div>` : '';
+      <div class="calc-line" style="margin-top:4px;color:var(--warn);">⚠ 設計風圧プリセット — 原典照合未完了（プリセットの正圧・負圧と、元の構造計算書・各階評価高さZとの厳密な対応付けは未確認。verificationStatus: ${windStatus}）</div>` : '';
 
   // 入力値ブロックの階数/部位行は案件プリセットモードにのみ存在する
   // （手入力モードには floor/zone の概念がない）。
@@ -2091,13 +2262,14 @@ function renderResults(result) {
           <div class="calc-line">階数 = <span class="val">${floorLabel}</span></div>
           <div class="calc-line">部位 = <span class="val">${zoneLabel}</span></div>` : '';
 
+  const presetLabelText = activeProjectContext ? activeProjectContext.publicLabel : '';
   const windSelectionTitle =
-    mode === 'miyoshi' ? '設計風圧の選定（みよし案件プリセット）'
+    mode === 'miyoshi' ? '設計風圧の選定（案件プリセット: ' + escHtml(presetLabelText) + '）'
     : mode === 'imported' ? '設計風圧の選定（取り込みデータ・未検証）'
     : '設計風圧の選定（手入力値）';
   const windSelectionNote =
     mode === 'miyoshi'
-      ? '※ 正圧・負圧は告示から自動算定した値ではなく、みよし案件プリセット値です。'
+      ? '※ 正圧・負圧は告示から自動算定した値ではなく、現在の案件プリセットの値です。'
     : mode === 'imported'
       ? '※ 正圧・負圧は外部から取り込んだ値です（sourceKind: imported_unverified）。取り込み元の主張に関わらず、本ツールは未検証として扱います。'
       : '※ 正圧・負圧は現在画面に表示されている値（source: user_input）です。初期表示値も含め、案件原典との照合は本ツールでは行っていません。';
@@ -2249,6 +2421,25 @@ function renderResults(result) {
 }
 
 /* ============================================================
+   案件プリセットを読み込めないときの明示エラー（案件 module へ fallback しない）
+============================================================ */
+function renderPresetContextUnavailable() {
+  var area = document.getElementById('result-area');
+  area.textContent = '';
+  var card = document.createElement('div');
+  card.className = 'card';
+  var notice = document.createElement('div');
+  notice.className = 'notice';
+  notice.style.borderColor = 'rgba(239,68,68,0.5)';
+  notice.textContent = '案件プリセットを読み込めないため、案件プリセットモードでは計算しません: ' +
+    (activeProjectContextError && activeProjectContextError.message
+      ? activeProjectContextError.message : 'ProjectContext is not available') +
+    '。手入力・告示風圧計算・取り込みデータのモードは利用できます。';
+  card.appendChild(notice);
+  area.appendChild(card);
+}
+
+/* ============================================================
    メイン計算処理
 ============================================================ */
 
@@ -2259,6 +2450,13 @@ function runCalc() {
   const H           = parseFloat(document.getElementById('inp-H').value);
   const typeKey     = document.getElementById('inp-type').value;
   const extraFactor = parseFloat(document.getElementById('inp-coeff').value);
+
+  // 案件プリセットを読み込めていなければ、案件プリセット mode では計算しない
+  // （案件 module へ fallback しない。明示エラーを出す）。
+  if (mode === 'miyoshi' && !activeProjectContext) {
+    renderPresetContextUnavailable();
+    return;
+  }
 
   // バリデーション
   if (!W || !H || W <= 0 || H <= 0) {
@@ -2301,9 +2499,11 @@ function runCalc() {
   if (mode === 'miyoshi') {
     floorKey = document.getElementById('inp-floor').value;
     zoneKey  = document.getElementById('inp-zone').value;
-    const dflt = MiyoshiProjectConfig.getDefaultDimensionsMM();
+    const presetCtx = requireActiveProjectContext();
+    const dflt = contextCapability(presetCtx, 'sampleDefaultDimensions');
     isUnverifiedDefault =
-      (W === dflt.W && H === dflt.H) && MiyoshiProjectConfig.dimensions.status !== 'verified';
+      (W === dflt.widthMm.value && H === dflt.heightMm.value) &&
+      contextCapability(presetCtx, 'builtInEvidence').groupStatus.dimensions !== 'verified';
   }
 
   // 候補生成・OK / NG / 適用範囲外 に分離（汎用計算コア：calc.js、モード非依存）
@@ -2342,35 +2542,12 @@ document.getElementById('inp-coeff').addEventListener('input', function() {
 ============================================================ */
 
 window.addEventListener('DOMContentLoaded', function() {
-  var cfg = MiyoshiProjectConfig;
-
-  // 案件プリセット名の表示（Task 4）。
-  // 案件識別情報は社内資料で確認済み（cfg.identity.verificationStatus）だが、
-  // 本リポジトリは公開のため、表示元は必ず disclosure-safe な
-  // cfg.getPublicLabel()（= cfg.identity.publicLabel）経由とする。
-  // cfg.projectName（社内呼称としての後方互換フィールド）は公開UIの
-  // 表示元として使用しない。将来 projectName に内部正式名称が入っても、
-  // このUIコードが誤ってそれを表示することはない（fail-closed）。
-  var nameLabel = document.getElementById('preset-name-label');
-  if (nameLabel) {
-    nameLabel.textContent = cfg.getPublicLabel() + '（projectId: ' + cfg.projectId + '）';
-  }
-  var identityNote = document.getElementById('preset-identity-note');
-  if (identityNote && cfg.identity.verificationStatus !== 'verified') {
-    var identityDesc = cfg.identity.evidence && cfg.identity.evidence.publicDescription;
-    identityNote.textContent = '⚠ ' + (identityDesc || '案件識別情報は未確認です。');
-  }
-
-  // 入力欄の既定値は project-config を正として反映する
-  // （HTML属性のvalueは、JS無効時のフォールバック表示用に残している）。
-  // この既定値は「モード切替前の初期表示用サンプル値」であり、Manual
-  // モードに切り替えても、みよし案件の正圧・負圧プリセットが暗黙適用
-  // されることはない（floor/zone選択に基づく getPositivePressure() /
-  // getNegativePressure() は案件プリセットモードのrunCalc()分岐でしか
-  // 呼び出されない）。
-  var dflt = cfg.getDefaultDimensionsMM();
-  document.getElementById('inp-W').value = dflt.W;
-  document.getElementById('inp-H').value = dflt.H;
+  // 案件プリセットは active ProjectContext から表示する（Phase 2L-B2 S2-B）。
+  // 表示名は disclosure-safe な publicLabel だけ。階・部位の選択肢と初期 W/H も context から。
+  // 初期 W/H は「モード切替前の初期表示用サンプル値」であり、Manual モードへ切り替えても
+  // 案件プリセットの正圧・負圧が暗黙適用されることはない。
+  initActiveProjectContext();
+  applyActiveProjectContextToUI();
 
   // モード切替UIの初期化（Phase 2C, AC-08）
   var basisSel = document.getElementById('inp-wind-basis');

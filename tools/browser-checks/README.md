@@ -1,6 +1,6 @@
 # browser-checks
 
-`npm test` covers the modules under Node. These five harnesses cover what Node
+`npm test` covers the modules under Node. These six harnesses cover what Node
 cannot: that `index.html` actually behaves correctly when a real browser parses
 and runs it from `file://`.
 
@@ -16,6 +16,7 @@ F7-06). They are committed here for that reason.
 | `failopen-w4.mjs` | 10 | forced closure failure shows a warning that does **not** read as "verified" |
 | `stageA-regression.mjs` | 10 | Stage A exact-head regression over the protected values |
 | `parser-boundary.mjs` | 42 forms | the `html-like-tag` guard vs. real Chromium element creation |
+| `context-runtime.mjs` | 79 | the preset UI reads everything from the active ProjectContext (Phase 2L-B2 S2-B): the real tree, a synthetic built-in substituted in a temporary copy, the module global replaced after bootstrap (decoy), ProjectContext unavailable, and two built-ins |
 
 `parser-boundary.mjs` is a differential harness, not a pass/fail suite: it
 reports **bypasses** (guard accepts, Chromium builds an element — must be 0)
