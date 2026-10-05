@@ -185,6 +185,57 @@
     throw new Error('ProjectInput: PresetRegistry (project-config/registry.js) is required but not available');
   }
 
+  /**
+   * repository の built-in preset（registry が bootstrap で捕まえた instance）を返す。
+   * built-in でなければ null（fail closed）。
+   *
+   * Phase 2L-B2 S2-A.5: 「registry にあること」は built-in であることを意味しない。
+   * registerPreset() は公開されており、形の要件を満たす config を後からでも登録できる。
+   * `registered_preset` を名乗れるかどうかは getPreset() / hasPreset() ではなく、
+   * getBuiltInPreset() の同一性だけで決める。getBuiltInPreset() を持たない registry では
+   * 何も built-in と見なさない。
+   */
+  function resolveBuiltInPreset(projectId) {
+    var registry = resolveRegistry();
+    if (typeof registry.getBuiltInPreset !== 'function') {
+      return null;
+    }
+    try {
+      return registry.getBuiltInPreset(projectId);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /** registered_preset の provenance note（fromPreset() と検証の両方で同じ文言を使う）。 */
+  var BUILT_IN_PRESET_NOTE = '案件プリセット由来の設計風圧。告示から自動算定した値ではない。';
+
+  /** built-in preset の検証状況。未知の値は unverified に落とす（昇格させない）。 */
+  function builtInPresetStatus(presetConfig) {
+    var windStatus = presetConfig.wind && presetConfig.wind.status;
+    return VERIFICATION_STATUSES.indexOf(windStatus) === -1 ? 'unverified' : windStatus;
+  }
+
+  /**
+   * registered_preset の圧力は、その built-in が実際に持つ値でなければならない（RF-17-01）。
+   * 本物の built-in の sourceId を名乗るだけでは、payload がその preset から来たことにならない。
+   * floor / zone は package に無いので、各 map の値の集合への所属で確かめる
+   * （現在はすべての floor × zone の組み合わせが有効なので、これで既存 schema と等価）。
+   */
+  function assertBuiltInPressure(value, map, label, projectId) {
+    var keys = map && typeof map === 'object' ? Object.keys(map) : [];
+    for (var i = 0; i < keys.length; i++) {
+      var entry = map[keys[i]];
+      if (entry && entry.value === value) {
+        return value;
+      }
+    }
+    throw new Error(
+      'registered_preset ' + label + ' is not a value of the built-in preset ' + JSON.stringify(projectId) +
+        ' (a registered_preset payload must come from that preset; got ' + JSON.stringify(value) + ')'
+    );
+  }
+
   // ------------------------------------------------------------
   // 原始的なvalidator
   // ------------------------------------------------------------
@@ -301,19 +352,22 @@
 
     // sourceId（registered_presetのときのみ非null）
     var sourceId = null;
+    var builtInPreset = null;
     if (sourceKind === 'registered_preset') {
       if (!raw.sourceId || typeof raw.sourceId !== 'string') {
         throw new Error('registered_preset requires a non-empty string sourceId');
       }
       assertPublicSafeString(raw.sourceId, 'sourceId');
-      // registryに登録されていないprojectIdは `registered_preset` を名乗れない。
-      if (!resolveRegistry().hasPreset(raw.sourceId)) {
+      // repository の built-in preset でない projectId は `registered_preset` を名乗れない
+      // （後から registerPreset() で登録された preset も名乗れない）。
+      builtInPreset = resolveBuiltInPreset(raw.sourceId);
+      if (!builtInPreset) {
         throw new Error(
           'registered_preset requires a sourceId registered in the built-in preset registry: ' +
             JSON.stringify(raw.sourceId)
         );
       }
-      sourceId = raw.sourceId;
+      sourceId = builtInPreset.projectId;
     }
 
     // 寸法
@@ -361,6 +415,12 @@
     if (Math.abs(positivePressure) > MAX_PRESSURE || Math.abs(negativePressure) > MAX_PRESSURE) {
       throw new Error('pressure magnitude exceeds the allowed maximum (' + MAX_PRESSURE + ')');
     }
+    // registered_preset の圧力は built-in が実際に持つ値だけ（任意の値を preset 由来と名乗らせない）
+    if (builtInPreset) {
+      var builtInWind = builtInPreset.wind || {};
+      assertBuiltInPressure(positivePressure, builtInWind.positivePressureByFloor, 'positivePressure', sourceId);
+      assertBuiltInPressure(negativePressure, builtInWind.negativePressureByZone, 'negativePressure', sourceId);
+    }
 
     // designPressureは常に再計算する（payloadの値は信用しない）
     var designPressure = computeDesignPressure(positivePressure, negativePressure);
@@ -402,6 +462,19 @@
           VERIFICATION_STATUSES.indexOf(rawProv.verificationStatus) === -1) {
         throw new Error('unsupported provenance.verificationStatus: ' + JSON.stringify(rawProv.verificationStatus));
       }
+    } else if (builtInPreset) {
+      // registered_preset: 出所の表示・検証状況・注記は built-in から導く（RF-17-01）。
+      // payload の主張は形式だけ検証し、採用しない（より強い verificationStatus を名乗らせない）。
+      assertPublicSafeString(rawProv.publicLabel, 'provenance.publicLabel');
+      if (VERIFICATION_STATUSES.indexOf(rawProv.verificationStatus) === -1) {
+        throw new Error(
+          'unsupported provenance.verificationStatus: ' + JSON.stringify(rawProv.verificationStatus)
+        );
+      }
+      if (rawProv.note !== undefined) assertPublicSafeString(rawProv.note, 'provenance.note');
+      publicLabel = builtInPreset.getPublicLabel();
+      verificationStatus = builtInPresetStatus(builtInPreset);
+      note = BUILT_IN_PRESET_NOTE;
     } else {
       publicLabel = assertPublicSafeString(rawProv.publicLabel, 'provenance.publicLabel');
       if (VERIFICATION_STATUSES.indexOf(rawProv.verificationStatus) === -1) {
@@ -456,14 +529,14 @@
     if (!presetConfig || typeof presetConfig !== 'object' || presetConfig.hasFixedPreset !== true) {
       throw new Error('fromPreset(): a built-in registered preset config is required');
     }
-    // hasFixedPresetマーカーの自称だけでは足りない。registryが保持している
+    // hasFixedPresetマーカーの自称だけでは足りない。registryが bootstrap で捕まえた
     // built-in preset object *そのもの* であることを同一性で確認する
     // （`registered_preset` を名乗る偽装objectを構造的に排除する）。
-    var registry = resolveRegistry();
+    // getPreset() の同一性では足りない: 後から registerPreset() で登録した config も
+    // getPreset() からは自分自身が返る（S2-A.5）。
     if (
       typeof presetConfig.projectId !== 'string' ||
-      !registry.hasPreset(presetConfig.projectId) ||
-      registry.getPreset(presetConfig.projectId) !== presetConfig
+      resolveBuiltInPreset(presetConfig.projectId) !== presetConfig
     ) {
       throw new Error('fromPreset(): a built-in registered preset config is required');
     }
@@ -474,9 +547,7 @@
     var negativePressure = presetConfig.getNegativePressure(input.zoneKey);
 
     // presetの検証状況をそのままprovenanceへ反映する（昇格させない）。
-    var windStatus = presetConfig.wind && presetConfig.wind.status;
-    var verificationStatus =
-      VERIFICATION_STATUSES.indexOf(windStatus) === -1 ? 'unverified' : windStatus;
+    var verificationStatus = builtInPresetStatus(presetConfig);
 
     return validateAndNormalize({
       schemaVersion: SCHEMA_VERSION,
@@ -492,7 +563,7 @@
       provenance: {
         publicLabel: presetConfig.getPublicLabel(),
         verificationStatus: verificationStatus,
-        note: '案件プリセット由来の設計風圧。告示から自動算定した値ではない。'
+        note: BUILT_IN_PRESET_NOTE
       }
     }, {});
   }

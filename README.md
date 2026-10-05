@@ -203,6 +203,10 @@ designPressure = max(abs(positivePressure), abs(negativePressure))
 ### 信頼モデル（trust model）
 
 - `registered_preset` の検証状況を持てるのは、**repository内のbuilt-in config だけ**です。registryは外部入力からpresetを登録する経路を一切持ちません。
+- `registered_preset` の package は、その built-in **そのもの**に結びつきます（Phase 2L-B2 RF-17-01）。
+  本物の built-in の `sourceId` を名乗っても、正圧・負圧はその preset の階別正圧・部位別負圧に実在する値でなければ拒否されます。
+  `provenance` の `publicLabel` / `verificationStatus` / `note` は呼び出し側の値を採らず、built-in から導きます
+  （`verificationStatus` は `wind.status`。未知の値は `unverified`）。
 - `manual` / `imported_unverified` は `verificationStatus: "unverified"` 以外を名乗れません（validatorが拒否します）。
 - したがって、外部から取り込んだデータが案件の検証済みprovenanceを偽装することはできません。
 
@@ -223,7 +227,11 @@ designPressure = max(abs(positivePressure), abs(negativePressure))
 
 - **registry にあることは、repository の built-in であることと同じではありません。** `registerPreset()` は
   形の要件（`hasFixedPreset === true`・`getPublicLabel()` 等）を満たす config を後からでも登録できます。
-  built-in の trust が必要な境界（`ProjectContext.fromLegacyPreset()`）は `getBuiltInPreset()` を使います。
+  built-in の trust が必要な境界は `getBuiltInPreset()` を使います（Phase 2L-B2 S2-A.5 で収束）:
+  `ProjectInput.fromPreset()` と `registered_preset` の `sourceId` 検証、Evidence Closure の
+  scope contract と現在の主張（`createProjectScopeContract()` / `evaluateClosure()`）、
+  `ProjectContext.fromLegacyPreset()`。後から登録した preset は、これらのどれからも
+  `registered_preset`・closure の対象・`built_in_current` になりません。
   `BUILT_IN_PRESET_IDS` は参照用の凍結した写しで、trust の判定には使いません。registry の export object も凍結しています。
 - 登録できるのは `hasFixedPreset === true` を持つbuilt-in案件configだけです。手入力（`manual.js`、`hasFixedPreset: false`）は**trusted presetとして登録できません**。
 - 公開ラベルは各configの `getPublicLabel()` のみを経由します（内部呼称 `projectName` へフォールバックしません）。

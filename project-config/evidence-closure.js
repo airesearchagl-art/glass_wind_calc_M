@@ -70,6 +70,31 @@
   var Registry = resolveDependency(
     'PresetRegistry', './registry.js', 'project-config/registry.js (PresetRegistry)');
 
+  // Phase 2L-B2 S2-A.5: closure の topology と「現在の主張」の根は repository の built-in
+  // preset だけである。registry にあることは built-in であることを意味しない
+  // （registerPreset() は公開されており、後から登録した config も getPreset() で引ける）。
+  // そこで getPreset() ではなく、registry が bootstrap で捕まえた instance だけを返す
+  // getBuiltInPreset() を読み込み時に 1 度だけ掴み、それ以外の境界を持たない。
+  var getBuiltInPreset = Registry.getBuiltInPreset;
+  if (typeof getBuiltInPreset !== 'function') {
+    throw new Error('evidence-closure.js: PresetRegistry.getBuiltInPreset() is required ' +
+      '(the closure resolves presets only through the built-in boundary)');
+  }
+
+  /**
+   * closure の対象にできる preset（repository の built-in）を返す。built-in でなければ例外。
+   * 後から登録された preset の topology・現在値・Evidence を closure に使わない。
+   */
+  function resolveBuiltInConfig(projectId, where) {
+    try {
+      return getBuiltInPreset(projectId);
+    } catch (e) {
+      throw new Error(where + '(): unknown projectId for Evidence Closure ' +
+        '(only repository built-in presets can be closure subjects): ' +
+        JSON.stringify(projectId) + ' [' + e.message + ']');
+    }
+  }
+
   // ============================================================
   // Contract
   // ============================================================
@@ -262,7 +287,7 @@
    * 「どのscopeが存在しうるか」であって「現在何が正しいか」ではない。
    */
   function createProjectScopeContract(projectId) {
-    var config = Registry.getPreset(projectId);
+    var config = resolveBuiltInConfig(projectId, 'createProjectScopeContract');
     var wind = config && config.wind;
     if (!wind || typeof wind !== 'object') {
       throw new Error(
@@ -825,7 +850,8 @@
     // 必ず通す。正規化済みObservationを外から受け取る経路は作らない。
     var normalized = normalizeObservationSet(observations, projectId);
     var contract = createProjectScopeContract(projectId);
-    var config = Registry.getPreset(projectId);
+    // 現在の主張（resolveCurrentClaim）も built-in からだけ引く
+    var config = resolveBuiltInConfig(projectId, 'evaluateClosure');
     var slots = listRequiredObservationSlots(projectId);
 
     var bySlotKey = Object.create(null);
