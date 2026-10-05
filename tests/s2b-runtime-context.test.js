@@ -19,93 +19,7 @@ const ROOT = path.join(__dirname, '..');
 const HTML = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
 const STATIC = HTML.split('<script')[0];
 
-/** inline <script> の中身だけ（src 付き script は除く）。 */
-function inlineScripts(html) {
-  const out = [];
-  const re = /<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g;
-  let m;
-  while ((m = re.exec(html)) !== null) out.push(m[1]);
-  return out.join('\n');
-}
-
-/**
- * コメントを除く（文字列・template literal・正規表現 literal の中身は残す）。禁止 token が
- * 文字列の中にあっても検出できるようにするため、文字列は消さない。template literal の
- * `${ ... }` の中は code として再帰的に読む（入れ子の template も追う）。
- */
-function stripComments(code) {
-  let i = 0;
-  const n = code.length;
-  const REGEX_PREV = /[(,=:[!&|?{};+\-*%<>~^]$/;
-  function lastSignificant(out) {
-    const t = out.replace(/\s+$/, '');
-    return t.length ? t[t.length - 1] : '';
-  }
-  function copyQuoted(q) {
-    let j = i + 1;
-    while (j < n && code[j] !== q) { if (code[j] === '\\') j++; j++; }
-    const s = code.slice(i, j + 1);
-    i = j + 1;
-    return s;
-  }
-  function copyRegex() {
-    let j = i + 1;
-    let inClass = false;
-    while (j < n) {
-      const c = code[j];
-      if (c === '\\') { j += 2; continue; }
-      if (c === '[') inClass = true;
-      else if (c === ']') inClass = false;
-      else if (c === '/' && !inClass) break;
-      else if (c === '\n') break;
-      j++;
-    }
-    const s = code.slice(i, j + 1);
-    i = j + 1;
-    return s;
-  }
-  function scanTemplate() {
-    let out = '`';
-    i++;
-    while (i < n) {
-      const c = code[i];
-      if (c === '\\') { out += code.slice(i, i + 2); i += 2; continue; }
-      if (c === '`') { out += '`'; i++; return out; }
-      if (c === '$' && code[i + 1] === '{') {
-        out += '${';
-        i += 2;
-        out += scanCode(true);
-        if (code[i] === '}') { out += '}'; i++; }
-        continue;
-      }
-      out += c;
-      i++;
-    }
-    return out;
-  }
-  function scanCode(stopAtBrace) {
-    let out = '';
-    let depth = 0;
-    while (i < n) {
-      const c = code[i];
-      const d = code[i + 1];
-      if (stopAtBrace && c === '{') { depth++; out += c; i++; continue; }
-      if (stopAtBrace && c === '}') { if (depth === 0) return out; depth--; out += c; i++; continue; }
-      if (c === '/' && d === '*') { const e = code.indexOf('*/', i + 2); i = e === -1 ? n : e + 2; continue; }
-      if (c === '/' && d === '/') { const e = code.indexOf('\n', i); i = e === -1 ? n : e; continue; }
-      if (c === '\'' || c === '"') { out += copyQuoted(c); continue; }
-      if (c === '`') { out += scanTemplate(); continue; }
-      if (c === '/' && (REGEX_PREV.test(lastSignificant(out)) || lastSignificant(out) === '')) {
-        out += copyRegex();
-        continue;
-      }
-      out += c;
-      i++;
-    }
-    return out;
-  }
-  return scanCode(false);
-}
+const { inlineScripts, stripComments } = require('./support/inline-script.js');
 
 const CODE = stripComments(inlineScripts(HTML));
 
@@ -155,13 +69,9 @@ test('P2L-S2B-03: 案件 module を runtime data source として読まない', 
   // 案件名を UI の source にしない
   assert.equal(/みよし|Miyoshi|三好/.test(CODE), false, '実行コードに案件名がある');
   assert.equal(/みよし|Miyoshi|三好/.test(STATIC), false, '静的HTMLに案件名がある');
-  // 'miyoshi' は一時的な mode token としてだけ残す（project identity ではない）
-  const residue = CODE
-    .replace(/mode === 'miyoshi'/g, '')
-    .replace(/mode-field-miyoshi/g, '')
-    .replace(/option\[value="miyoshi"\]/g, '');
-  assert.equal(/miyoshi/i.test(residue), false, 'mode token 以外で案件 id を使っている: ' +
-    (residue.match(/.{0,60}miyoshi.{0,60}/i) || [''])[0]);
+  // S2-C: 一時的な mode token 'miyoshi' は generic な 'preset' へ移った。実行コードに案件 id は残らない
+  assert.equal(/miyoshi/i.test(CODE), false, '実行コードで案件 id を使っている: ' +
+    (CODE.match(/.{0,60}miyoshi.{0,60}/i) || [''])[0]);
 });
 
 test('P2L-S2B-04: active ProjectContext は fromLegacyPreset() でだけ作り、built-in がちょうど 1 件のときだけ自動選択する', () => {
@@ -178,8 +88,8 @@ test('P2L-S2B-04: active ProjectContext は fromLegacyPreset() でだけ作り�
   const apply = fnBody('applyActiveProjectContextToUI');
   assert.match(apply, /読み込めませんでした/);
   const run = fnBody('runCalc');
-  assert.match(run, /mode === 'miyoshi' && !activeProjectContext/);
-  assert.equal(run.indexOf("mode === 'miyoshi' && !activeProjectContext") < run.indexOf('buildCurrentProjectInput()'), true,
+  assert.match(run, /mode === 'preset' && !activeProjectContext/);
+  assert.equal(run.indexOf("mode === 'preset' && !activeProjectContext") < run.indexOf('buildCurrentProjectInput()'), true,
     'context が無いときの分岐が package 生成より後にある');
   assert.match(fnBody('renderPresetContextUnavailable'), /案件プリセットモードでは計算しません/);
 });

@@ -922,12 +922,27 @@ fixture はすべて合成値です（`tests/project-pack.test.js` が、reposit
   `context.origin.registryProjectId` → `PresetRegistry.getBuiltInPreset()` の compatibility bridge を使います。
 - context を作れなかったときは、案件プリセット mode を明示エラーにします（案件 module へ fallback しません）。
   手入力・告示風圧計算・取り込みデータの mode はそのまま使えます。
-- 階の初期選択だけは、`<select id="inp-floor" data-initial-value="2">` の UI 既定（その値が context にあれば選ぶ。
-  無ければ先頭）で、現在の初期表示を変えないために残しています。topology ではありません。
-- `mode-field-miyoshi` / `value="miyoshi"` は一時的な runtime mode token です（project identity ではありません）。
 - Project Pack はまだ runtime で選択・読込しません（`project-pack.js` は `project-context.js` の依存として読み込むだけ）。
 - 実ブラウザでの確認: `node tools/browser-checks/context-runtime.mjs`（合成 built-in への差し替え・
   bootstrap 後の module global 差し替え・context 読込失敗・built-in 2 件を含む）。
+
+### 旧案件前提の UI residue を generic 化（Phase 2L-B2 / S2-C）
+
+- 入力モードの UI token は `preset`（`<option value="preset">` / `.mode-field-preset` / `mode === 'preset'`）の
+  1 種類です。これは画面の入力モードの名前で、ProjectContext の `sourceKind`（`legacy_builtin`）や
+  ProjectInput の `sourceKind`（`registered_preset`）とは別物です（そちらは変えていません）。
+- 階の初期選択は **context の階の並びの先頭**です。UI 固有の既定階（旧 `data-initial-value="2"`）は持たず、
+  ProjectContext にも初期階の情報を足していません。現在の built-in では初期表示の階が 2 階から先頭の階に変わり、
+  初期表示の計算結果もそれに伴って変わります（各階 × 部位の個別計算・package・風圧値は変わりません）。
+- 案件ラベル（`#preset-name-label`）は `publicLabel` だけを表示します。`registryProjectId` は内部の origin として
+  bridge と Closure でだけ使い、人間向けの表示に併記しません。
+- 告示モードの説明は、旧案件の階表記ではなく generic な階識別子（例: 1 / B1 / R / PH）で例示します。
+  階から評価高さ Z を作らないことは変わりません。
+- Batch / Scenario / プロファイルの placeholder と TSV 列見本は、built-in preset や一次資料の値と無関係な
+  合成値（例: W 900 / H 1800、Z 9.0、V0 30、粗度 II）で、画面にも「合成した入力例」と表示します。
+  built-in preset 自体の値（`project-config/` 内）と protected invariant は変えていません。
+- browser harness（`browser-w4` / `stageA-regression`）は案件 module の global を読まず、page の active ProjectContext を
+  観察します。期待値は page の外（Node 側の built-in instance と `verification-spec.json` の `evidenceStateExpected`）から取ります。
 
 | adapter | 入力 | sourceKind | trust |
 |---|---|---|---|

@@ -565,7 +565,7 @@
       <div class="form-group" style="margin-bottom:16px;">
         <label>入力モード</label>
         <select id="inp-mode">
-          <option value="miyoshi" selected>案件プリセット</option>
+          <option value="preset" selected>案件プリセット</option>
           <option value="manual">手入力 / Generic（Manual）</option>
           <option value="notification">告示風圧計算（Notification / Calculated）</option>
           <option value="imported">取り込みデータ（Imported / Unverified）</option>
@@ -578,14 +578,14 @@
         </div>
       </div>
 
-      <div class="mode-field mode-field-miyoshi form-group" style="margin-bottom:16px;">
+      <div class="mode-field mode-field-preset form-group" style="margin-bottom:16px;">
         <div class="meta-chip" style="display:inline-block;">
           案件プリセット: <span id="preset-name-label">—</span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;" id="preset-identity-note"></div>
       </div>
 
-      <div class="mode-field mode-field-miyoshi form-group" style="margin-bottom:16px;">
+      <div class="mode-field mode-field-preset form-group" style="margin-bottom:16px;">
         <label>Evidence status（案件factの検証状況）</label>
         <div id="evidence-status-table"></div>
         <div style="font-size:11px;color:var(--text3);margin-top:6px;">
@@ -650,15 +650,14 @@
         </div>
       </div>
 
-      <div class="mode-field mode-field-miyoshi form-group">
+      <div class="mode-field mode-field-preset form-group">
         <label>設置階数</label>
         <!-- 選択肢は active ProjectContext の projectPressureMap から生成する（HTML に階を持たない）。
-             data-initial-value は「その値が context にあれば初期選択にする」だけの UI 既定で、
-             topology ではない（context に無ければ無視し、先頭を選ぶ）。 -->
-        <select id="inp-floor" data-initial-value="2"></select>
+             初期選択は context の順序の先頭（UI 固有の既定階を持たない）。 -->
+        <select id="inp-floor"></select>
       </div>
 
-      <div class="mode-field mode-field-miyoshi form-group">
+      <div class="mode-field mode-field-preset form-group">
         <label>部位</label>
         <!-- 選択肢は active ProjectContext の projectPressureMap から生成する（HTML に部位を持たない）。 -->
         <select id="inp-zone"></select>
@@ -758,7 +757,7 @@
           <span class="unit-label">m</span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          <strong>階（1F / 2F / 3F / RF）から Z を自動生成しません。</strong>実際の設置高さを入力してください。
+          <strong>階識別子（例: 1 / B1 / R / PH）から Z を自動生成しません。</strong>実際の設置高さを入力してください。
         </div>
       </div>
 
@@ -845,7 +844,7 @@
       <strong>⚠ ご注意</strong><br>
       本ツールは平成12年建設省告示第1458号（4辺支持ガラスの構造計算）に基づく風圧検討を簡易的に行うためのものです。<br>
       複層ガラスは板硝子協会「4辺支持板ガラスの耐風圧強度計算法」の適用範囲（厚板/薄板 ≦ 2.5）を超える組合せを自動推奨から除外し、警告表示します。<br>
-      <span class="mode-field mode-field-miyoshi">階別正圧・部位別負圧は現在の案件プリセットの値であり、告示から自動算定した値ではありません。<br></span>
+      <span class="mode-field mode-field-preset">階別正圧・部位別負圧は現在の案件プリセットの値であり、告示から自動算定した値ではありません。<br></span>
       <span class="mode-field mode-field-manual">このモードでは、現在画面に表示されているW/H/正圧/負圧をユーザー入力値として扱います。初期表示値も含め、案件原典で検証済みの値ではありません。<br></span>
       自重・衝撃・熱割れ・製作可否・サッシ納まり・支持条件の違い・法的適合性の最終判断は別途確認が必要です。<br>
       <strong>最終的な設計判断にはメーカー検討書または専門技術者による確認を優先してください。</strong>
@@ -888,7 +887,7 @@
       </div>
       <div class="form-group">
         <label for="prof-v0">基準風速 V0 (m/s)</label>
-        <input type="number" id="prof-v0" step="0.1" placeholder="例: 34">
+        <input type="number" id="prof-v0" step="0.1" placeholder="例: 30">
       </div>
       <div class="form-group">
         <label for="prof-roughness">地表面粗度区分</label>
@@ -900,11 +899,11 @@
       </div>
       <div class="form-group">
         <label for="prof-building-h">建物高さ H (m)</label>
-        <input type="number" id="prof-building-h" step="0.1" placeholder="例: 14.2">
+        <input type="number" id="prof-building-h" step="0.1" placeholder="例: 12.0">
       </div>
       <div class="form-group">
         <label for="prof-eaves-h">軒高 (m)</label>
-        <input type="number" id="prof-eaves-h" step="0.1" placeholder="例: 14.2">
+        <input type="number" id="prof-eaves-h" step="0.1" placeholder="例: 12.0">
       </div>
       <div class="form-group">
         <label for="prof-building-type">建物タイプ</label>
@@ -956,12 +955,13 @@
       開口ごとの値だけを入力します。風条件はプロファイル側の共通値を使います。
       ケース行に V0・粗度・建物高さ・算定基準を書くことはできません
       （個別に風条件を変える場合は下の Workspace TSV を使ってください）。
+      入力欄の薄い数値は合成した入力例で、特定案件の値ではありません。
     </div>
 
     <div class="profile-grid">
-      <div class="form-group"><label for="sc-w">幅 W (mm)</label><input type="number" id="sc-w" placeholder="1250"></div>
-      <div class="form-group"><label for="sc-h">高さ H (mm)</label><input type="number" id="sc-h" placeholder="2050"></div>
-      <div class="form-group"><label for="sc-z">評価高さ Z (m)</label><input type="number" id="sc-z" step="0.1" placeholder="14.2"></div>
+      <div class="form-group"><label for="sc-w">幅 W (mm)</label><input type="number" id="sc-w" placeholder="900"></div>
+      <div class="form-group"><label for="sc-h">高さ H (mm)</label><input type="number" id="sc-h" placeholder="1800"></div>
+      <div class="form-group"><label for="sc-z">評価高さ Z (m)</label><input type="number" id="sc-z" step="0.1" placeholder="9.0"></div>
       <div class="form-group">
         <label for="sc-zone">部位</label>
         <select id="sc-zone">
@@ -988,10 +988,11 @@
       <label>組み合わせ生成（明示した値の直積）</label>
       <div style="font-size:11px;color:var(--text3);margin:6px 0 8px;">
         カンマ区切りで入力した値だけを組み合わせます。階から評価高さを作ることはしません。
+        入力欄の薄い数値は合成した入力例で、特定案件の値ではありません。
       </div>
       <div class="profile-grid">
-        <div class="form-group"><label for="gen-w">幅 W (mm)</label><input type="text" id="gen-w" placeholder="1250, 1500" oninput="updateMatrixPreview()"></div>
-        <div class="form-group"><label for="gen-h">高さ H (mm)</label><input type="text" id="gen-h" placeholder="2050" oninput="updateMatrixPreview()"></div>
+        <div class="form-group"><label for="gen-w">幅 W (mm)</label><input type="text" id="gen-w" placeholder="900, 1200" oninput="updateMatrixPreview()"></div>
+        <div class="form-group"><label for="gen-h">高さ H (mm)</label><input type="text" id="gen-h" placeholder="1800" oninput="updateMatrixPreview()"></div>
         <div class="form-group"><label for="gen-z">評価高さ Z (m)</label><input type="text" id="gen-z" placeholder="4.2, 8.4, 12.6" oninput="updateMatrixPreview()"></div>
         <div class="form-group"><label for="gen-zone">部位</label><input type="text" id="gen-zone" placeholder="general, corner" oninput="updateMatrixPreview()"></div>
         <div class="form-group"><label for="gen-type">ガラス種別</label><input type="text" id="gen-type" placeholder="fl_single" oninput="updateMatrixPreview()"></div>
@@ -1310,9 +1311,9 @@ function zoneDisplayLabel(zone) {
   return ZONE_DISPLAY_LABELS[zone];
 }
 
-/* select の選択肢を context の順序のまま作り直す（textContent のみ）。 */
+/* select の選択肢を context の順序のまま作り直す（textContent のみ）。
+   初期選択は先頭。UI 固有の既定値（特定の階など）を持たない。 */
 function fillContextSelect(select, values, labelOf) {
-  var initial = select.getAttribute('data-initial-value');
   select.textContent = '';
   values.forEach(function (v) {
     var opt = document.createElement('option');
@@ -1320,12 +1321,12 @@ function fillContextSelect(select, values, labelOf) {
     opt.textContent = labelOf(v);
     select.appendChild(opt);
   });
-  select.value = (initial !== null && values.indexOf(initial) !== -1) ? initial : values[0];
+  select.value = values[0];
 }
 
 /* active context を案件プリセット mode の UI へ反映する。失敗時は明示エラー表示。 */
 function applyActiveProjectContextToUI() {
-  var modeOption = document.querySelector('#inp-mode option[value="miyoshi"]');
+  var modeOption = document.querySelector('#inp-mode option[value="preset"]');
   var nameLabel = document.getElementById('preset-name-label');
   var identityNote = document.getElementById('preset-identity-note');
   var floorSel = document.getElementById('inp-floor');
@@ -1346,10 +1347,9 @@ function applyActiveProjectContextToUI() {
   }
   var ctx = requireActiveProjectContext();
   if (modeOption) modeOption.textContent = '案件プリセット（' + ctx.publicLabel + '）';
-  // 表示元は disclosure-safe な publicLabel だけ（内部呼称を表示しない）。
-  if (nameLabel) {
-    nameLabel.textContent = ctx.publicLabel + '（projectId: ' + ctx.origin.registryProjectId + '）';
-  }
+  // 表示元は disclosure-safe な publicLabel だけ。registryProjectId は内部の origin であり、
+  // 人間向けの表示に併記しない。
+  if (nameLabel) nameLabel.textContent = ctx.publicLabel;
   var identity = builtInEvidenceField(ctx, 'identity');
   if (identityNote && identity.verificationStatus !== 'verified') {
     identityNote.textContent = '⚠ ' + (identity.evidence.publicDescription || '案件識別情報は未確認です。');
@@ -1852,8 +1852,8 @@ function getInputMode() {
 
 function applyModeVisibility() {
   var mode = getInputMode();
-  document.querySelectorAll('.mode-field-miyoshi').forEach(function (el) {
-    el.style.display = mode === 'miyoshi' ? '' : 'none';
+  document.querySelectorAll('.mode-field-preset').forEach(function (el) {
+    el.style.display = mode === 'preset' ? '' : 'none';
   });
   document.querySelectorAll('.mode-field-manual').forEach(function (el) {
     el.style.display = mode === 'manual' ? '' : 'none';
@@ -2197,8 +2197,8 @@ function renderResults(result) {
   const bestP     = best ? fmt(best.P, 0) : '—';
 
   // 未検証既定値（UNVERIFIED PROJECT DEFAULT）警告（案件プリセットモードのみ）。
-  // 1250×2050mm は本ツールの初期値として導入されただけで、案件確定寸法として
-  // 検証された記録がない。この値のまま計算した結果を「案件適合OK」と
+  // 初期寸法（context の sampleDefaultDimensions）は本ツールの初期値として導入されただけで、
+  // 案件確定寸法として検証された記録がない。この値のまま計算した結果を「案件適合OK」と
   // 誤解させないよう、明示的な状態表示を行う。
   //
   // 手入力 / Generic モードは常にユーザー入力値（source: 'user_input',
@@ -2253,22 +2253,22 @@ function renderResults(result) {
   // Evidence status 表に context から表示される。
   // 既存の「告示から自動算定した値ではない」という警告を弱めるものではなく、
   // 追加の注記として表示する。
-  const windStatusWarningHtml = (mode === 'miyoshi' && windStatus !== 'verified') ? `
+  const windStatusWarningHtml = (mode === 'preset' && windStatus !== 'verified') ? `
       <div class="calc-line" style="margin-top:4px;color:var(--warn);">⚠ 設計風圧プリセット — 原典照合未完了（プリセットの正圧・負圧と、元の構造計算書・各階評価高さZとの厳密な対応付けは未確認。verificationStatus: ${windStatus}）</div>` : '';
 
   // 入力値ブロックの階数/部位行は案件プリセットモードにのみ存在する
   // （手入力モードには floor/zone の概念がない）。
-  const floorZoneLinesHtml = mode === 'miyoshi' ? `
+  const floorZoneLinesHtml = mode === 'preset' ? `
           <div class="calc-line">階数 = <span class="val">${floorLabel}</span></div>
           <div class="calc-line">部位 = <span class="val">${zoneLabel}</span></div>` : '';
 
   const presetLabelText = activeProjectContext ? activeProjectContext.publicLabel : '';
   const windSelectionTitle =
-    mode === 'miyoshi' ? '設計風圧の選定（案件プリセット: ' + escHtml(presetLabelText) + '）'
+    mode === 'preset' ? '設計風圧の選定（案件プリセット: ' + escHtml(presetLabelText) + '）'
     : mode === 'imported' ? '設計風圧の選定（取り込みデータ・未検証）'
     : '設計風圧の選定（手入力値）';
   const windSelectionNote =
-    mode === 'miyoshi'
+    mode === 'preset'
       ? '※ 正圧・負圧は告示から自動算定した値ではなく、現在の案件プリセットの値です。'
     : mode === 'imported'
       ? '※ 正圧・負圧は外部から取り込んだ値です（sourceKind: imported_unverified）。取り込み元の主張に関わらず、本ツールは未検証として扱います。'
@@ -2445,7 +2445,7 @@ function renderPresetContextUnavailable() {
 
 function runCalc() {
   // 入力値取得（モード非依存の共通項目）
-  const mode        = getInputMode(); // 'miyoshi' | 'manual' | 'notification' | 'imported'
+  const mode        = getInputMode(); // 'preset' | 'manual' | 'notification' | 'imported'
   const W           = parseFloat(document.getElementById('inp-W').value);
   const H           = parseFloat(document.getElementById('inp-H').value);
   const typeKey     = document.getElementById('inp-type').value;
@@ -2453,7 +2453,7 @@ function runCalc() {
 
   // 案件プリセットを読み込めていなければ、案件プリセット mode では計算しない
   // （案件 module へ fallback しない。明示エラーを出す）。
-  if (mode === 'miyoshi' && !activeProjectContext) {
+  if (mode === 'preset' && !activeProjectContext) {
     renderPresetContextUnavailable();
     return;
   }
@@ -2496,7 +2496,7 @@ function runCalc() {
   }
 
   let floorKey = null, zoneKey = null, isUnverifiedDefault = false;
-  if (mode === 'miyoshi') {
+  if (mode === 'preset') {
     floorKey = document.getElementById('inp-floor').value;
     zoneKey  = document.getElementById('inp-zone').value;
     const presetCtx = requireActiveProjectContext();
@@ -2770,9 +2770,10 @@ function generateMatrix() {
 function insertScenarioTsvTemplate() {
   document.getElementById('sc-tsv').value =
     'scenario_id\tlabel\twidth_mm\theight_mm\tevaluation_height_m\tzone\tglass_type\textra_factor\n'
-    + 'S1\t\t1250\t2050\t14.2\tgeneral\tfl_single\t1.00';
+    + 'S1\t\t900\t1800\t9.0\tgeneral\tfl_single\t1.00';
   batchSetStatus('sc-tsv-status',
-    '列見本を入れました。風条件（V0・粗度・建物高さ・算定基準）の列は入れられません。', false);
+    '列見本を入れました（数値は合成した入力例で、特定案件の値ではありません）。' +
+    '風条件（V0・粗度・建物高さ・算定基準）の列は入れられません。', false);
 }
 
 function importScenarioTsv() {
@@ -3036,11 +3037,12 @@ function batchInsertTsvTemplate(mode) {
     ? 'case_id\tlabel\tmode\twidth_mm\theight_mm\tglass_type\textra_factor\tv0\troughness\tbuilding_height_m\teaves_height_m\tevaluation_height_m\tbuilding_type\tzone\tbasis'
     : 'case_id\tlabel\tmode\twidth_mm\theight_mm\tglass_type\textra_factor\tpositive_pressure\tnegative_pressure';
   var sample = mode === 'notification'
-    ? 'Sample-001\t\tnotification\t1250\t2050\tfl_single\t1.00\t34\tIII\t14.2\t14.2\t14.2\tclosed\tgeneral\tnotification_baseline'
-    : 'Sample-001\t\tmanual\t1250\t2050\tfl_single\t1.00\t1500\t-900';
+    ? 'Sample-001\t\tnotification\t900\t1800\tfl_single\t1.00\t30\tII\t12.0\t12.0\t9.0\tclosed\tgeneral\tnotification_baseline'
+    : 'Sample-001\t\tmanual\t900\t1800\tfl_single\t1.00\t1500\t-900';
   document.getElementById('batch-tsv').value = header + '\n' + sample;
   batchSetStatus('batch-tsv-status',
-    '列見本を入れました。case_id / label は空欄でも構いません（case_id は自動採番されます）。', false);
+    '列見本を入れました（数値は合成した入力例で、特定案件の値ではありません）。' +
+    'case_id / label は空欄でも構いません（case_id は自動採番されます）。', false);
 }
 
 function batchImportTsv() {
