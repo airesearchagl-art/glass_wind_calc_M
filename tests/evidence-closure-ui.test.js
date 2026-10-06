@@ -82,11 +82,11 @@ function blockEndIndex(html, startAt) {
 test('P2J-U02: Matrix は案件preset modeの Evidence ブロック内にある', () => {
   assert.match(HTML, /id="evidence-closure-area"/);
 
-  // evidence-status-table を含む mode-field-miyoshi ブロックの開始位置
+  // evidence-status-table を含む mode-field-preset ブロックの開始位置
   const statusAt = HTML.indexOf('id="evidence-status-table"');
   assert.notEqual(statusAt, -1);
-  const blockStart = HTML.lastIndexOf('<div', HTML.lastIndexOf('mode-field-miyoshi', statusAt));
-  assert.match(HTML.slice(blockStart, statusAt), /mode-field-miyoshi/);
+  const blockStart = HTML.lastIndexOf('<div', HTML.lastIndexOf('mode-field-preset', statusAt));
+  assert.match(HTML.slice(blockStart, statusAt), /mode-field-preset/);
 
   const blockEnd = blockEndIndex(HTML, blockStart);
   const closureAt = HTML.indexOf('id="evidence-closure-area"');
@@ -96,7 +96,7 @@ test('P2J-U02: Matrix は案件preset modeの Evidence ブロック内にある'
   assert.equal(reconAt > blockStart && reconAt < blockEnd, true,
     '前提: reconciliation はこのブロック内にある（判定が機能している）');
   assert.equal(closureAt > blockStart && closureAt < blockEnd, true,
-    'Matrix は同じ mode-field-miyoshi ブロックの**内側**にある');
+    'Matrix は同じ mode-field-preset ブロックの**内側**にある');
   assert.equal(closureAt > reconAt, true, 'reconciliation の後に置く');
 
   // Batch / Review / Profile / Scenario 側には置かない

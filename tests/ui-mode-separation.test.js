@@ -10,7 +10,7 @@
  *
  * ブラウザでの実際の表示切替（visibility）はPlaywright実機確認で別途
  * 検証済み（PR説明を参照）。本テストはindex.htmlのHTML構造そのものの
- * 契約（mode-field-miyoshi / mode-field-manual によるラップ）を
+ * 契約（mode-field-preset / mode-field-manual によるラップ）を
  * node:testで静的に固定する。
  *
  * 実行: node --test tests/  （または npm test）
@@ -34,16 +34,16 @@ test('UI mode separation: index.htmlはproject-config/manual.jsを読み込む',
   assert.match(html, /<script src="project-config\/manual\.js"><\/script>/);
 });
 
-test('UI mode separation: mode-field-miyoshi / mode-field-manual の両クラスが存在する', () => {
+test('UI mode separation: mode-field-preset / mode-field-manual の両クラスが存在する', () => {
   const html = readIndexHtml();
-  assert.match(html, /class="[^"]*mode-field-miyoshi[^"]*"/);
+  assert.match(html, /class="[^"]*mode-field-preset[^"]*"/);
   assert.match(html, /class="[^"]*mode-field-manual[^"]*"/);
 });
 
-test('UI mode separation: applyModeVisibility()がmode-field-miyoshi/mode-field-manualの両方をtoggleする', () => {
+test('UI mode separation: applyModeVisibility()がmode-field-preset/mode-field-manualの両方をtoggleする', () => {
   const html = readIndexHtml();
   assert.match(html, /function applyModeVisibility/);
-  assert.match(html, /querySelectorAll\('\.mode-field-miyoshi'\)/);
+  assert.match(html, /querySelectorAll\('\.mode-field-preset'\)/);
   assert.match(html, /querySelectorAll\('\.mode-field-manual'\)/);
 });
 
@@ -95,17 +95,17 @@ test('AC-02: runCalc()はProject Input Package経由で計算する（designPを
   assert.doesNotMatch(html, /designP\s*=\s*Math\.max\(posP,\s*negP\)/);
 });
 
-test('UI mode separation (RF-01): 静的HTMLに案件名は無く、案件プリセットの説明はmode-field-miyoshiでラップされている', () => {
+test('UI mode separation (RF-01): 静的HTMLに案件名は無く、案件プリセットの説明はmode-field-presetでラップされている', () => {
   const html = readIndexHtml();
   // <script>より前の静的HTML部分のみを対象とする。
   const staticPart = html.split('<script')[0];
   // S2-B: 案件名は active ProjectContext の publicLabel から実行時に表示する。静的HTMLに持たない。
   assert.equal(/みよし|Miyoshi|三好/.test(staticPart), false, '静的HTMLに案件名が残っている');
-  const withoutSelectOption = staticPart.replace(/<option value="miyoshi"[\s\S]*?<\/option>/, '');
+  const withoutSelectOption = staticPart.replace(/<option value="preset"[\s\S]*?<\/option>/, '');
 
   assert.ok(
     withoutSelectOption.includes('現在の案件プリセット'),
-    'テスト前提が崩れている: 静的部分に「現在の案件プリセット」が出現するはず（mode-field-miyoshi内に存在するはず）'
+    'テスト前提が崩れている: 静的部分に「現在の案件プリセット」が出現するはず（mode-field-preset内に存在するはず）'
   );
 
   const regex = /現在の案件プリセット/g;
@@ -117,8 +117,8 @@ test('UI mode separation (RF-01): 静的HTMLに案件名は無く、案件プリ
     const precedingChunk = withoutSelectOption.slice(Math.max(0, idx - 400), idx);
     assert.match(
       precedingChunk,
-      /mode-field-miyoshi/,
-      `「現在の案件プリセット」の出現箇所(${count}番目)がmode-field-miyoshiでラップされていない`
+      /mode-field-preset/,
+      `「現在の案件プリセット」の出現箇所(${count}番目)がmode-field-presetでラップされていない`
     );
   }
 });
@@ -147,11 +147,11 @@ test('AC-05: 告示風圧計算モードが選択肢として存在し、既存3
   const html = readIndexHtml();
   assert.match(html, /<option value="notification">/);
   // 既存3モードが残っていること
-  assert.match(html, /<option value="miyoshi" selected>/);
+  assert.match(html, /<option value="preset" selected>/);
   assert.match(html, /<option value="manual">/);
   assert.match(html, /<option value="imported">/);
   // 既定は案件プリセットのまま（既存挙動を変えない）
-  assert.match(html, /<option value="miyoshi" selected>/);
+  assert.match(html, /<option value="preset" selected>/);
 });
 
 test('AC-05: 風圧入力欄はすべて mode-field-notification でラップされている', () => {
@@ -168,7 +168,7 @@ test('AC-05: 風圧入力欄はすべて mode-field-notification でラップさ
     const before = html.slice(0, idx);
     const lastBlock = before.lastIndexOf('mode-field-notification');
     const lastOtherBlock = Math.max(
-      before.lastIndexOf('mode-field-miyoshi'),
+      before.lastIndexOf('mode-field-preset'),
       before.lastIndexOf('mode-field-manual'),
       before.lastIndexOf('mode-field-imported')
     );
@@ -194,8 +194,9 @@ test('AC-11: UIに階→評価高さ/建物高さの自動変換が存在しな�
                     'inp-wind-eaves-h', 'inp-wind-z']) {
     assert.ok(fnBody.includes(id), 'buildWindInputFromUI() は ' + id + ' を読むこと');
   }
-  // 明示入力であることをUIが述べている
-  assert.match(html, /階（1F \/ 2F \/ 3F \/ RF）から Z を自動生成しません/);
+  // 明示入力であることをUIが述べている（S2-C: 例示は旧案件の階表記ではなく generic な階識別子）
+  assert.match(html, /階識別子（例: 1 \/ B1 \/ R \/ PH）から Z を自動生成しません/);
+  assert.equal(/1F \/ 2F \/ 3F \/ RF/.test(html), false, '旧案件由来の階表記の例示が残っている');
   assert.match(html, /階数からは推定しません/);
 });
 

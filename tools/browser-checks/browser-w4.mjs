@@ -9,12 +9,39 @@
 // and reported as done.
 import { openBrowser, finishRun } from './harness.mjs';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+import fs from 'fs';
 // リポジトルートは**このファイルの位置から**求める。
 // 絶対パスを埋め込むと、harness は自分が入っている tree ではなく
 // **そのパスにある tree** を測る。独立検証8 F8-04 は、tag guard を
 // `return false;` にした copy で parser-boundary がなお「bypass 0」と
 // 報告することを実証した——欠陥を原理的に検出できない形だった。
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
+const require = createRequire(import.meta.url);
+
+// B-facts の期待値は page の外で求める（page の値を page で確かめない）。
+//   NODE_FACTS : Node 側で registry の built-in instance から読んだ値
+//   SPEC_FACTS : verification-spec.json の evidenceStateExpected（tree から読まない手書きの期待値）
+// page 側は案件 module の global ではなく、runtime と同じ active ProjectContext から読む。
+const Registry = require(REPO + 'project-config/registry.js');
+const BUILT_IN = Registry.getBuiltInPreset(Registry.BUILT_IN_PRESET_IDS[0]);
+const NODE_FACTS = {
+  verifiedCases: BUILT_IN.verifiedCases.length,
+  mode: BUILT_IN.dimensions.mode,
+  w: BUILT_IN.dimensions.defaultW.value,
+  h: BUILT_IN.dimensions.defaultH.value,
+  v0: BUILT_IN.wind.V0.value,
+  rough: BUILT_IN.wind.roughnessCategory.value
+};
+const SPEC = JSON.parse(fs.readFileSync(REPO + 'tools/verification/verification-spec.json', 'utf8')).evidenceStateExpected;
+const SPEC_FACTS = {
+  verifiedCases: SPEC.project.verifiedCaseCount,
+  mode: SPEC.preset.dimensions.mode,
+  w: SPEC.preset.dimensions.widthMm,
+  h: SPEC.preset.dimensions.heightMm,
+  v0: SPEC.preset.wind.V0,
+  rough: SPEC.preset.wind.roughnessCategory
+};
 
 
 const FILE = 'file://' + REPO + 'index.html';
@@ -56,13 +83,13 @@ const mode = await page.evaluate(() => document.getElementById('inp-mode').value
 const visible = async () => page.evaluate(() => {
   const el = document.getElementById('evidence-closure-area');
   if (!el) return false;
-  const block = el.closest('.mode-field-miyoshi');
+  const block = el.closest('.mode-field-preset');
   // 包含されていなければ false を返す（例外で落ちると harness の異常終了が
   // 「検出できた」と誤読される。実際に U4-13 でそれが起きた）。
   if (!block) return false;
   return !!el.textContent.trim() && block.style.display !== 'none';
 });
-check('B2', mode === 'miyoshi' && await visible(), `mode=${mode}`);
+check('B2', mode === 'preset' && await visible(), `mode=${mode}`);
 
 // header numbers
 const head = await page.evaluate(() => {
@@ -129,7 +156,7 @@ for (const [id, m] of [['B3','manual'],['B4','notification'],['B5','imported']])
     sel.value = mm; sel.dispatchEvent(new Event('change'));
     await new Promise(r => setTimeout(r, 120));
     const el = document.getElementById('evidence-closure-area');
-    const block = el ? el.closest('.mode-field-miyoshi') : null;
+    const block = el ? el.closest('.mode-field-preset') : null;
     if (!block) return 'not-contained';   // 例外にせず、検出可能な失敗として返す
     return block.style.display === 'none';
   }, m);
@@ -137,7 +164,7 @@ for (const [id, m] of [['B3','manual'],['B4','notification'],['B5','imported']])
 }
 await page.evaluate(() => {
   const sel = document.getElementById('inp-mode');
-  sel.value = 'miyoshi'; sel.dispatchEvent(new Event('change'));
+  sel.value = 'preset'; sel.dispatchEvent(new Event('change'));
 });
 await page.waitForTimeout(150);
 
@@ -173,18 +200,22 @@ check('B29', storage.ls === 0 && storage.ss === 0 && storage.cookie === 0, JSON.
 check('B-priv', !/drive\.google|notion\.|sharepoint|C:\\|\/home\/|\/Users\//.test(allText),
   'no private reference in matrix');
 
-// project facts unchanged after UI interaction
-const facts = await page.evaluate(() => ({
-  verifiedCases: MiyoshiProjectConfig.verifiedCases.length,
-  mode: MiyoshiProjectConfig.dimensions.mode,
-  w: MiyoshiProjectConfig.dimensions.defaultW.value,
-  h: MiyoshiProjectConfig.dimensions.defaultH.value,
-  v0: MiyoshiProjectConfig.wind.V0.value,
-  rough: MiyoshiProjectConfig.wind.roughnessCategory.value
-}));
-check('B-facts', facts.verifiedCases === 0 && facts.mode === 'sample_default' &&
-  facts.w === 1250 && facts.h === 2050 && facts.v0 === 34 && facts.rough === 'III',
-  JSON.stringify(facts));
+// project facts unchanged after UI interaction（page の active ProjectContext から読む）
+const facts = await page.evaluate(() => {
+  try {
+    const ctx = activeProjectContext;
+    const be = ProjectContext.requireCapability(ctx, 'builtInEvidence');
+    const dims = ProjectContext.requireCapability(ctx, 'sampleDefaultDimensions');
+    const value = (k) => { const f = be.fields.find((x) => x.fieldKey === k); return f ? f.value : null; };
+    return { verifiedCases: be.verifiedCases.length, mode: dims.mode, w: dims.widthMm.value, h: dims.heightMm.value,
+      v0: value('wind.V0'), rough: value('wind.roughnessCategory') };
+  } catch (e) {
+    return { error: String(e && e.message || e) };
+  }
+});
+const sameFacts = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+check('B-facts', sameFacts(facts, NODE_FACTS) && sameFacts(NODE_FACTS, SPEC_FACTS),
+  `page=${JSON.stringify(facts)} page==node:${sameFacts(facts, NODE_FACTS)} node==spec:${sameFacts(NODE_FACTS, SPEC_FACTS)}`);
 
 console.log(results.join('\n'));
 await browser.close();

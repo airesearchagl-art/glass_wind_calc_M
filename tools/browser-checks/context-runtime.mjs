@@ -10,6 +10,9 @@
 //   ambiguous  … built-in が 2 件ある一時 copy。先頭を選ばず fail closed
 //
 // 期待値は page の外（Node 側で module を require して）求める。page の値を page で確かめない。
+//
+// S2-C: UI mode token は 'preset'、階の初期選択は context の先頭、案件ラベルは publicLabel だけ
+// （registryProjectId を表示しない）。合成 tree の先頭階は実 tree に無い階で、2 階も無い。
 import { openBrowser, finishRun } from './harness.mjs';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -70,10 +73,12 @@ function builtInModules() {
     .map((m) => ({ projectId: m[1], nodePath: m[2], globalName: m[3] }));
 }
 
-// 合成 built-in。階は整数風 key を含むので、Object.keys の順（1, 5, B1, R, PH）が context の順になる。
+// 合成 built-in。階は整数風 key を含むので、Object.keys の順（4, 5, B1, R, PH）が context の順になる。
+// 先頭の 4 は実 tree の階に無く、2 階も無い（初期選択が「context の先頭」であって、特定の階の
+// hard-code や旧 UI 既定ではないことを、実 tree と区別して確かめるため）。
 const SYN = {
   label: 'Synthetic Built-in Sample',
-  floors: { B1: [1111, 'verified', 'primary'], 1: [1222, 'partially_verified', 'indirect'], 5: [1333, 'unverified', 'none'],
+  floors: { B1: [1111, 'verified', 'primary'], 4: [1222, 'partially_verified', 'indirect'], 5: [1333, 'unverified', 'none'],
     R: [1444, 'partially_verified', 'indirect'], PH: [1477, 'unverified', 'none'] },
   zones: { corner: [1666, 'partially_verified', 'indirect'], general: [1555, 'partially_verified', 'indirect'] },
   w: 987, h: 2345
@@ -123,7 +128,7 @@ async function observe(page, opts) {
       hasContext: !!ctx,
       isIssued: !!(ctx && typeof ProjectContext !== 'undefined' && ProjectContext.isProjectContext(ctx)),
       ctx: ctx ? JSON.parse(JSON.stringify(ctx)) : null,
-      modeOptionText: txt(document.querySelector('#inp-mode option[value="miyoshi"]')),
+      modeOptionText: txt(document.querySelector('#inp-mode option[value="preset"]')),
       presetLabel: txt($('preset-name-label')),
       identityNote: txt($('preset-identity-note')),
       floorOptions: [...$('inp-floor').options].map((op) => [op.value, op.textContent]),
@@ -167,7 +172,7 @@ async function observe(page, opts) {
         out.comparison[z] = n ? rowsOf(n)[0] : null;
       }
       $('inp-wind-compare').value = 'off';
-      await setMode('miyoshi'); runCalc();
+      await setMode('preset'); runCalc();
     }
     // 他の mode は context に依存しない（失敗時も動く）
     if (!o.keepDims) { $('inp-W').value = 1100; $('inp-H').value = 1900; }
@@ -180,7 +185,7 @@ async function observe(page, opts) {
     importProjectInput();
     runCalc();
     out.imported = { kind: buildCurrentProjectInput().sourceKind, glass: txt(document.querySelector('.conclusion-glass')) };
-    await setMode('miyoshi'); runCalc();
+    await setMode('preset'); runCalc();
     out.presetAfterReturnText = txt($('result-area'));
     return out;
   }, opts || {});
@@ -220,7 +225,12 @@ function checkLoaded(tag, o, expect) {
   }
   // B
   check(tag + '-B1', o.modeOptionText === '案件プリセット（' + expect.label + '）', o.modeOptionText);
-  check(tag + '-B2', o.presetLabel === expect.label + '（projectId: ' + expect.id + '）', o.presetLabel);
+  // 人間向けの表示は publicLabel だけ。registryProjectId（内部 origin）を併記しない。
+  check(tag + '-B2', o.presetLabel === expect.label, o.presetLabel);
+  const idPattern = new RegExp('(^|[^A-Za-z0-9_-])' + expect.id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '([^A-Za-z0-9_-]|$)');
+  const presetTexts = [o.modeOptionText, o.presetLabel, o.identityNote, o.statusText, o.reconRows.flat().join(' '), o.closureText,
+    ...o.calc.map((c) => c.resultText)];
+  check(tag + '-B3', !presetTexts.some((t) => idPattern.test(t || '')), 'projectId is not shown in the preset UI');
   // C / D
   const floors = expect.ctx.capabilities.projectPressureMap.positivePressures.map((r) => r.floor);
   const zones = expect.ctx.capabilities.projectPressureMap.negativePressures.map((r) => r.zone);
@@ -288,8 +298,7 @@ try {
     const o = await observe(page, { keepDims: false });
     checkLoaded('real', o, { ctx: JSON.parse(JSON.stringify(REAL_CTX)), nodeCtx: JSON.parse(JSON.stringify(REAL_CTX)),
       id: REAL_ID, label: REAL_CTX.publicLabel, closure: closureFromNode(REAL_ID),
-      initialFloor: (REAL_CTX.capabilities.projectPressureMap.positivePressures.map((r) => r.floor).includes('2') ? '2'
-        : REAL_CTX.capabilities.projectPressureMap.positivePressures[0].floor) });
+      initialFloor: REAL_CTX.capabilities.projectPressureMap.positivePressures[0].floor });
     // F: fromPreset を Node 側で独立に計算した結果とも一致（page と module を共有しない）
     const nodeSame = o.calc.every((c) => JSON.stringify(PI.fromPreset(REAL_PRESET, { floorKey: c.f, zoneKey: c.z,
       widthMm: c.pkg.widthMm, heightMm: c.pkg.heightMm, glassType: c.pkg.glassType, extraFactor: c.pkg.extraFactor })) === JSON.stringify(c.pkg));
@@ -360,8 +369,12 @@ try {
     check('syn-ctx', shapeOk, 'page context reflects the synthetic built-in');
     if (synCtx) {
       checkLoaded('syn', o, { ctx: synCtx, id: mod.projectId, label: SYN.label,
-        closure: closureFromTopology(floors.length, zones.length), initialFloor: floors.includes('2') ? '2' : floors[0] });
+        closure: closureFromTopology(floors.length, zones.length), initialFloor: floors[0] });
     }
+    // 初期階は context の先頭。合成 tree には 2 階が無く、先頭は実 tree の先頭とも違う。
+    const realFirst = REAL_CTX.capabilities.projectPressureMap.positivePressures[0].floor;
+    check('syn-C4', !floors.includes('2') && floors[0] !== realFirst && o.selected[0] === floors[0],
+      'initial floor ' + o.selected[0] + ' = context first ' + floors[0] + ' (no floor 2; real first ' + realFirst + ')');
     // 実案件の名称・値が 1 つも出ない（hard-code や偶然一致の検出）
     const shown = [o.presetLabel, o.modeOptionText, o.statusText, o.reconRows.flat().join(' '), o.closureText,
       ...(o.calc || []).map((c) => c.resultText)].join(' ');
