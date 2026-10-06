@@ -76,7 +76,7 @@ test('P2L-S2C-01: UI input mode token は generic な preset 1 種類で、旧 t
 });
 
 test('P2L-S2C-02: mode token の変更は ProjectContext / ProjectInput の sourceKind を変えない', () => {
-  const id = Registry.BUILT_IN_PRESET_IDS[0];
+  const id = Registry.getRuntimeDefaultBuiltInPresetId();
   const ctx = ProjectContext.fromLegacyPreset(id);
   assert.equal(ctx.sourceKind, 'legacy_builtin');
   assert.deepEqual(Array.from(ProjectContext.SOURCE_KINDS).sort(), ['legacy_builtin', 'project_pack_unreviewed']);
@@ -124,17 +124,17 @@ test('P2L-S2C-04: 案件ラベルは publicLabel だけで、projectId を人間
   assert.deepEqual(literals.filter((l) => /projectId/i.test(l)), [], '表示文言に projectId がある');
 });
 
-test('P2L-S2C-05: index.html に案件名を持たない（script path 以外に案件 id も無い）', () => {
+test('P2L-S2C-05: index.html に案件名も案件 id も持たない（S3-A: 以前の案件 module の script も無い）', () => {
   assert.equal(/みよし|Miyoshi|三好|MIYOSHI/.test(HTML), false, 'index.html に案件名がある');
-  const lower = [...HTML.matchAll(/[^\n]*miyoshi[^\n]*/g)].map((m) => m[0].trim());
-  assert.deepEqual(lower, ['<script src="project-config/miyoshi.js"></script>'], 'script path 以外に案件 id がある');
+  assert.equal(/miyoshi/i.test(HTML), false, 'index.html に以前の案件 id / module がある');
 });
 
 test('P2L-S2C-06: 告示モードの説明は generic な階識別子で例示する（評価高さの自動生成はしない）', () => {
   assert.match(STATIC, /<strong>階識別子（例: 1 \/ B1 \/ R \/ PH）から Z を自動生成しません。<\/strong>/);
-  // 旧案件の階表記（1F / 2F / 3F / RF）を説明に使わない。RF-P1 等の修正番号や自由記述ラベルの例は対象外
+  // 旧案件の階表記（1F / 2F / 3F / RF）を説明・見本に使わない（S3-A でラベル見本からも除いた）。
+  // RF-P1 等の修正番号は対象外
   const floorish = /(^|[^0-9A-Za-z])[123]F([^0-9A-Za-z-]|$)|(^|[^A-Za-z])RF([^A-Za-z0-9-]|$)/;
-  assert.equal(floorish.test(STATIC.replace(/placeholder="例: 北面 2F A"/, '')), false, '旧案件由来の階表記がある');
+  assert.equal(floorish.test(STATIC), false, '旧案件由来の階表記がある');
   assert.equal(floorish.test('階（1F / 2F / 3F / RF）'), true, '検出 pattern が旧表記を捉えない');
 });
 
@@ -143,29 +143,35 @@ test('P2L-S2C-06: 告示モードの説明は generic な階識別子で例示�
 ============================================================ */
 
 /**
- * repository に commit されている案件の数値: built-in preset の値と、Phase 2L-A で取り込んだ公開 intake
- * subset（Intake.observations）。module から読む。
+ * repository に commit されている案件の数値: runtime default 以外の built-in preset（S3-A 以降は legacy
+ * validation 用の案件 preset）の値と、Phase 2L-A で取り込んだ公開 intake subset（Intake.observations）。
+ * module から読む。runtime default の合成サンプルは公開見本と同じ合成値を持つので照合先に含めない。
  *
  * これは一次資料の全数ではない。Phase 2L-A は pane の実寸 W/H などを意図的に intake していないので、
  * ここに無い一次資料の値は照合できない。非公開の一次資料との非衝突は review 時の手動確認であり、
  * test を完全にするためにその値の一覧を公開 repository に書き込むことはしない。
  */
+const projectContexts = () => Registry.BUILT_IN_PRESET_IDS
+  .filter((id) => id !== Registry.getRuntimeDefaultBuiltInPresetId())
+  .map((id) => ProjectContext.fromLegacyPreset(id));
 function committedProjectNumbers() {
-  const id = Registry.BUILT_IN_PRESET_IDS[0];
-  const ctx = ProjectContext.fromLegacyPreset(id);
-  const cap = ctx.capabilities;
+  const ctxs = projectContexts();
+  assert.equal(ctxs.length >= 1, true, '照合先の案件 preset が無い');
   const nums = new Set();
-  cap.projectPressureMap.positivePressures.forEach((r) => nums.add(r.pressure.value));
-  cap.projectPressureMap.negativePressures.forEach((r) => nums.add(r.magnitude.value));
-  nums.add(cap.sampleDefaultDimensions.widthMm.value);
-  nums.add(cap.sampleDefaultDimensions.heightMm.value);
-  cap.builtInEvidence.fields.filter((f) => typeof f.value === 'number').forEach((f) => nums.add(f.value));
+  ctxs.forEach((ctx) => {
+    const cap = ctx.capabilities;
+    cap.projectPressureMap.positivePressures.forEach((r) => nums.add(r.pressure.value));
+    cap.projectPressureMap.negativePressures.forEach((r) => nums.add(r.magnitude.value));
+    nums.add(cap.sampleDefaultDimensions.widthMm.value);
+    nums.add(cap.sampleDefaultDimensions.heightMm.value);
+    cap.builtInEvidence.fields.filter((f) => typeof f.value === 'number').forEach((f) => nums.add(f.value));
+  });
   Intake.observations.forEach((o) => nums.add(o.observedValue));
   return nums;
 }
-function builtInRoughness() {
-  const ctx = ProjectContext.fromLegacyPreset(Registry.BUILT_IN_PRESET_IDS[0]);
-  return ctx.capabilities.builtInEvidence.fields.find((f) => f.fieldKey === 'wind.roughnessCategory').value;
+function projectRoughnessValues() {
+  return projectContexts().map((ctx) =>
+    ctx.capabilities.builtInEvidence.fields.find((f) => f.fieldKey === 'wind.roughnessCategory').value);
 }
 function templateLiterals(fn) {
   return [...fnBody(fn).matchAll(/'((?:[^'\\]|\\.)*)'/g)].map((m) => m[1].replace(/\\t/g, '\t').replace(/\\n/g, '\n'));
@@ -199,9 +205,9 @@ test('P2L-S2C-08: 見本値は committed な built-in 値・公開 intake subset
   assert.equal(numbers.length >= 20, true, '数値を取り出せていない: ' + numbers.length);
   const hits = numbers.filter((n) => n !== 1 && project.has(Math.abs(n)));
   assert.deepEqual(hits, [], '見本値が committed な案件の値（built-in / 公開 intake subset）と一致している');
-  // 粗度区分の見本も built-in と同じ値にしない
+  // 粗度区分の見本も案件 preset と同じ値にしない
   const notif = sampleRows.find((r) => r.includes('\tnotification\t')).split('\t');
-  assert.notEqual(notif[8], builtInRoughness());
+  assert.equal(projectRoughnessValues().includes(notif[8]), false);
   // 見本であって真値ではないことを UI が述べる
   [fnBody('insertScenarioTsvTemplate'), fnBody('batchInsertTsvTemplate')].forEach((body) =>
     assert.match(body, /数値は合成した入力例で、特定案件の値ではありません/));
@@ -226,17 +232,16 @@ test('P2L-S2C-09: 見本値は既存の計算契約のまま通る（TSV parser 
 });
 
 /**
- * 合成見本の契約（RF-19-01）。どの合成値を使うかを明示して固定する。
+ * 合成見本の契約（RF-19-01、S3-A で gen-z / sc-label を追加）。どの合成値を使うかを明示して固定する。
  *
  * これは禁止値の一覧（denylist）ではない。値を変えると、変えたこと自体でここが落ちる。
  * 値を変えるのは意図した変更であり、そのときは新しい値が非公開の一次資料に現れないことを
  * review 時に手動で確かめる（P2L-S2C-08 は commit 済みの値としか照合できないため）。
- * gen-z と sc-label は S2-C で変えていない既存の見本なので、この契約に含めない。
  */
 const SYNTHETIC_SAMPLE_CONTRACT = Object.freeze({
   placeholders: Object.freeze({
     'sc-w': '900', 'sc-h': '1800', 'sc-z': '9.0',
-    'gen-w': '900, 1350', 'gen-h': '1800',
+    'gen-w': '900, 1350', 'gen-h': '1800', 'gen-z': '3.5, 7.5, 11.5', 'sc-label': '例: 開口A',
     'prof-v0': '例: 30', 'prof-building-h': '例: 12.0', 'prof-eaves-h': '例: 12.0'
   }),
   scenarioRow: 'S1\t\t900\t1800\t9.0\tgeneral\tfl_single\t1.00',
@@ -276,7 +281,8 @@ test('P2L-S2C-11: browser-w4 / stageA-regression は active ProjectContext を�
   [['browser-w4.mjs', 'B-facts', 'sameFacts'], ['stageA-regression.mjs', 'A-facts', 'same']].forEach(([f, id, eq]) => {
     const src = read(path.join(HARNESS_DIR, f));
     // 期待値: Node 側の built-in instance と、tree から読まない手書きの evidenceStateExpected
-    assert.match(src, /Registry\.getBuiltInPreset\(Registry\.BUILT_IN_PRESET_IDS\[0\]\)/, f);
+    // S3-A: Node 側の期待値は runtime default（id 一覧の位置ではない）
+    assert.match(src, /Registry\.getBuiltInPreset\(Registry\.getRuntimeDefaultBuiltInPresetId\(\)\)/, f);
     assert.match(src, /\.evidenceStateExpected;/, f);
     const nodeAt = src.indexOf('const NODE_FACTS');
     const specAt = src.indexOf('const SPEC_FACTS');

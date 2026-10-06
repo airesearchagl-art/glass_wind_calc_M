@@ -398,8 +398,11 @@ test('P2L-A12: runtime へは配線しない（UI と probe は引き続き空�
   assert.match(html, /evaluateClosure\(\s*closureProjectId\s*,\s*\[\s*\]\s*\)/);
   assert.match(html, /closureProjectId = requireActiveProjectContext\(\)\.origin\.registryProjectId/);
 
+  // S3-A: probe は公開 runtime の現在の状態（runtime default の built-in）を、空の Observation 集合で評価する。
+  // この intake は legacy validation 用で、runtime の状態ではない
   const probe = fs.readFileSync(
     path.join(ROOT, 'tools', 'verification', 'project-state-probe.mjs'), 'utf8');
   assert.equal(probe.includes('miyoshi-observations'), false, 'probe が intake を読んでいる');
-  assert.match(probe, /evaluateClosure\(\s*'miyoshi'\s*,\s*\[\s*\]\s*\)/);
+  assert.match(probe, /Registry\.getRuntimeDefaultBuiltInPresetId\(\)/);
+  assert.match(probe, /evaluateClosure\(\s*context\.origin\.registryProjectId\s*,\s*\[\s*\]\s*\)/);
 });

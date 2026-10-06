@@ -13,6 +13,17 @@
 // into Closure's internal result and guess. This probe may adapt internally if
 // the runtime APIs evolve; its OUTPUT schema is versioned and must not.
 //
+// WHAT "project" AND "preset" MEAN (Phase 2L-B2 / S3-A). They are the CURRENT
+// PUBLIC RUNTIME state: the built-in that index.html actually uses, selected
+// the same way the page selects it (PresetRegistry.getRuntimeDefaultBuiltInPresetId()
+// -> ProjectContext.fromLegacyPreset()). The probe names no project module and
+// no project id. The legacy project preset and its Phase 2L-A intake are a
+// separate legacy validation dataset and are not reported here.
+//
+// "protectedCalculations" are ALGORITHM REGRESSION FIXTURES, not runtime or
+// project state: fixed inputs whose outputs must not drift. They do not read
+// the runtime preset, so switching the runtime built-in cannot move them.
+//
 // This is verification tooling, NOT a Production API. Nothing here may be
 // imported as project Evidence, a Promotion Candidate, a registered preset, or
 // a verifiedCases entry.
@@ -32,12 +43,16 @@ const require = createRequire(import.meta.url);
 /**
  * Fixture inputs for the protected wind calculation.
  *
- * These are the AC-14 known-answer inputs, NOT project state: the mean height
- * H' = 14.2 m and the recurrence factor y = 1.00 are fixture values. The
- * roughness parameters and V0 are read from the project config, so a change to
- * either shows up in the protected numbers instead of hiding.
+ * An ALGORITHM REGRESSION FIXTURE (the long-standing AC-14 known-answer
+ * conditions), NOT runtime or project state and not Evidence of any project.
+ * Every input is stated here, including V0 and the roughness category, so the
+ * fixture no longer depends on whichever preset the runtime uses: changing the
+ * runtime built-in cannot move Er or qBar, and a change to the wind algorithm
+ * still shows up in them.
  */
-const WIND_FIXTURE = Object.freeze({ meanHeightM: 14.2, recurrenceFactor: 1.00 });
+const WIND_FIXTURE = Object.freeze({
+  meanHeightM: 14.2, recurrenceFactor: 1.00, V0: 34, roughnessCategory: 'III'
+});
 
 /** Pane sizes whose FL6 allowable pressure is a protected value. */
 const PROTECTED_PANES = Object.freeze([
@@ -54,12 +69,24 @@ function fail(message) { throw new Error('project-state-probe: ' + message); }
 
 export function readProjectState() {
   const Closure = require(ROOT + 'project-config/evidence-closure.js');
-  const Miyoshi = require(ROOT + 'project-config/miyoshi.js');
+  const Registry = require(ROOT + 'project-config/registry.js');
+  const ProjectContext = require(ROOT + 'project-config/project-context.js');
   const Manual = require(ROOT + 'project-config/manual.js');
   const Glass = require(ROOT + 'calc.js');
   const Wind = require(ROOT + 'wind-pressure.js');
 
-  const closure = Closure.evaluateClosure('miyoshi', []);
+  // The current public runtime built-in, selected exactly as index.html selects it.
+  const runtimeId = Registry.getRuntimeDefaultBuiltInPresetId();
+  const context = ProjectContext.fromLegacyPreset(runtimeId);
+  const evidence = ProjectContext.requireCapability(context, 'builtInEvidence');
+  const sampleDims = ProjectContext.requireCapability(context, 'sampleDefaultDimensions');
+  const field = (fieldKey) => {
+    const f = evidence.fields.find((x) => x.fieldKey === fieldKey);
+    if (!f) fail('runtime context has no built-in Evidence field ' + JSON.stringify(fieldKey));
+    return f;
+  };
+
+  const closure = Closure.evaluateClosure(context.origin.registryProjectId, []);
 
   // The field names below are the ONLY place this mapping should live.
   for (const field of ['status', 'requiredSlotCount', 'readySlotCount',
@@ -72,8 +99,8 @@ export function readProjectState() {
     }
   }
 
-  const dimW = Miyoshi.dimensions.defaultW;
-  const dimH = Miyoshi.dimensions.defaultH;
+  const dimW = field('dimensions.defaultW');
+  const dimH = field('dimensions.defaultH');
   // A single verificationStatus field would hide a disagreement between the two
   // dimensions, so refuse to collapse one that exists.
   if (dimW.verificationStatus !== dimH.verificationStatus) {
@@ -82,13 +109,12 @@ export function readProjectState() {
       '); the single-field shape would hide that');
   }
 
-  const roughness = Miyoshi.wind.roughnessCategory.value;
-  const v0 = Miyoshi.wind.V0.value;
-  const rp = Wind.ROUGHNESS_PARAMETERS[roughness];
-  if (!rp) fail('no roughness parameters for category ' + JSON.stringify(roughness));
+  // Algorithm regression fixture: inputs come from WIND_FIXTURE only, never the runtime preset.
+  const rp = Wind.ROUGHNESS_PARAMETERS[WIND_FIXTURE.roughnessCategory];
+  if (!rp) fail('no roughness parameters for category ' + JSON.stringify(WIND_FIXTURE.roughnessCategory));
 
   const er = Wind.calcEr(WIND_FIXTURE.meanHeightM, rp.Zb, rp.ZG, rp.alpha);
-  const qBar = Wind.calcMeanVelocityPressure(er.Er, v0, WIND_FIXTURE.recurrenceFactor);
+  const qBar = Wind.calcMeanVelocityPressure(er.Er, WIND_FIXTURE.V0, WIND_FIXTURE.recurrenceFactor);
 
   // Derived through the real calculation APIs. No formula is reimplemented
   // here; duplicating an equation into the probe would make the probe agree
@@ -114,18 +140,18 @@ export function readProjectState() {
       readyCaseScopeCount: closure.readyCaseScopeCount,
       caseScopeCount: closure.caseScopeCount,
       hasPromotionCandidate: closure.promotionCandidate !== null,
-      verifiedCaseCount: Miyoshi.verifiedCases.length
+      verifiedCaseCount: evidence.verifiedCases.length
     },
     preset: {
       dimensions: {
-        widthMm: dimW.value,
-        heightMm: dimH.value,
-        mode: Miyoshi.dimensions.mode,
+        widthMm: sampleDims.widthMm.value,
+        heightMm: sampleDims.heightMm.value,
+        mode: sampleDims.mode,
         verificationStatus: dimW.verificationStatus
       },
       wind: {
-        V0: v0,
-        roughnessCategory: roughness
+        V0: field('wind.V0').value,
+        roughnessCategory: field('wind.roughnessCategory').value
       }
     },
     protectedCalculations: {

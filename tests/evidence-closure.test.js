@@ -1213,7 +1213,8 @@ test('P2J-C43: 合成presetで全slotが揃えば READY_CANDIDATE になる', ()
 test('P2J-C44: 本番registryは合成presetに汚染されていない', () => {
   withSyntheticRegistry((C) => { C.evaluateClosure(SYN_PROJECT, []); });
   assert.equal(PresetRegistry.hasPreset(SYN_PROJECT), false);
-  assert.deepEqual(PresetRegistry.BUILT_IN_PRESET_IDS.slice(), ['miyoshi']);
+  // repository の built-in 宣言だけ（S3-A: legacy validation 用の案件 preset と公開 runtime の合成サンプル）
+  assert.deepEqual(PresetRegistry.BUILT_IN_PRESET_IDS.slice(), ['miyoshi', 'synthetic-sample']);
   // 復帰後も実案件の評価が従来どおり動く
   assert.equal(Closure.evaluateClosure(PROJECT, []).status, 'BLOCKED');
 });

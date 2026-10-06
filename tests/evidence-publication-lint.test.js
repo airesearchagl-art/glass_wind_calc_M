@@ -228,7 +228,20 @@ test('FP-01: 出荷済みの公開面値を literal で固定する（walker の
     'miyoshi.wind.positivePressureByFloor.2.evidence.publicDescription',
     'miyoshi.wind.positivePressureByFloor.3.evidence.publicDescription',
     'miyoshi.wind.positivePressureByFloor.R.evidence.publicDescription',
-    'miyoshi.wind.roughnessCategory.evidence.publicDescription'
+    'miyoshi.wind.roughnessCategory.evidence.publicDescription',
+    // Phase 2L-B2 / S3-A: the public runtime's synthetic built-in. Every value carries the same
+    // synthetic, public-safe description.
+    'sample.dimensions.defaultH.evidence.publicDescription',
+    'sample.dimensions.defaultW.evidence.publicDescription',
+    'sample.identity.evidence.publicDescription',
+    'sample.wind.V0.evidence.publicDescription',
+    'sample.wind.negativePressureByZone.corner.evidence.publicDescription',
+    'sample.wind.negativePressureByZone.general.evidence.publicDescription',
+    'sample.wind.positivePressureByFloor.1.evidence.publicDescription',
+    'sample.wind.positivePressureByFloor.2.evidence.publicDescription',
+    'sample.wind.positivePressureByFloor.4.evidence.publicDescription',
+    'sample.wind.positivePressureByFloor.R.evidence.publicDescription',
+    'sample.wind.roughnessCategory.evidence.publicDescription'
   ];
   const inventory = lint.collectInventory();
   assert.deepEqual(inventory.map((i) => i.path).sort(), EXPECTED_PATHS,

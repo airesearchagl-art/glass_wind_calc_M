@@ -2,12 +2,18 @@
 // 実ブラウザで確かめる。Playwright は resolve する（P2K-F06）。harness.mjs を経由するので、
 // browser が無ければ UNVERIFIED（exit 3）であって FAIL ではない。
 //
-// 4 つの tree を測る:
-//   real       … この tree そのもの
-//   synthetic  … built-in preset を合成 preset に差し替えた一時 copy（ラベル・階・部位の順・寸法・
-//                圧力・Evidence level がすべて違う）。hard-code や「現在値の偶然一致」はここで落ちる
-//   failure    … project-context.js を読めない一時 copy。案件 module へ fallback せず明示エラー
-//   ambiguous  … built-in が 2 件ある一時 copy。先頭を選ばず fail closed
+// 測る tree（S3-A で runtime default の方針に合わせて組み直した）:
+//   real       … この tree そのもの。runtime default（合成サンプル）だけを読み込み、runtimeDefault でない
+//                built-in の module は page に読み込まれない
+//   decoy      … bootstrap 後に runtime default module の global を別物へ差し替える
+//   synthetic  … runtime default module を別の合成 preset に差し替えた一時 copy（ラベル・階・部位の順・
+//                寸法・圧力・Evidence level がすべて違う）。hard-code や「現在値の偶然一致」はここで落ちる
+//   failure    … project-context.js を読めない一時 copy。別の module へ fallback せず明示エラー
+//   missing    … runtime default module を読み込まず、代わりに runtimeDefault でない built-in を読み込む
+//                一時 copy。読み込まれている別の built-in へ fallback せず fail closed
+//   duplicate  … runtimeDefault の宣言が 2 件ある一時 copy。どちらも選ばず fail closed
+//   extra      … runtimeDefault でない built-in が追加で読み込まれた一時 copy。runtime default は変わらない
+//   reordered  … 宣言の順序を入れ替えた一時 copy（id 一覧の先頭が変わる）。runtime default は変わらない
 //
 // 期待値は page の外（Node 側で module を require して）求める。page の値を page で確かめない。
 //
@@ -38,11 +44,12 @@ const Registry = require(REPO + 'project-config/registry.js');
 const PC = require(REPO + 'project-config/project-context.js');
 const PI = require(REPO + 'project-config/project-input.js');
 const Closure = require(REPO + 'project-config/evidence-closure.js');
-const REAL_ID = Registry.BUILT_IN_PRESET_IDS[0];
+// 実 tree の runtime default。id 一覧（BUILT_IN_PRESET_IDS）の位置ではなく runtimeDefault の宣言で決まる。
+const REAL_ID = Registry.getRuntimeDefaultBuiltInPresetId();
 const REAL_CTX = PC.fromLegacyPreset(REAL_ID);
 const REAL_PRESET = Registry.getBuiltInPreset(REAL_ID);
 
-// 実案件の値（合成 tree に漏れていないことの確認用）。test に書き写さず module から読む。
+// 実 tree（runtime default）の値（差し替えた tree に漏れていないことの確認用）。test に書き写さず module から読む。
 const REAL_VALUES = new Set();
 REAL_CTX.capabilities.projectPressureMap.positivePressures.forEach((r) => REAL_VALUES.add(String(r.pressure.value)));
 REAL_CTX.capabilities.projectPressureMap.negativePressures.forEach((r) => REAL_VALUES.add(String(r.magnitude.value)));
@@ -67,18 +74,46 @@ function makeTree(mutate) {
   mutate(dir);
   return dir;
 }
+const DECLARATION_RE = /\{ projectId: '([^']+)', nodePath: '([^']+)', globalName: '([^']+)', runtimeDefault: (true|false) \}/g;
 function builtInModules() {
   const src = fs.readFileSync(REPO + 'project-config/registry.js', 'utf8');
-  return [...src.matchAll(/\{ projectId: '([^']+)', nodePath: '([^']+)', globalName: '([^']+)' \}/g)]
-    .map((m) => ({ projectId: m[1], nodePath: m[2], globalName: m[3] }));
+  return [...src.matchAll(DECLARATION_RE)]
+    .map((m) => ({ projectId: m[1], nodePath: m[2], globalName: m[3], runtimeDefault: m[4] === 'true' }));
 }
+const declaration = (m) => `{ projectId: '${m.projectId}', nodePath: '${m.nodePath}', globalName: '${m.globalName}', runtimeDefault: ${m.runtimeDefault} }`;
+/** 一時 tree の registry.js の built-in 宣言を mods で置き換える（宣言の行だけを書き換える）。 */
+function writeDeclarations(dir, mods) {
+  const reg = path.join(dir, 'project-config', 'registry.js');
+  const src = fs.readFileSync(reg, 'utf8');
+  const out = src.replace(/(var BUILT_IN_PRESET_MODULES = \[\n)([\s\S]*?)(\n  \];)/,
+    (all, open, body, close) => open + mods.map((m) => '    ' + declaration(m)).join(',\n') + close);
+  if (out === src) throw new Error('could not rewrite the built-in declarations');
+  fs.writeFileSync(reg, out);
+}
+/** 一時 tree の index.html で script を足す（registry.js の直前）・外す。 */
+function addScriptBeforeRegistry(dir, src) {
+  const idx = path.join(dir, 'index.html');
+  fs.writeFileSync(idx, fs.readFileSync(idx, 'utf8').replace('<script src="project-config/registry.js"></script>',
+    '<script src="' + src + '"></script>\n<script src="project-config/registry.js"></script>'));
+}
+function removeScript(dir, src) {
+  const idx = path.join(dir, 'index.html');
+  const html = fs.readFileSync(idx, 'utf8');
+  const out = html.replace('<script src="' + src + '"></script>\n', '');
+  if (out === html) throw new Error('script not found: ' + src);
+  fs.writeFileSync(idx, out);
+}
+const MODS = builtInModules();
+const DEFAULT_MOD = MODS.filter((m) => m.runtimeDefault)[0];
+const NON_DEFAULT_MODS = MODS.filter((m) => !m.runtimeDefault);
+const SECOND = { projectId: 'synthetic-second', nodePath: './synthetic-second.js', globalName: 'SyntheticSecondConfig', runtimeDefault: false };
 
-// 合成 built-in。階は整数風 key を含むので、Object.keys の順（4, 5, B1, R, PH）が context の順になる。
-// 先頭の 4 は実 tree の階に無く、2 階も無い（初期選択が「context の先頭」であって、特定の階の
+// 合成 built-in。階は整数風 key を含むので、Object.keys の順（3, 5, B1, R, PH）が context の順になる。
+// 先頭の 3 は実 tree の階に無く、2 階も無い（初期選択が「context の先頭」であって、特定の階の
 // hard-code や旧 UI 既定ではないことを、実 tree と区別して確かめるため）。
 const SYN = {
   label: 'Synthetic Built-in Sample',
-  floors: { B1: [1111, 'verified', 'primary'], 4: [1222, 'partially_verified', 'indirect'], 5: [1333, 'unverified', 'none'],
+  floors: { B1: [1111, 'verified', 'primary'], 3: [1222, 'partially_verified', 'indirect'], 5: [1333, 'unverified', 'none'],
     R: [1444, 'partially_verified', 'indirect'], PH: [1477, 'unverified', 'none'] },
   zones: { corner: [1666, 'partially_verified', 'indirect'], general: [1555, 'partially_verified', 'indirect'] },
   w: 987, h: 2345
@@ -102,7 +137,7 @@ function syntheticModule(projectId, globalName) {
     dimensions: { mode: 'sample_default', defaultW: v(${SYN.w}, 'mm', 'unverified', 'none'),
       defaultH: v(${SYN.h}, 'mm', 'unverified', 'none'), status: 'unverified' },
     wind: { positivePressureByFloor: {}, negativePressureByZone: {},
-      V0: v(31, 'm/s', 'unverified', 'none'), roughnessCategory: v('II', null, 'unverified', 'none'), status: 'partially_verified' },
+      V0: v(31, 'm/s', 'unverified', 'none'), roughnessCategory: v('I', null, 'unverified', 'none'), status: 'partially_verified' },
     verifiedCases: [],
     getPublicLabel: function () { return this.identity.publicLabel; },
     getPositivePressure: function (f) { return this.wind.positivePressureByFloor[f].value; },
@@ -281,6 +316,11 @@ function checkLoaded(tag, o, expect) {
   check(tag + '-K3', o.imported.kind === 'imported_unverified' && !!o.imported.glass, 'imported');
 }
 
+/** preset UI の比較用の写し（表示・選択肢・寸法・Evidence・照合・全 package・参考比較・Closure）。 */
+const pickUi = (o) => JSON.stringify([o.presetLabel, o.modeOptionText, o.floorOptions, o.zoneOptions, o.W, o.H, o.statusRows,
+  o.reconRows, (o.calc || []).map((c) => c.pkg), o.comparison, o.closureText]);
+let realPick = null;
+
 const browser = await chromium.launch();
 const temps = [];
 // scenario が想定外の例外で止まっても、それを「測れなかった」ではなく FAIL として数える
@@ -293,8 +333,16 @@ async function scenario(name, fn) {
 }
 try {
   // ── real ─────────────────────────────────────────────────────────
+  // 公開 runtime の現在の状態: runtime default（合成サンプル）だけが読み込まれ、それが active context になる。
   await scenario('real', async () => {
     const { page, pageErrors } = await load(REPO);
+    const loaded = await page.evaluate((mods) => ({
+      scripts: [...document.querySelectorAll('script[src]')].map((el) => el.getAttribute('src')),
+      globals: mods.map((m) => typeof window[m.globalName]),
+      runtimeDefault: (() => {
+        try { return PresetRegistry.getRuntimeDefaultBuiltInPresetId(); } catch (e) { return 'ERR ' + e.message; }
+      })()
+    }), MODS);
     const o = await observe(page, { keepDims: false });
     checkLoaded('real', o, { ctx: JSON.parse(JSON.stringify(REAL_CTX)), nodeCtx: JSON.parse(JSON.stringify(REAL_CTX)),
       id: REAL_ID, label: REAL_CTX.publicLabel, closure: closureFromNode(REAL_ID),
@@ -303,15 +351,46 @@ try {
     const nodeSame = o.calc.every((c) => JSON.stringify(PI.fromPreset(REAL_PRESET, { floorKey: c.f, zoneKey: c.z,
       widthMm: c.pkg.widthMm, heightMm: c.pkg.heightMm, glassType: c.pkg.glassType, extraFactor: c.pkg.extraFactor })) === JSON.stringify(c.pkg));
     check('real-F7', nodeSame, 'packages equal Node-side ProjectInput.fromPreset()');
+    // P: 公開 runtime の読み込み境界。runtimeDefault でない built-in の module は page に無い
+    const srcOf = (m) => 'project-config/' + path.basename(m.nodePath);
+    check('real-P1', NON_DEFAULT_MODS.length >= 1 && loaded.scripts.includes(srcOf(DEFAULT_MOD)) &&
+      NON_DEFAULT_MODS.every((m) => !loaded.scripts.includes(srcOf(m))),
+      'only the runtime-default module is loaded (' + NON_DEFAULT_MODS.length + ' non-default module(s) absent)');
+    check('real-P2', MODS.every((m, i) => loaded.globals[i] === (m.runtimeDefault ? 'object' : 'undefined')),
+      'module globals defined: runtime default only');
+    check('real-P3', loaded.runtimeDefault === REAL_ID && !!o.ctx && o.ctx.origin.registryProjectId === REAL_ID &&
+      o.ctx.publicLabel === REAL_CTX.publicLabel, 'active context is the runtime default');
+    // P4: Node では legacy validation 用に捕まえられる非 default built-in の label・圧力 map・寸法が
+    // active context に混ざっていない（構造比較だけ。値を書き写さない）
+    const others = NON_DEFAULT_MODS.filter((m) => Registry.BUILT_IN_PRESET_IDS.includes(m.projectId))
+      .map((m) => PC.fromLegacyPreset(m.projectId));
+    check('real-P4', !!o.ctx && others.length === NON_DEFAULT_MODS.length && others.every((c) =>
+      c.publicLabel !== o.ctx.publicLabel &&
+      JSON.stringify(c.capabilities.projectPressureMap) !== JSON.stringify(o.ctx.capabilities.projectPressureMap) &&
+      JSON.stringify(c.capabilities.sampleDefaultDimensions) !== JSON.stringify(o.ctx.capabilities.sampleDefaultDimensions)),
+      'non-default built-in state is not in the active context (' + others.length + ' compared)');
+    // U: 合成サンプルであり実案件 Evidence ではないことが分かり、強い検証表現を作らない
+    check('real-U1', o.identityNote === '⚠ ' + REAL_PRESET.identity.evidence.publicDescription &&
+      (o.modeOptionText || '').includes(REAL_CTX.publicLabel), o.identityNote);
+    const be = REAL_CTX.capabilities.builtInEvidence;
+    const allUnverified = be.fields.every((f) => f.verificationStatus === 'unverified') &&
+      be.groupStatus.wind === 'unverified' && be.groupStatus.dimensions === 'unverified';
+    const rows = o.statusRows.filter((r) => r.length === 4 && r[1] !== '検証状況');
+    check('real-U2', allUnverified && rows.length === 6 && rows.every((r) => r[1] === 'Unverified' && r[2] === 'None'),
+      JSON.stringify(rows.map((r) => r.slice(1, 3))));
+    const evidenceUi = [o.identityNote, o.statusText, o.reconRows.flat().join(' '), o.verifiedCaseText, o.closureText].join(' ');
+    check('real-U3', !/確認済|検証済|一次資料で確認|(^|[^n])Verified(?! Case)|Primary/.test(evidenceUi),
+      'no strong verified wording in the preset Evidence UI');
     check('real-Z1', pageErrors.length === 0, 'page errors: ' + JSON.stringify(pageErrors));
+    realPick = pickUi(o);
     await page.close();
   });
 
-  // ── decoy: bootstrap 後に案件 module の global を別物へ差し替える ──────────
+  // ── decoy: bootstrap 後に runtime default module の global を別物へ差し替える ──────────
   // registry は bootstrap で instance を捕まえているので、context も bridge も影響を受けない。
   // UI が module の global を直接読んでいれば、ここで decoy の値が画面に出る。
   await scenario('decoy', async () => {
-    const mod = builtInModules()[0];
+    const mod = DEFAULT_MOD;
     const { page, pageErrors } = await load(REPO);
     const before = await observe(page, { keepDims: false });
     await page.evaluate((globalName) => {
@@ -335,20 +414,18 @@ try {
       runCalc();
     }, mod.globalName);
     const after = await observe(page, { keepDims: false });
-    const pick = (o) => JSON.stringify([o.presetLabel, o.modeOptionText, o.floorOptions, o.zoneOptions, o.W, o.H, o.statusRows,
-      o.reconRows, (o.calc || []).map((c) => c.pkg), o.comparison]);
-    check('decoy-1', pick(after) === pick(before), 'UI unchanged after replacing the module global');
+    check('decoy-1', pickUi(after) === pickUi(before), 'UI unchanged after replacing the module global');
     check('decoy-2', ![after.presetLabel, after.statusText, after.reconRows.flat().join(' '), JSON.stringify(after.comparison),
       ...(after.calc || []).map((c) => c.resultText)].join(' ').match(/DECOY|9001|9101|4321/), 'no decoy value reaches the UI');
     check('decoy-Z1', pageErrors.length === 0, 'page errors: ' + JSON.stringify(pageErrors));
     await page.close();
   });
 
-  // ── synthetic built-in ───────────────────────────────────────────
+  // ── synthetic: runtime default module を別の合成 preset に差し替える ─────────
   await scenario('syn', async () => {
-    const mods = builtInModules();
-    check('syn-0', mods.length === 1, 'registry declares exactly one built-in module: ' + JSON.stringify(mods.map((m) => m.projectId)));
-    const mod = mods[0];
+    check('syn-0', MODS.filter((m) => m.runtimeDefault).length === 1 && MODS.length >= 2,
+      'registry declares exactly one runtime-default built-in among ' + MODS.length + ' declarations');
+    const mod = DEFAULT_MOD;
     const dir = makeTree((d) => fs.writeFileSync(path.join(d, 'project-config', path.basename(mod.nodePath)),
       syntheticModule(mod.projectId, mod.globalName)));
     temps.push(dir);
@@ -375,12 +452,12 @@ try {
     const realFirst = REAL_CTX.capabilities.projectPressureMap.positivePressures[0].floor;
     check('syn-C4', !floors.includes('2') && floors[0] !== realFirst && o.selected[0] === floors[0],
       'initial floor ' + o.selected[0] + ' = context first ' + floors[0] + ' (no floor 2; real first ' + realFirst + ')');
-    // 実案件の名称・値が 1 つも出ない（hard-code や偶然一致の検出）
+    // 実 tree（runtime default）の名称・値が 1 つも出ない（hard-code や偶然一致の検出）
     const shown = [o.presetLabel, o.modeOptionText, o.statusText, o.reconRows.flat().join(' '), o.closureText,
       ...(o.calc || []).map((c) => c.resultText)].join(' ');
     const leaked = [...REAL_VALUES].filter((v) => new RegExp('(^|[^0-9])' + v + '([^0-9]|$)').test(shown));
-    check('syn-L1', leaked.length === 0, 'real project values shown: ' + JSON.stringify(leaked));
-    check('syn-L2', !shown.includes(REAL_CTX.publicLabel), 'real project label shown');
+    check('syn-L1', leaked.length === 0, 'runtime-default values shown: ' + JSON.stringify(leaked));
+    check('syn-L2', !shown.includes(REAL_CTX.publicLabel), 'runtime-default label shown');
     check('syn-Z1', pageErrors.length === 0, 'page errors: ' + JSON.stringify(pageErrors));
     await page.close();
   });
@@ -406,27 +483,93 @@ try {
     await page.close();
   });
 
-  // ── ambiguous: built-in が 2 件 ────────────────────────────────────
-  await scenario('amb', async () => {
+  // ── missing: runtime default module を読み込まない（代わりに非 default built-in を読み込む）───
+  await scenario('missing', async () => {
     const dir = makeTree((d) => {
-      const reg = path.join(d, 'project-config', 'registry.js');
-      const src = fs.readFileSync(reg, 'utf8').replace(
-        /(var BUILT_IN_PRESET_MODULES = \[\n)/,
-        "$1    { projectId: 'synthetic-second', nodePath: './synthetic-second.js', globalName: 'SyntheticSecondConfig' },\n");
-      fs.writeFileSync(reg, src);
-      fs.writeFileSync(path.join(d, 'project-config', 'synthetic-second.js'), syntheticModule('synthetic-second', 'SyntheticSecondConfig'));
-      const idx = path.join(d, 'index.html');
-      fs.writeFileSync(idx, fs.readFileSync(idx, 'utf8').replace('<script src="project-config/registry.js"></script>',
-        '<script src="project-config/synthetic-second.js"></script>\n<script src="project-config/registry.js"></script>'));
+      writeDeclarations(d, MODS.concat([SECOND]));
+      fs.writeFileSync(path.join(d, 'project-config', 'synthetic-second.js'), syntheticModule(SECOND.projectId, SECOND.globalName));
+      addScriptBeforeRegistry(d, 'project-config/synthetic-second.js');
+      removeScript(d, 'project-config/' + path.basename(DEFAULT_MOD.nodePath));
     });
+    temps.push(dir);
+    const { page, pageErrors } = await load(dir);
+    const captured = await page.evaluate((id) => {
+      try { PresetRegistry.getBuiltInPreset(id); return true; } catch (e) { return false; }
+    }, SECOND.projectId);
+    const o = await observe(page, { keepDims: false });
+    check('missing-0', captured, 'a non-default built-in is loaded and captured, so a fallback would be possible');
+    check('missing-1', !o.hasContext && /is not loaded in this environment/.test(o.identityNote || ''), (o.identityNote || '').slice(0, 140));
+    check('missing-2', o.floorOptions.length === 0 && /案件プリセットモードでは計算しません/.test(o.presetAfterReturnText || '') &&
+      ![o.modeOptionText, o.presetLabel, o.statusText, o.closureText].join(' ').includes(SYN.label),
+      'no fallback to the loaded non-default built-in');
+    // 後から registerPreset() した config は、runtime default の id を名乗っても runtime default になれない
+    const late = await page.evaluate((id) => {
+      const fake = { projectId: id, hasFixedPreset: true, getPublicLabel: () => 'FAKE-RUNTIME-DEFAULT' };
+      let registered = false;
+      try { PresetRegistry.registerPreset(fake); registered = true; } catch (e) { /* not registrable */ }
+      let selected = null;
+      try { selected = PresetRegistry.getRuntimeDefaultBuiltInPresetId(); } catch (e) { selected = 'ERR'; }
+      initActiveProjectContext();
+      applyActiveProjectContextToUI();
+      return { registered, selected, hasContext: !!activeProjectContext,
+        label: document.getElementById('preset-name-label').textContent };
+    }, DEFAULT_MOD.projectId);
+    check('missing-3', late.registered && late.selected === 'ERR' && !late.hasContext && !/FAKE/.test(late.label),
+      'a dynamically registered look-alike cannot become the runtime default: ' + JSON.stringify(late));
+    check('missing-Z1', pageErrors.length === 0, 'page errors: ' + JSON.stringify(pageErrors));
+    await page.close();
+  });
+
+  // ── duplicate: runtimeDefault の宣言が 2 件 ─────────────────────────
+  await scenario('duplicate', async () => {
+    const dir = makeTree((d) => {
+      writeDeclarations(d, MODS.concat([Object.assign({}, SECOND, { runtimeDefault: true })]));
+      fs.writeFileSync(path.join(d, 'project-config', 'synthetic-second.js'), syntheticModule(SECOND.projectId, SECOND.globalName));
+      addScriptBeforeRegistry(d, 'project-config/synthetic-second.js');
+    });
+    temps.push(dir);
+    const { page, pageErrors } = await load(dir);
+    const o = await observe(page, { keepDims: false });
+    check('duplicate-1', !o.hasContext && /exactly one built-in must be declared runtimeDefault \(found 2\)/.test(o.identityNote || ''),
+      (o.identityNote || '').slice(0, 140));
+    check('duplicate-2', o.floorOptions.length === 0 && /案件プリセットモードでは計算しません/.test(o.presetAfterReturnText || '') &&
+      ![o.modeOptionText, o.presetLabel].join(' ').includes(SYN.label) && ![o.modeOptionText, o.presetLabel].join(' ').includes(REAL_CTX.publicLabel),
+      'neither declaration is chosen');
+    check('duplicate-Z1', pageErrors.length === 0, 'page errors: ' + JSON.stringify(pageErrors));
+    await page.close();
+  });
+
+  // ── extra: runtimeDefault でない built-in が追加で読み込まれている ────────────
+  await scenario('extra', async () => {
+    const dir = makeTree((d) => {
+      writeDeclarations(d, MODS.concat([SECOND]));
+      fs.writeFileSync(path.join(d, 'project-config', 'synthetic-second.js'), syntheticModule(SECOND.projectId, SECOND.globalName));
+      addScriptBeforeRegistry(d, 'project-config/synthetic-second.js');
+    });
+    temps.push(dir);
+    const { page, pageErrors } = await load(dir);
+    const captured = await page.evaluate((id) => {
+      try { PresetRegistry.getBuiltInPreset(id); return true; } catch (e) { return false; }
+    }, SECOND.projectId);
+    const o = await observe(page, { keepDims: false });
+    check('extra-0', captured, 'the extra non-default built-in is loaded and captured');
+    check('extra-1', !!o.ctx && o.ctx.origin.registryProjectId === REAL_ID && realPick !== null && pickUi(o) === realPick,
+      'runtime default and the whole preset UI are unchanged');
+    check('extra-Z1', pageErrors.length === 0, 'page errors: ' + JSON.stringify(pageErrors));
+    await page.close();
+  });
+
+  // ── reordered: 宣言の順序を入れ替える（id 一覧の先頭が変わる）────────────────
+  await scenario('reordered', async () => {
+    const dir = makeTree((d) => writeDeclarations(d, MODS.slice().reverse()));
     temps.push(dir);
     const { page, pageErrors } = await load(dir);
     const ids = await page.evaluate(() => Array.from(PresetRegistry.BUILT_IN_PRESET_IDS));
     const o = await observe(page, { keepDims: false });
-    check('amb-0', ids.length === 2, 'two built-ins declared: ' + JSON.stringify(ids));
-    check('amb-1', !o.hasContext && /exactly one built-in preset/.test(o.identityNote || ''), (o.identityNote || '').slice(0, 120));
-    check('amb-2', o.floorOptions.length === 0 && /案件プリセットモードでは計算しません/.test(o.presetAfterReturnText || ''), 'no first-entry choice');
-    check('amb-Z1', pageErrors.length === 0, 'page errors: ' + JSON.stringify(pageErrors));
+    check('reordered-0', ids.length === MODS.length && ids[0] !== Registry.BUILT_IN_PRESET_IDS[0], 'the id list starts with a different entry');
+    check('reordered-1', !!o.ctx && o.ctx.origin.registryProjectId === REAL_ID && realPick !== null && pickUi(o) === realPick,
+      'runtime default and the whole preset UI are unchanged');
+    check('reordered-Z1', pageErrors.length === 0, 'page errors: ' + JSON.stringify(pageErrors));
     await page.close();
   });
 } finally {

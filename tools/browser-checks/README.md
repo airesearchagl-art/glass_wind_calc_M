@@ -11,12 +11,12 @@ F7-06). They are committed here for that reason.
 
 | harness | checks | what it covers |
 |---|---|---|
-| `browser-w4.mjs` | 34 | Evidence Closure Matrix renders; protected facts read back from the page's active ProjectContext and compared with expectations taken outside the page (Node-side built-in instance and `evidenceStateExpected`) |
+| `browser-w4.mjs` | 34 | Evidence Closure Matrix renders; protected facts read back from the page's active ProjectContext and compared with expectations taken outside the page (Node-side runtime-default built-in and `evidenceStateExpected`) |
 | `probe-w4.mjs` | 8 | injection probes against the closure UI; asserts no page errors |
 | `failopen-w4.mjs` | 10 | forced closure failure shows a warning that does **not** read as "verified" |
 | `stageA-regression.mjs` | 10 | Stage A exact-head regression over the protected values (facts and Closure observed through the active ProjectContext, never the project module global) |
 | `parser-boundary.mjs` | 42 forms | the `html-like-tag` guard vs. real Chromium element creation |
-| `context-runtime.mjs` | 82 | the preset UI reads everything from the active ProjectContext (Phase 2L-B2 S2-B / S2-C): the real tree, a synthetic built-in substituted in a temporary copy (its first floor is not in the real tree and it has no floor 2, so the initial floor must be the context's first), the module global replaced after bootstrap (decoy), ProjectContext unavailable, and two built-ins; the label shows publicLabel only |
+| `context-runtime.mjs` | 99 | the preset UI reads everything from the active ProjectContext of the runtime-default built-in (Phase 2L-B2 S2-B / S2-C / S3-A): the real tree (the synthetic sample only; non-default built-in modules are not loaded and the Evidence UI stays unverified), the module global replaced after bootstrap (decoy), a different synthetic built-in substituted in a temporary copy (its first floor is not in the real tree and it has no floor 2), ProjectContext unavailable, the runtime-default module missing (no fallback, and a late look-alike registration cannot become the default), a duplicate runtime-default declaration, an extra non-default built-in, and reordered declarations |
 
 `parser-boundary.mjs` is a differential harness, not a pass/fail suite: it
 reports **bypasses** (guard accepts, Chromium builds an element — must be 0)

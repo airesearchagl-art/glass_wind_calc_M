@@ -103,16 +103,16 @@ cd glass_wind_calc_M
 
 | 項目 | 説明 | 初期値 |
 |------|------|--------|
-| ガラス幅 W | **ガラス1枚の見付寸法**（mm単位） | 1250 mm（※未検証な既定値） |
-| ガラス高さ H | **ガラス1枚の見付寸法**（mm単位） | 2050 mm（※未検証な既定値） |
-| 設置階数 | 1階 / 2階 / 3階 / R階 | 2階 |
+| ガラス幅 W | **ガラス1枚の見付寸法**（mm単位） | 900 mm（※合成サンプルの未検証な既定値） |
+| ガラス高さ H | **ガラス1枚の見付寸法**（mm単位） | 1800 mm（※合成サンプルの未検証な既定値） |
+| 設置階数 | runtime の built-in の階（現在の合成サンプル: 1階 / 2階 / 4階 / R階） | 先頭の階（1階） |
 | 部位 | 一般部 / 隅角部 | 一般部 |
 | 候補ガラス構成 | 複層/単板・ガラス種別 | Low-E + A + FL |
 | 告示外の追加低減係数 | 0.70 〜 1.00（スライダー） | **1.00**（告示準拠） |
 
 > W・H はサッシ枠を含む建具全体寸法ではなく、**ガラス1枚の見付寸法**（面積算定に用いる寸法）です。
 >
-> ⚠️ **初期値 W=1250mm / H=2050mm は UNVERIFIED PROJECT DEFAULT（未検証な既定値）です。** リポジトリ初回リリースコミットで `index.html` の初期値として導入されましたが、コミットメッセージ・README・設計根拠資料のいずれにも算定根拠の記載がなく、特定案件のガラス確定寸法として検証された値ではありません（正は `project-config/miyoshi.js` の `dimensions.defaultW` / `dimensions.defaultH`。Phase 2Dで `calc.js` 側の複製は削除済み）。社内の見積資料にはACW（アルミカーテンウォール）全体高さとしてH=2050mmに類する記録が存在しますが、これはACW全体寸法であり、ガラス1枚の見付高さと同一であることは確認できていません。今回確認できた社内資料の範囲では、ガラス1枚の見付幅W=1250mmと直接対応付けられる根拠は確認できていません（社内資料全体に存在しないことまで確認・証明したものではありません）。この初期値のまま計算した結果は「参考計算」であり、案件適合の根拠として扱わず、必ず案件図・メーカー資料でガラス1枚の実見付寸法を確認のうえ入力し直してください。
+> ⚠️ **初期値（現在は W=900mm / H=1800mm）は、公開 runtime の標準 built-in である合成サンプル（`project-config/sample.js`）の未検証な既定値です（Phase 2L-B2 / S3-A）。** 公開ツールの動作確認のための合成値で、どの案件の一次資料にも基づきません。この初期値のまま計算した結果は「参考計算」であり、案件適合の根拠として扱わず、必ず案件図・メーカー資料でガラス1枚の実見付寸法を確認のうえ入力し直してください。以前の案件 preset の既定寸法（1250×2050mm）は legacy validation 用のデータとして repository に残っていますが、公開 runtime では読み込まず、verified な pane 寸法へ昇格させることもありません。
 
 ---
 
@@ -122,7 +122,7 @@ cd glass_wind_calc_M
 
 | モード | sourceKind | 信頼度 | 値の出どころ |
 |---|---|---|---|
-| 案件プリセット（みよし案件） | `registered_preset` | プリセットの検証状況をそのまま保持（現状 `partially_verified`） | repository内のbuilt-in config（`project-config/miyoshi.js`） |
+| 案件プリセット（合成サンプル） | `registered_preset` | built-in の検証状況をそのまま保持（合成サンプルは常に `unverified`） | repository の runtime default built-in（`project-config/sample.js`、Phase 2L-B2 / S3-A） |
 | 手入力 / Generic | `manual` | 常に `unverified` | ユーザーがその場で入力した値 |
 | 告示風圧計算 | `notification_calculation` | 常に `unverified`（**式は検証済み / 入力値は未検証**） | 入力した風条件から算定した値（Phase 2E） |
 | 取り込みデータ | `imported_unverified` | **常に `unverified`** | 外部から読み込んだJSON |
@@ -131,7 +131,7 @@ cd glass_wind_calc_M
 
 ### 案件プリセット（みよし案件 / Miyoshi）
 
-Phase 1〜2Bで確立した既存動作そのものです。`project-config/miyoshi.js`（`MiyoshiProjectConfig`）の階別正圧・部位別負圧プリセットを、設置階数・部位のセレクトから選択します。値・検証状況（`verificationStatus`）・Evidenceの扱いは本README「設計定数」「Evidence Status」セクションのとおりで、**Phase 2Cによる変更は一切ありません**。
+**Phase 2L-B2 / S3-A 以降、公開 runtime の案件プリセットは合成サンプル（`project-config/sample.js`）です。** 階別正圧・部位別負圧を、設置階数・部位のセレクトから選択します（値はすべて合成値・`unverified`・Evidence level `none`）。以前の案件 preset（`project-config/miyoshi.js`）とその Phase 2L-A intake は **legacy validation 用**に repository に残し、Node のテストでは引き続き検証しますが、`index.html` では読み込みません。以下の「設計定数」「Evidence Status」等のセクションのうち以前の案件 preset について書かれた部分は、その legacy validation data の説明です。
 
 ### 手入力 / Generic（Manual）
 
@@ -916,8 +916,9 @@ fixture はすべて合成値です（`tests/project-pack.test.js` が、reposit
 - 案件プリセット mode の表示名・階／部位の選択肢・初期 W/H・Evidence status・Verified Case・
   Evidence照合・Evidence Closure は、`fromLegacyPreset()` で作った**1 つの active ProjectContext** から読みます。
   UI は案件 module を直接読みません。案件 id・階・部位・寸法を HTML / コードに持ちません。
-- built-in の候補は `PresetRegistry.BUILT_IN_PRESET_IDS` で見つけますが、これは trust の根ではありません。
-  preset selector はまだ無いため、built-in が**ちょうど 1 件**のときだけ自動選択し、0 件・2 件以上は fail closed します。
+- どの built-in を使うかは `PresetRegistry.getRuntimeDefaultBuiltInPresetId()` だけで決まります（S3-A。S2-B の
+  「built-in がちょうど 1 件なら自動選択」は終了しました）。`BUILT_IN_PRESET_IDS` は参照用の一覧で、trust の根でも
+  選択の根でもありません。preset selector はまだありません。
 - `ProjectInput.fromPreset()` と Evidence Closure は canonical な built-in instance を要求するので、
   `context.origin.registryProjectId` → `PresetRegistry.getBuiltInPreset()` の compatibility bridge を使います。
 - context を作れなかったときは、案件プリセット mode を明示エラーにします（案件 module へ fallback しません）。
@@ -946,6 +947,33 @@ fixture はすべて合成値です（`tests/project-pack.test.js` が、reposit
   built-in preset 自体の値（`project-config/` 内）と protected invariant は変えていません。
 - browser harness（`browser-w4` / `stageA-regression`）は案件 module の global を読まず、page の active ProjectContext を
   観察します。期待値は page の外（Node 側の built-in instance と `verification-spec.json` の `evidenceStateExpected`）から取ります。
+
+### 公開 runtime の標準 built-in を合成サンプルへ切り替え（Phase 2L-B2 / S3-A）
+
+- **公開 runtime の現在の状態 = 合成サンプル**（`project-config/sample.js`、projectId `synthetic-sample`、表示名「合成サンプル」）。
+  実案件ではなく、公開ツールの動作確認のための合成値です: W 900 / H 1800 mm（`sample_default`）、
+  階 1 / 2 / 4 / R の正圧 1110 / 1330 / 1550 / 1770 N/m²、一般部 / 隅角部の負圧 870 / 1190 N/m²、V0 30 m/s、粗度区分 II。
+  すべて `unverified`・Evidence level `none`・`checkedAt: null`・`privateReferenceAvailable: false`、`verifiedCases: []`。
+  値は `tests/s3a-synthetic-runtime.test.js` の契約で固定しており、変えるのは Human Review を伴う変更です。
+- repository の built-in なので context では `legacy_builtin` / `built_in_current`、入力 package では `registered_preset` に
+  なりますが、**`built_in_current` は verified ではありません**（Promotion Gate を通る Evidence は 0）。
+- **runtime default は選択の方針で、trust の方針ではありません。** registry の built-in 宣言は `runtimeDefault` を持ち、
+  `getRuntimeDefaultBuiltInPresetId()` は宣言がちょうど 1 件で、その module が今の環境で built-in として捕まえられている
+  ときだけ id を返します。0 件・2 件以上・module 未読込は fail closed で、別の built-in や id 一覧の先頭へは fallback
+  しません。後から `registerPreset()` した config は runtime default になれません。
+- `index.html` は `project-config/sample.js` だけを読み込みます（以前の案件 module を読み込まず、その global も定義されません）。
+- 告示モードの初期値も合成値です: V0 30 m/s、粗度区分 II、建物高さ 12.0 m、軒高 12.0 m、評価高さ Z 9.0 m
+  （計算式・validation は変えていません）。ラベル見本は「例: 開口A」、組み合わせ生成の Z 見本は 3.5, 7.5, 11.5 です。
+- `project-state-probe` の `project` / `preset` は**公開 runtime の現在の状態**（runtime default を `index.html` と同じ経路で
+  読む）です。`protectedCalculations` は runtime preset から独立した **algorithm regression fixture**（入力を固定した
+  既知解）で、値は従来どおりです。
+- **LEGACY VALIDATION ONLY**: 以前の案件 preset（`project-config/miyoshi.js`）と Phase 2L-A intake
+  （`project-config/miyoshi-observations.js`）は削除せず、Node では引き続き built-in として捕まえて検証します
+  （legacy Closure 0/12 · 0/4 · 0/8、intake 10/12 · 3/4 · 0/8、candidate なし）。これは legacy validation の結果であり、
+  公開 runtime の現在の状態ではありません。
+- 実ブラウザでの確認: `node tools/browser-checks/context-runtime.mjs`（合成サンプルの実 tree、module global の差し替え、
+  別の合成 built-in への差し替え、context 読込失敗、runtime default module の欠損、runtimeDefault の重複、
+  非 default built-in の追加、宣言の並び替えを含む）。
 
 | adapter | 入力 | sourceKind | trust |
 |---|---|---|---|

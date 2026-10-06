@@ -27,8 +27,10 @@ const EXPECTED_PROJECT_FIELDS = [
 ];
 
 // Hand-written expected values. Independent of whatever the probe reports.
+// Phase 2L-B2 / S3-A: 'project' and 'preset' are the CURRENT PUBLIC RUNTIME state, which is the
+// synthetic sample built-in. The legacy project preset is legacy validation data, not reported here.
 const EXPECTED_PROJECT = {
-  projectId: 'miyoshi',
+  projectId: 'synthetic-sample',
   closureStatus: 'BLOCKED',
   observations: 0,
   readySlotCount: 0, requiredSlotCount: 12,
@@ -37,6 +39,7 @@ const EXPECTED_PROJECT = {
   hasPromotionCandidate: false,
   verifiedCaseCount: 0
 };
+// Algorithm regression fixtures with fixed inputs, independent of the runtime preset.
 const EXPECTED_PROTECTED = {
   fl6_1250x2050: 1756.09756097561,
   fl6_1500x2050: 1463.4146341463415,
@@ -76,8 +79,8 @@ test('P2K-P02: the probe reports the current project state (hand-written expecta
   assert.notEqual(state.project.readyCaseScopeCount, state.project.caseScopeCount);
 
   assert.deepEqual(state.preset.dimensions,
-    { widthMm: 1250, heightMm: 2050, mode: 'sample_default', verificationStatus: 'unverified' });
-  assert.deepEqual(state.preset.wind, { V0: 34, roughnessCategory: 'III' });
+    { widthMm: 900, heightMm: 1800, mode: 'sample_default', verificationStatus: 'unverified' });
+  assert.deepEqual(state.preset.wind, { V0: 30, roughnessCategory: 'II' });
 });
 
 test('P2K-P03: protected calculations are bit-exact', async () => {

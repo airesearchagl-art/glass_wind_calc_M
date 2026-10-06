@@ -264,9 +264,14 @@ test('P2K-V05: expected project state is declared, not read from the tree', asyn
   assert.equal(exp.project.caseScopeCount, 8);
   assert.equal(exp.project.hasPromotionCandidate, false);
   assert.equal(exp.project.verifiedCaseCount, 0);
-  assert.equal(exp.preset.wind.V0, 34);
-  assert.equal(exp.preset.wind.roughnessCategory, 'III');
+  // S3-A: project / preset are the current public runtime state (the synthetic sample)
+  assert.equal(exp.project.projectId, 'synthetic-sample');
+  assert.equal(exp.preset.wind.V0, 30);
+  assert.equal(exp.preset.wind.roughnessCategory, 'II');
+  assert.equal(exp.preset.dimensions.widthMm, 900);
+  assert.equal(exp.preset.dimensions.heightMm, 1800);
   assert.equal(exp.preset.dimensions.mode, 'sample_default');
+  assert.equal(exp.preset.dimensions.verificationStatus, 'unverified');
   assert.equal(exp.protectedCalculations.er, 0.8516557589672942);
   assert.equal(exp.protectedCalculations.qBar, 503.08024004410464);
   assert.equal(exp.protectedCalculations.fl6_1250x2050, 1756.09756097561);
@@ -286,7 +291,7 @@ test('P2K-V06: protected invariants and limitations are carried, not summarised 
   const pkg = m.buildVerifierPackage();
   const ids = pkg.protectedInvariants.map((i) => i.id);
   ['verified-cases-empty', 'no-promotion-candidate', 'closure-blocked',
-   'sample-default-dimensions', 'v0-34', 'roughness-III',
+   'sample-default-dimensions', 'runtime-wind-synthetic', 'runtime-evidence-unverified',
    'protected-calculations', 'guard-policy-frozen'].forEach((id) => {
     assert.equal(ids.includes(id), true, 'protected invariant ' + id + ' must be present');
   });

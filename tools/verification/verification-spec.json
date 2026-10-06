@@ -12,7 +12,7 @@
       "target": "the Evidence Closure Matrix renders and protected facts read back from the loaded page",
       "oracle": "real Chromium",
       "sharedDependencies": [
-        "none for the page: it is loaded over file:// and observed through a real Chromium; the protected-facts check (B-facts) reads the page's active ProjectContext and takes its expectation from outside the page — the built-in instance under Node (project-config/registry.js getBuiltInPreset) and the hand-written evidenceStateExpected in this file"
+        "none for the page: it is loaded over file:// and observed through a real Chromium; the protected-facts check (B-facts) reads the page's active ProjectContext and takes its expectation from outside the page — the runtime-default built-in under Node (project-config/registry.js getRuntimeDefaultBuiltInPresetId / getBuiltInPreset) and the hand-written evidenceStateExpected in this file"
       ],
       "positiveControl": "mutants K4-01..K4-08: removing the override, the bare specifier, the chromium check, the typed error, or collapsing UNVERIFIED into FAIL are each killed by P2K-R02..R07",
       "negativeControl": "with Playwright unresolvable the run reports UNVERIFIED and exits 3, never 0 or 1",
@@ -31,13 +31,13 @@
       "command": "node tools/browser-checks/context-runtime.mjs",
       "evidenceClass": "observational",
       "admissibility": "UNVERIFIED",
-      "target": "the preset-mode UI reads its label (publicLabel only, no projectId), floor/zone options, initial floor (the context's first floor), initial dimensions, calculation, comparison, Evidence panels and Closure from the active ProjectContext, in the real tree and in substituted trees (synthetic built-in whose first floor is absent from the real tree and which has no floor 2, module global replaced after bootstrap, ProjectContext unavailable, two built-ins)",
+      "target": "the preset-mode UI reads its label (publicLabel only, no projectId), floor/zone options, initial floor (the context's first floor), initial dimensions, calculation, comparison, Evidence panels and Closure from the active ProjectContext of the runtime-default built-in, in the real tree (synthetic sample; the legacy module is not loaded) and in substituted trees (alternate synthetic built-in, module global replaced after bootstrap, ProjectContext unavailable, runtime-default module missing, duplicate runtime-default declaration, extra non-default built-in, reordered declarations)",
       "oracle": "real Chromium",
       "sharedDependencies": [
-        "expected values for the real tree are computed by requiring the same project-config modules under Node (registry, project-context, project-input, evidence-closure); the synthetic tree's expectations come from the synthetic preset written by the harness"
+        "expected values for the real tree are computed by requiring the same project-config modules under Node (registry via getRuntimeDefaultBuiltInPresetId, project-context, project-input, evidence-closure); the substituted trees' expectations come from the synthetic presets written by the harness"
       ],
       "positiveControl": "the real tree must show the context's own label, topology and values, and the synthetic tree must show the synthetic ones (different label, floor set and order, zone order, dimensions, pressures and Evidence levels)",
-      "negativeControl": "mutants N1-N12 (direct module reads, hard-coded options/dimensions/ids, fallback on failure, ambiguous auto-selection, broken load order) and S2-C controls C1-C9 (old mode token, data-initial-value, projectId in the label, project wording, built-in sample values, module-global reads in harnesses, a hard-coded initial floor) each fail at least one check here or in tests/s2b-runtime-context.test.js / tests/s2c-runtime-residue.test.js",
+      "negativeControl": "mutants N1-N12 (S2-B), C1-C9 (S2-C) and S3-01..S3-11 (legacy module reloaded, selection by id-list position, ambiguous or missing runtime default with fallback, dynamic registration as default, promoted sample Evidence, non-empty verifiedCases, probe or harness reading the legacy module or id-list position, old notification defaults, a Project Pack runtime path) each fail at least one check here or in tests/s2b-runtime-context.test.js / tests/s2c-runtime-residue.test.js / tests/s3a-synthetic-runtime.test.js",
       "proves": "how index.html wires the built-in preset through ProjectContext in a real browser for the head measured",
       "doesNotProve": "anything about an unmeasured head, or about Project Pack runtime use, which does not exist yet",
       "instrumentFiles": [
@@ -237,10 +237,11 @@
       "command": "node tools/verification/project-state-probe.mjs",
       "evidenceClass": "observational",
       "admissibility": "ADMISSIBLE",
-      "target": "the project's actual closure state, preset values and protected calculations",
+      "target": "the current public runtime state (the runtime-default built-in selected as index.html selects it: closure, preset dimensions and wind) and the algorithm regression fixtures (protected calculations with fixed inputs)",
       "oracle": "the running product via its real APIs; expected values are hand-written in its test",
       "sharedDependencies": [
-        "calls production calculation APIs deliberately — it must not reimplement a formula"
+        "calls production calculation APIs deliberately — it must not reimplement a formula",
+        "selects the runtime state through PresetRegistry.getRuntimeDefaultBuiltInPresetId() and ProjectContext, the same path as index.html; it names no project module and no project id"
       ],
       "positiveControl": "renaming or mis-sourcing readySlotCount fails the test (K1-04)",
       "negativeControl": "forbidden-key scan rejects any Evidence prose or private identifier in the output",
@@ -282,9 +283,9 @@
       "oracle": "real Chromium",
       "sharedDependencies": [
         "Playwright absolute path (P2K-F06)",
-        "A-facts expectation is computed outside the page: the built-in instance under Node (project-config/registry.js getBuiltInPreset) and the hand-written evidenceStateExpected in this file"
+        "A-facts expectation is computed outside the page: the runtime-default built-in under Node (project-config/registry.js getRuntimeDefaultBuiltInPresetId / getBuiltInPreset) and the hand-written evidenceStateExpected in this file"
       ],
-      "positiveControl": "reads protected values from the page's active ProjectContext (never the project module global) and requires them to equal both the Node-side built-in instance and evidenceStateExpected",
+      "positiveControl": "reads protected values from the page's active ProjectContext (never a project module global) and requires them to equal both the Node-side runtime-default built-in and evidenceStateExpected",
       "negativeControl": null,
       "proves": "the protected values as the browser sees them for the head measured",
       "doesNotProve": "anything about an unmeasured head",
@@ -308,32 +309,32 @@
     },
     {
       "id": "closure-blocked",
-      "statement": "runtime closure remains BLOCKED with 0 runtime-wired observations (index.html and project-state-probe evaluate an empty set; the Phase 2L-A intake module is not wired to runtime)",
+      "statement": "runtime closure (the current public runtime built-in, the synthetic sample) remains BLOCKED with 0 runtime-wired observations (index.html and project-state-probe evaluate an empty set; the Phase 2L-A legacy intake is legacy validation data, not runtime state)",
       "source": "project-state-probe project.closureStatus === 'BLOCKED'"
     },
     {
       "id": "slot-counts",
-      "statement": "runtime closure: 0/12 ready slots, 0/4 categories, 0/8 case scopes",
+      "statement": "runtime closure of the synthetic sample (4 floors x 2 zones): 0/12 ready slots, 0/4 categories, 0/8 case scopes",
       "source": "project-state-probe project.*Count"
     },
     {
       "id": "sample-default-dimensions",
-      "statement": "1250x2050 stays sample_default / unverified and is never promoted to verified pane dimensions",
+      "statement": "the runtime sample default dimensions (900x1800) stay sample_default / unverified; no sample dimension is ever promoted to verified pane dimensions (this includes the legacy preset's 1250x2050, which is legacy validation data only)",
       "source": "project-state-probe preset.dimensions"
     },
     {
-      "id": "v0-34",
-      "statement": "project config V0 stays 34 and is never conflated with the legal default 32",
-      "source": "project-state-probe preset.wind.V0"
+      "id": "runtime-wind-synthetic",
+      "statement": "the runtime sample wind conditions are synthetic and unverified: V0 30, roughness II. The legacy project config V0 (34) is legacy validation data, not runtime state, and is never conflated with the legal default 32",
+      "source": "project-state-probe preset.wind"
     },
     {
-      "id": "roughness-III",
-      "statement": "roughness category stays III",
-      "source": "project-state-probe preset.wind.roughnessCategory"
+      "id": "runtime-evidence-unverified",
+      "statement": "every value of the runtime synthetic sample is unverified with Evidence level none; built_in_current trust is not verification, and no runtime value can pass the Promotion Gate",
+      "source": "tests/s3a-synthetic-runtime.test.js synthetic sample contract"
     },
     {
       "id": "protected-calculations",
-      "statement": "FL6 1250x2050 = 1756.09756097561, FL6 1500x2050 = 1463.4146341463415, manual designP = 1400, Er = 0.8516557589672942, qBar = 503.08024004410464",
+      "statement": "algorithm regression fixtures, independent of the runtime preset: FL6 1250x2050 = 1756.09756097561, FL6 1500x2050 = 1463.4146341463415, manual designP = 1400, Er = 0.8516557589672942, qBar = 503.08024004410464 (wind fixture: H' 14.2 m, V0 34, roughness III, y 1.00 — fixed inputs, not project state or Evidence)",
       "source": "project-state-probe protectedCalculations"
     },
     {
@@ -365,7 +366,7 @@
     },
     {
       "id": "protected-facts-from-page",
-      "statement": "verifiedCases 0, sample_default, 1250x2050, V0 34, roughness III read back from the loaded page's active ProjectContext and equal to both the Node-side built-in instance and evidenceStateExpected",
+      "statement": "the runtime synthetic sample facts (verifiedCases 0, sample_default 900x1800, V0 30, roughness II) are read back from the loaded page's active ProjectContext and equal both the Node-side runtime-default built-in and evidenceStateExpected; the legacy project module is not loaded in the page",
       "instrument": "browser-w4"
     },
     {
@@ -496,10 +497,10 @@
     }
   ],
   "evidenceStateExpected": {
-    "note": "Hand-written expectation, NOT read from the tree. A verifier runs `node tools/verification/project-state-probe.mjs` and compares its output against these values. Disagreement is a finding, not a tolerance.",
+    "note": "Hand-written expectation, NOT read from the tree. A verifier runs `node tools/verification/project-state-probe.mjs` and compares its output against these values. Disagreement is a finding, not a tolerance. 'project' and 'preset' are the CURRENT PUBLIC RUNTIME state (the runtime-default built-in, the synthetic sample); 'protectedCalculations' are algorithm regression fixtures with fixed inputs, independent of the runtime preset. The legacy project preset and its Phase 2L-A intake are legacy validation data and are not described here.",
     "probeCommand": "node tools/verification/project-state-probe.mjs",
     "project": {
-      "projectId": "miyoshi",
+      "projectId": "synthetic-sample",
       "closureStatus": "BLOCKED",
       "observations": 0,
       "readySlotCount": 0,
@@ -513,14 +514,14 @@
     },
     "preset": {
       "dimensions": {
-        "widthMm": 1250,
-        "heightMm": 2050,
+        "widthMm": 900,
+        "heightMm": 1800,
         "mode": "sample_default",
         "verificationStatus": "unverified"
       },
       "wind": {
-        "V0": 34,
-        "roughnessCategory": "III"
+        "V0": 30,
+        "roughnessCategory": "II"
       }
     },
     "protectedCalculations": {

@@ -20,11 +20,11 @@ const REPO = fileURLToPath(new URL('../../', import.meta.url));
 const require = createRequire(import.meta.url);
 
 // B-facts の期待値は page の外で求める（page の値を page で確かめない）。
-//   NODE_FACTS : Node 側で registry の built-in instance から読んだ値
+//   NODE_FACTS : Node 側で registry の runtime default built-in（getRuntimeDefaultBuiltInPresetId）から読んだ値
 //   SPEC_FACTS : verification-spec.json の evidenceStateExpected（tree から読まない手書きの期待値）
 // page 側は案件 module の global ではなく、runtime と同じ active ProjectContext から読む。
 const Registry = require(REPO + 'project-config/registry.js');
-const BUILT_IN = Registry.getBuiltInPreset(Registry.BUILT_IN_PRESET_IDS[0]);
+const BUILT_IN = Registry.getBuiltInPreset(Registry.getRuntimeDefaultBuiltInPresetId());
 const NODE_FACTS = {
   verifiedCases: BUILT_IN.verifiedCases.length,
   mode: BUILT_IN.dimensions.mode,

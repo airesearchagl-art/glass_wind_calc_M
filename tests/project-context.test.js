@@ -615,15 +615,19 @@ test('P2L-S2A-40: context を作っても runtime / probe の状態は変わら�
   assert.equal(state.hasPromotionCandidate, false);
 });
 
-test('P2L-S2A-41: runtime consumer は index.html だけで、legacy adapter だけを使う（S2-B）', () => {
+test('P2L-S2A-41: ProjectContext の consumer は index.html と probe だけで、legacy adapter だけを使う（S2-B / S3-A）', () => {
   // S2-B で index.html が唯一の runtime consumer になった。pack adapter は runtime から呼ばない。
-  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-  assert.match(html, /ProjectContext\.fromLegacyPreset\(/);
-  assert.equal(/fromProjectPack|validateProjectPack/.test(html), false, 'index.html が Project Pack を runtime で扱っている');
-  // それ以外の runtime module・probe は読まない
+  // S3-A: project-state-probe も index.html と同じ経路（runtime default → fromLegacyPreset）で現在の状態を読む。
+  [fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'),
+    fs.readFileSync(path.join(ROOT, 'tools/verification/project-state-probe.mjs'), 'utf8')].forEach((src, i) => {
+    const name = ['index.html', 'project-state-probe.mjs'][i];
+    assert.match(src, /ProjectContext\.fromLegacyPreset\(/, name);
+    assert.equal(/fromProjectPack|validateProjectPack/.test(src), false, name + ' が Project Pack を runtime で扱っている');
+  });
+  // それ以外の runtime module は読まない
   const files = ['project-config/registry.js', 'project-config/evidence-closure.js',
     'project-config/project-input.js', 'project-config/project-pack.js', 'project-config/miyoshi.js',
-    'tools/verification/project-state-probe.mjs', 'workspace.js', 'project-profile.js', 'review-package.js'];
+    'project-config/sample.js', 'workspace.js', 'project-profile.js', 'review-package.js'];
   files.forEach((f) => {
     const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
     assert.equal(/project-context|ProjectContext/.test(src), false, f + ' が ProjectContext を参照している');
@@ -732,7 +736,8 @@ test('P2L-S2A-52: BUILT_IN_PRESET_IDS を書き換えても写しても trust �
   assert.throws(() => Registry.BUILT_IN_PRESET_IDS.push(FAKE_ID), TypeError);
   assert.throws(() => { Registry.BUILT_IN_PRESET_IDS = [LEGACY_ID, FAKE_ID]; }, TypeError);
   assert.throws(() => { Registry.getBuiltInPreset = () => syntheticFakePreset(FAKE_ID); }, TypeError);
-  assert.deepEqual(Array.from(Registry.BUILT_IN_PRESET_IDS), [LEGACY_ID]);
+  // 宣言された built-in だけ（S3-A: legacy validation 用の案件 preset と公開 runtime の合成サンプル）
+  assert.deepEqual(Array.from(Registry.BUILT_IN_PRESET_IDS), [LEGACY_ID, require('../project-config/sample.js').projectId]);
   // 写しに足しても権威にはならない
   const copy = Registry.BUILT_IN_PRESET_IDS.slice();
   copy.push(FAKE_ID);
