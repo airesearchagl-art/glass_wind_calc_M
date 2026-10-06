@@ -938,8 +938,11 @@ fixture はすべて合成値です（`tests/project-pack.test.js` が、reposit
   bridge と Closure でだけ使い、人間向けの表示に併記しません。
 - 告示モードの説明は、旧案件の階表記ではなく generic な階識別子（例: 1 / B1 / R / PH）で例示します。
   階から評価高さ Z を作らないことは変わりません。
-- Batch / Scenario / プロファイルの placeholder と TSV 列見本は、built-in preset や一次資料の値と無関係な
-  合成値（例: W 900 / H 1800、Z 9.0、V0 30、粗度 II）で、画面にも「合成した入力例」と表示します。
+- Batch / Scenario / プロファイルの placeholder と TSV 列見本は合成値（例: W 900 / H 1800、Z 9.0、V0 30、粗度 II）で、
+  画面にも「合成した入力例」と表示します。使う値は `tests/s2c-runtime-residue.test.js` の合成見本の契約（P2L-S2C-12）で
+  明示的に固定しています。自動テストが照合できるのは committed な built-in 値と Phase 2L-A の公開 intake subset だけで、
+  非公開の一次資料全体と衝突しないことは証明しません。見本値を変えるときは review 時に手動で確認します
+  （その資料の値の一覧は repository に置きません）。
   built-in preset 自体の値（`project-config/` 内）と protected invariant は変えていません。
 - browser harness（`browser-w4` / `stageA-regression`）は案件 module の global を読まず、page の active ProjectContext を
   観察します。期待値は page の外（Node 側の built-in instance と `verification-spec.json` の `evidenceStateExpected`）から取ります。

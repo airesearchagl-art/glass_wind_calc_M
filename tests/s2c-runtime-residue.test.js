@@ -8,7 +8,9 @@
  *   - 階の初期選択は context の先頭（UI 固有の既定階を持たない）
  *   - 案件ラベルは publicLabel だけを表示し、projectId を併記しない
  *   - 案件名・旧案件の階表記・built-in の寸法を index.html に持たない
- *   - Batch / Scenario の見本値は built-in や一次資料の値と無関係な合成値
+ *   - Batch / Scenario の見本値は明示した合成値の契約（P2L-S2C-12）。自動で照合できるのは committed な
+ *     built-in 値と Phase 2L-A の公開 intake subset だけで、非公開の一次資料全体との非衝突は
+ *     証明しない（review 時の手動境界。その値の一覧を repository に置かない）
  *   - browser harness は案件 module の global を読まず、active ProjectContext を観察する。
  *     期待値は page ではなく Node 側（built-in instance と手書きの evidenceStateExpected）から取る
  *
@@ -140,8 +142,15 @@ test('P2L-S2C-06: 告示モードの説明は generic な階識別子で例示�
    見本値
 ============================================================ */
 
-/** built-in と一次資料 intake の数値（見本値がこれらと一致しないことの照合先）。module から読む。 */
-function projectNumbers() {
+/**
+ * repository に commit されている案件の数値: built-in preset の値と、Phase 2L-A で取り込んだ公開 intake
+ * subset（Intake.observations）。module から読む。
+ *
+ * これは一次資料の全数ではない。Phase 2L-A は pane の実寸 W/H などを意図的に intake していないので、
+ * ここに無い一次資料の値は照合できない。非公開の一次資料との非衝突は review 時の手動確認であり、
+ * test を完全にするためにその値の一覧を公開 repository に書き込むことはしない。
+ */
+function committedProjectNumbers() {
   const id = Registry.BUILT_IN_PRESET_IDS[0];
   const ctx = ProjectContext.fromLegacyPreset(id);
   const cap = ctx.capabilities;
@@ -176,8 +185,8 @@ test('P2L-S2C-07: index.html に built-in の寸法 1250 / 2050 が無い（見�
   assert.equal(/1250|2050/.test(HTML), false, 'index.html に 1250 / 2050 がある');
 });
 
-test('P2L-S2C-08: Batch / Scenario の見本値は合成値で、built-in・一次資料の値と一致しない', () => {
-  const project = projectNumbers();
+test('P2L-S2C-08: 見本値は committed な built-in 値・公開 intake subset と一致しない（非公開一次資料全体との非衝突は証明しない）', () => {
+  const project = committedProjectNumbers();
   assert.equal(project.size > 10, true, '照合先を取り出せていない');
   const scenario = scenarioTemplate();
   assert.equal(scenario.split('\n').length, 2, 'Scenario の列見本を取り出せていない');
@@ -189,7 +198,7 @@ test('P2L-S2C-08: Batch / Scenario の見本値は合成値で、built-in・一�
     .filter((t) => /^-?\d+(\.\d+)?$/.test(t)).map(Number);
   assert.equal(numbers.length >= 20, true, '数値を取り出せていない: ' + numbers.length);
   const hits = numbers.filter((n) => n !== 1 && project.has(Math.abs(n)));
-  assert.deepEqual(hits, [], '見本値が案件の値と一致している');
+  assert.deepEqual(hits, [], '見本値が committed な案件の値（built-in / 公開 intake subset）と一致している');
   // 粗度区分の見本も built-in と同じ値にしない
   const notif = sampleRows.find((r) => r.includes('\tnotification\t')).split('\t');
   assert.notEqual(notif[8], builtInRoughness());
@@ -214,6 +223,35 @@ test('P2L-S2C-09: 見本値は既存の計算契約のまま通る（TSV parser 
   const parsed = Profile.parseScenarioTsv(scenarioTemplate());
   assert.deepEqual(parsed.errors, []);
   assert.equal(parsed.rows.length, 1);
+});
+
+/**
+ * 合成見本の契約（RF-19-01）。どの合成値を使うかを明示して固定する。
+ *
+ * これは禁止値の一覧（denylist）ではない。値を変えると、変えたこと自体でここが落ちる。
+ * 値を変えるのは意図した変更であり、そのときは新しい値が非公開の一次資料に現れないことを
+ * review 時に手動で確かめる（P2L-S2C-08 は commit 済みの値としか照合できないため）。
+ * gen-z と sc-label は S2-C で変えていない既存の見本なので、この契約に含めない。
+ */
+const SYNTHETIC_SAMPLE_CONTRACT = Object.freeze({
+  placeholders: Object.freeze({
+    'sc-w': '900', 'sc-h': '1800', 'sc-z': '9.0',
+    'gen-w': '900, 1350', 'gen-h': '1800',
+    'prof-v0': '例: 30', 'prof-building-h': '例: 12.0', 'prof-eaves-h': '例: 12.0'
+  }),
+  scenarioRow: 'S1\t\t900\t1800\t9.0\tgeneral\tfl_single\t1.00',
+  batchRows: Object.freeze([
+    'Sample-001\t\tnotification\t900\t1800\tfl_single\t1.00\t30\tII\t12.0\t12.0\t9.0\tclosed\tgeneral\tnotification_baseline',
+    'Sample-001\t\tmanual\t900\t1800\tfl_single\t1.00\t1500\t-900'
+  ])
+});
+
+test('P2L-S2C-12: 合成見本は明示した契約の値そのもの（変えるなら契約と review を伴う）', () => {
+  Object.keys(SYNTHETIC_SAMPLE_CONTRACT.placeholders).forEach((id) =>
+    assert.equal(placeholder(id), SYNTHETIC_SAMPLE_CONTRACT.placeholders[id], id + ' の合成見本が契約と違う'));
+  assert.equal(scenarioTemplate().split('\n')[1], SYNTHETIC_SAMPLE_CONTRACT.scenarioRow, 'Scenario TSV の合成見本が契約と違う');
+  const batchRows = templateLiterals('batchInsertTsvTemplate').filter((t) => /^Sample-001\t/.test(t));
+  assert.deepEqual(batchRows, Array.from(SYNTHETIC_SAMPLE_CONTRACT.batchRows), 'Batch TSV の合成見本が契約と違う');
 });
 
 /* ============================================================
