@@ -446,6 +446,17 @@ checkFailed('G1-got-suffix', sRec, 'Project Pack 検証',
 check('G1-path-reason', sRec.status.includes('場所: pack.glazingCases[0]') &&
   sRec.status.includes('notification_baseline does not take recurrenceYears') && !/\bgot\b/i.test(sRec.status),
   sRec.status.split('\n').slice(2).join(' | ').slice(0, 160));
+// この文面は既定の表示長（200 字）で値の手前が切れるので、G1 だけでは「長さの上限で偶然隠れた」のか
+// 「echo の規則が落とした」のかを区別できない。表示長の上限を外して、規則そのものを確かめる。
+await page.evaluate(() => { window.__savedPackErrorMax = PROJECT_PACK_ERROR_MAX_LENGTH; PROJECT_PACK_ERROR_MAX_LENGTH = 100000; });
+await paste(JSON.stringify(rec));
+const sRec2 = await state();
+await page.evaluate(() => { PROJECT_PACK_ERROR_MAX_LENGTH = window.__savedPackErrorMax; });
+checkFailed('G2-got-suffix-uncapped', sRec2, 'Project Pack 検証',
+  [REC_VALUE, '8642', 'Synthetic Pack Recurrence Probe', '"windConditions"']);
+const recReason = (sRec2.status.split('\n').find((l) => l.startsWith('理由: ')) || '');
+check('G2-rule-not-cap', /not part of the notification baseline\)$/.test(recReason) && !/…$/.test(recReason) &&
+  !/\bgot\b/i.test(recReason), recReason.slice(-80));
 
 // advisory は数と path・規則名だけを出し、0 件を安全と言わない
 const adv = fixture('case_direct');

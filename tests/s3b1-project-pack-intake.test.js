@@ -668,6 +668,19 @@ test('P2L-S3B1-22: notification_baseline に recurrenceYears を付けた Pack �
   box2.sandbox.intakeProjectPackFile(fakeFile(build(), { name: 'recurrence-probe-file-XYZ.json' }), 'ファイル選択');
   await settle(5);
   assertSafeFailure(box2, secrets, 'recurrenceYears via file');
+  // この文面は長く、既定の表示長（200 字）で値の手前が切れる。長さの上限で偶然隠れるのではなく、
+  // echo の規則そのものが値を落とすことを、上限を外して確かめる（外さないと規則を戻しても通ってしまう）。
+  const box3 = intakeSandbox();
+  box3.sandbox.PROJECT_PACK_ERROR_MAX_LENGTH = 100000;
+  assert.equal(box3.sandbox.loadProjectPackText(build(), '貼り付け'), false);
+  // 上限を外しているので行の長さは確かめない。それ以外（staged 空・値や本文を出さない・stack なし）は同じ
+  const text3 = box3.status();
+  assert.equal(text3.startsWith(FAILURE_LEAD) && box3.staged() === null && box3.context() === null, true);
+  secrets.forEach((x) => assert.equal(text3.includes(x), false, 'cap lifted: ' + x + ' を表示した: ' + text3));
+  assert.equal(/\n\s+at |Error:|\bgot\b/i.test(text3), false, text3);
+  const reason = box3.status().split('\n').find((l) => l.startsWith('理由: '));
+  assert.match(reason, /not part of the notification baseline\)$/, '値の手前で正しく止まっていない: ' + reason);
+  assert.equal(reason.length < 1000 && !/…$/.test(reason), true, '上限で切られている（規則が働いたか確かめられない）');
 });
 
 test('P2L-S3B1-20: browser harness は登録され、Pack の検証器・adapter を呼ばない', () => {
