@@ -486,15 +486,23 @@ test('P2L-B1-20: 公開面の advisory は捨てずに返し、hard rule は拒�
   rejects(desc, /sourceClaim: is not a valid source claim: .*windows-absolute-path/);
 });
 
-test('P2L-B1-21: runtime へは配線しない（既存 format も置き換えない）', () => {
+test('P2L-B1-21: runtime では staged preview の intake にだけ配線する（既存 format も置き換えない）', () => {
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-  // S2-B: project-pack.js は project-context.js の依存として読み込まれるだけで、runtime は
-  // Project Pack を選択・読込しない（validator も pack adapter も呼ばない）。
+  // S2-B: project-pack.js は project-context.js の依存として読み込む。
+  // S3-B1: index.html は Project Pack を intake（loadProjectPackText）でだけ検証し、staged preview にする。
+  // active context・計算・入力 package へは流さない（境界は tests/s3b1-project-pack-intake.test.js）。
   const packAt = html.indexOf('<script src="project-config/project-pack.js"></script>');
   const ctxAt = html.indexOf('<script src="project-config/project-context.js"></script>');
-  assert.equal(packAt !== -1 && ctxAt > packAt, true, 'project-pack.js は project-context.js の依存としてだけ読み込む');
-  assert.equal(/ProjectPack\.|validateProjectPack|fromProjectPack/.test(html), false,
-    'index.html が Project Pack を runtime で扱っている');
+  assert.equal(packAt !== -1 && ctxAt > packAt, true, 'project-pack.js は project-context.js より前に読み込む');
+  const { inlineScripts, stripComments } = require('./support/inline-script.js');
+  const code = stripComments(inlineScripts(html));
+  assert.equal((code.match(/validateProjectPack\(/g) || []).length, 1, 'Project Pack の検証が intake 以外にある');
+  const intakeStart = code.indexOf('var MAX_PROJECT_PACK_IMPORT_BYTES');
+  const intakeEnd = code.indexOf('\nfunction ', code.indexOf('function renderProjectPackPreview(') + 1);
+  assert.notEqual(intakeStart, -1, 'intake block が無い');
+  const outside = code.slice(0, intakeStart) + code.slice(intakeEnd);
+  assert.equal(/ProjectPack\.|validateProjectPack|fromProjectPack/.test(outside), false,
+    'index.html の intake 以外が Project Pack を扱っている');
   ['project-config/registry.js', 'project-config/evidence-closure.js', 'project-config/project-input.js',
     'workspace.js', 'project-profile.js', 'review-package.js', 'tools/verification/project-state-probe.mjs']
     .forEach((f) => {

@@ -615,15 +615,21 @@ test('P2L-S2A-40: context を作っても runtime / probe の状態は変わら�
   assert.equal(state.hasPromotionCandidate, false);
 });
 
-test('P2L-S2A-41: ProjectContext の consumer は index.html と probe だけで、legacy adapter だけを使う（S2-B / S3-A）', () => {
-  // S2-B で index.html が唯一の runtime consumer になった。pack adapter は runtime から呼ばない。
+test('P2L-S2A-41: ProjectContext の consumer は index.html と probe だけで、active context は legacy adapter だけで作る（S2-B / S3-A / S3-B1）', () => {
+  // S2-B で index.html が唯一の runtime consumer になった。
   // S3-A: project-state-probe も index.html と同じ経路（runtime default → fromLegacyPreset）で現在の状態を読む。
-  [fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8'),
-    fs.readFileSync(path.join(ROOT, 'tools/verification/project-state-probe.mjs'), 'utf8')].forEach((src, i) => {
-    const name = ['index.html', 'project-state-probe.mjs'][i];
-    assert.match(src, /ProjectContext\.fromLegacyPreset\(/, name);
-    assert.equal(/fromProjectPack|validateProjectPack/.test(src), false, name + ' が Project Pack を runtime で扱っている');
-  });
+  // S3-B1: index.html は pack adapter を staged preview の intake で 1 か所だけ呼ぶ（active context にはしない。
+  // 境界は tests/s3b1-project-pack-intake.test.js）。probe は Project Pack を扱わない。
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const probe = fs.readFileSync(path.join(ROOT, 'tools/verification/project-state-probe.mjs'), 'utf8');
+  assert.match(html, /activeProjectContext = ProjectContext\.fromLegacyPreset\(/, 'index.html');
+  const { inlineScripts, stripComments } = require('./support/inline-script.js');
+  const code = stripComments(inlineScripts(html));
+  assert.equal((code.match(/fromProjectPack\(/g) || []).length, 1, 'index.html の pack adapter 呼び出しが 1 か所でない');
+  assert.match(code, /var context = ProjectContext\.fromProjectPack\(validated\);/);
+  assert.equal(/activeProjectContext\s*=(?!=)\s*[^;]*(fromProjectPack|context\b|staged)/.test(code), false, 'Project Pack を active context にしている');
+  assert.match(probe, /ProjectContext\.fromLegacyPreset\(/, 'project-state-probe.mjs');
+  assert.equal(/fromProjectPack|validateProjectPack/.test(probe), false, 'probe が Project Pack を扱っている');
   // それ以外の runtime module は読まない
   const files = ['project-config/registry.js', 'project-config/evidence-closure.js',
     'project-config/project-input.js', 'project-config/project-pack.js', 'project-config/miyoshi.js',

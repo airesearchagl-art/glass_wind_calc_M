@@ -16,10 +16,12 @@
  *
  * ── これは何でないか ─────────────────────────────────────
  *
- * runtime（index.html）は Phase 2L-B2 S2-B から fromLegacyPreset() だけを使い、built-in 案件
- * preset の表示・入力・Evidence UI をこの context から読む。fromProjectPack() は runtime から
- * 呼ばれない（Project Pack の読み込みはまだ無い）。registry・Evidence Closure・probe は
- * この module を読まない。案件 preset の削除・sample の移行もしない。
+ * runtime（index.html）は Phase 2L-B2 S2-B から fromLegacyPreset() で active context を作り、built-in
+ * 案件 preset の表示・入力・Evidence UI をこの context から読む。S3-B1 から index.html は
+ * fromProjectPack() を Project Pack intake で 1 か所だけ呼ぶが、その context は staged preview 用で
+ * あって active context にはならない（計算・案件プリセット・Evidence UI・Closure は読まない）。
+ * registry・Evidence Closure はこの module を読まない（probe は S3-A から fromLegacyPreset() だけを使う）。
+ * 案件 preset の削除・sample の移行もしない。
  *
  * 計算をしない。ガラス強度式・風圧式・設計風圧の再計算はここに無い。context は
  * 入力データを保持し、後段の ProjectInput / WindPressure / GlassCalc へ渡すだけである。

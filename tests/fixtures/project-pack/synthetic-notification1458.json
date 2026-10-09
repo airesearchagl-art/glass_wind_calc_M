@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "packType": "glass_wind_project_pack",
+  "projectMetadata": { "publicLabel": "Synthetic Pack N1458" },
+  "pressureModel": { "mode": "notification1458" },
+  "windConditions": {
+    "basis": "notification_baseline",
+    "V0": { "value": 30, "unit": "m/s" },
+    "roughnessCategory": "II",
+    "buildingHeightM": { "value": 18.5, "unit": "m" },
+    "eavesHeightM": { "value": 17.5, "unit": "m" },
+    "buildingType": "closed",
+    "evaluationHeights": [
+      { "floor": "1", "height": { "value": 3.4, "unit": "m" } },
+      { "floor": "2", "height": { "value": 6.8, "unit": "m" } },
+      { "floor": "3", "height": { "value": 10.2, "unit": "m" } },
+      { "floor": "R", "height": { "value": 16.1, "unit": "m" } }
+    ]
+  },
+  "panes": [
+    { "paneId": "P001", "widthMm": { "value": 1020, "unit": "mm" }, "heightMm": { "value": 2240, "unit": "mm" } },
+    { "paneId": "P002", "widthMm": { "value": 760, "unit": "mm" }, "heightMm": { "value": 1880, "unit": "mm" } }
+  ],
+  "glazingCases": [
+    { "caseId": "G001", "paneId": "P001", "floor": "1", "zone": "general", "glassType": "fl_single", "extraFactor": 1.0 },
+    { "caseId": "G002", "paneId": "P002", "floor": "3", "zone": "corner", "glassType": "lowe_fl", "extraFactor": 1.0 },
+    { "caseId": "G003", "paneId": "P001", "floor": "R", "zone": "general", "glassType": "fl_fl", "extraFactor": 1.0 }
+  ],
+  "evidence": {
+    "sourceScopes": [
+      { "sourceScopeId": "S01", "sourceClaim": { "claimedLevel": "primary", "claimedCheckedAt": "2026-02-10",
+        "publicDescription": "合成テスト用の出典（実案件ではない）", "claimedPrivateReferenceAvailable": false } },
+      { "sourceScopeId": "S02", "sourceClaim": { "claimedLevel": "indirect", "claimedCheckedAt": "2026-02-11",
+        "publicDescription": "合成テスト用の参考資料（実案件ではない）", "claimedPrivateReferenceAvailable": false } }
+    ],
+    "records": [
+      { "sourceScopeId": "S01", "subject": { "kind": "pane_width", "paneId": "P001" }, "quantity": { "value": 1020, "unit": "mm" } },
+      { "sourceScopeId": "S02", "subject": { "kind": "wind_v0" }, "quantity": { "value": 30, "unit": "m/s" } },
+      { "sourceScopeId": "S02", "subject": { "kind": "evaluation_height", "floor": "3" }, "quantity": { "value": 10.2, "unit": "m" } }
+    ]
+  }
+}

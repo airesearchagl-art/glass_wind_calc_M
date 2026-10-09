@@ -39,7 +39,7 @@
       "positiveControl": "the real tree must show the context's own label, topology and values, and the synthetic tree must show the synthetic ones (different label, floor set and order, zone order, dimensions, pressures and Evidence levels)",
       "negativeControl": "mutants N1-N12 (S2-B), C1-C9 (S2-C) and S3-01..S3-11 (legacy module reloaded, selection by id-list position, ambiguous or missing runtime default with fallback, dynamic registration as default, promoted sample Evidence, non-empty verifiedCases, probe or harness reading the legacy module or id-list position, old notification defaults, a Project Pack runtime path) and RF-20-01 U1/U2 (preset wording that implies a real-project source behind the built-in) each fail at least one check here or in tests/s2b-runtime-context.test.js / tests/s2c-runtime-residue.test.js / tests/s3a-synthetic-runtime.test.js",
       "proves": "how index.html wires the built-in preset through ProjectContext in a real browser for the head measured",
-      "doesNotProve": "anything about an unmeasured head, or about Project Pack runtime use, which does not exist yet",
+      "doesNotProve": "anything about an unmeasured head, or about the Project Pack intake (measured by project-pack-intake; a staged Pack never reaches the preset-mode UI)",
       "instrumentFiles": [
         "tools/browser-checks/context-runtime.mjs",
         "tools/browser-checks/resolve-playwright.mjs",
@@ -233,6 +233,28 @@
       "reason": "no browser measurement exists for the current target head"
     },
     {
+      "id": "project-pack-intake",
+      "command": "node tools/browser-checks/project-pack-intake.mjs",
+      "evidenceClass": "observational",
+      "admissibility": "UNVERIFIED",
+      "target": "the browser-local Project Pack intake (S3-B1): paste, file and drop all reach one load path (raw text, JSON.parse, Project Pack validation, ProjectContext adaptation, staged); the staged Pack is pack_unreviewed and never becomes the active ProjectContext; the preview shows counts and IDs only; a drop must carry exactly one item and it must be a file; failures are transactional and show a validator path and reason without echoing input (anything after a \"got\" token is cut, whatever separator precedes it); the 8 MiB import cap applies before parsing or reading; nothing is persisted, sent or written to the URL",
+      "oracle": "real Chromium",
+      "sharedDependencies": [
+        "the harness drives the page only through its UI (textarea, file input, drop events, buttons) and never calls the Pack validator or adapter itself; preview expectations are counted from the synthetic fixture JSON in tests/fixtures/project-pack/, and the active-context expectation comes from the Node-side runtime-default built-in (project-config/registry.js)"
+      ],
+      "positiveControl": "each of the three synthetic fixtures (notification1458, project_pressure_map, case_direct) must load through its own input path and show its own label, mode, counts, IDs and claimed levels",
+      "negativeControl": "mutants B1-B12 (staged written to the active context, a second load path, validation skipped, the byte guard removed or moved after parsing, a previous Pack kept after a failure, raw input or a stack echoed in errors, persistence or a network call added, claims rendered as verified, the filename stored, a Pack-to-ProjectInput mapping, preview read from raw JSON) and RF-21 R1-R3 (a drop carrying a file plus a non-file item accepted, the \"; got <value>\" echo restored, echo suffixes enumerated instead of cut at \"got\") each fail at least one check here or in tests/s3b1-project-pack-intake.test.js",
+      "proves": "how index.html takes in, validates, stages and previews a Project Pack in a real browser for the head measured",
+      "doesNotProve": "anything about an unmeasured head; Pack calculation, Pack-to-ProjectInput mapping, active source switching and Pack Closure, none of which exist yet; the safety of the private content a real Pack might carry",
+      "instrumentFiles": [
+        "tools/browser-checks/project-pack-intake.mjs",
+        "tools/browser-checks/resolve-playwright.mjs",
+        "tools/browser-checks/browser-outcome.mjs"
+      ],
+      "finding": null,
+      "reason": "no browser measurement exists for the current target head; a verifier must run it at theirs"
+    },
+    {
       "id": "project-state-probe",
       "command": "node tools/verification/project-state-probe.mjs",
       "evidenceClass": "observational",
@@ -348,6 +370,11 @@
       "id": "preset-ui-from-project-context",
       "statement": "the preset-mode UI is derived from the active ProjectContext of the runtime-default built-in: options, labels (publicLabel only), initial floor (first context floor), dimensions, calculation, comparison, Evidence panels and Closure follow a substituted synthetic built-in and ignore a replaced module global. Several built-ins may coexist; selection requires exactly one runtimeDefault declaration. Zero or duplicate runtimeDefault declarations, a missing runtime-default module and an unavailable ProjectContext each fail closed (no fallback to another built-in or to the first id). An extra non-default built-in or a different declaration order does not change the selection",
       "instrument": "context-runtime"
+    },
+    {
+      "id": "project-pack-staged-not-active",
+      "statement": "a Project Pack loaded by paste, file or drop is validated and adapted into a staged pack_unreviewed ProjectContext only; activeProjectContext, the preset-mode UI and the calculation result stay those of the runtime-default built-in before load, after a successful load, after a failed load and after unload; a failed load leaves no staged Pack (the previous one is not kept); errors show a validator path and reason only; the 8 MiB browser import cap rejects before parsing or reading; no storage, network, URL or console output",
+      "instrument": "project-pack-intake"
     },
     {
       "id": "matrix-renders",

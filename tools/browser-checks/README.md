@@ -1,6 +1,6 @@
 # browser-checks
 
-`npm test` covers the modules under Node. These six harnesses cover what Node
+`npm test` covers the modules under Node. These seven harnesses cover what Node
 cannot: that `index.html` actually behaves correctly when a real browser parses
 and runs it from `file://`.
 
@@ -17,6 +17,7 @@ F7-06). They are committed here for that reason.
 | `stageA-regression.mjs` | 10 | Stage A exact-head regression over the protected values (facts and Closure observed through the active ProjectContext, never the project module global) |
 | `parser-boundary.mjs` | 42 forms | the `html-like-tag` guard vs. real Chromium element creation |
 | `context-runtime.mjs` | 103 | the preset UI reads everything from the active ProjectContext of the runtime-default built-in (Phase 2L-B2 S2-B / S2-C / S3-A): the real tree (the synthetic sample only; non-default built-in modules are not loaded, the Evidence UI stays unverified, and the preset wording does not imply a real-project source behind the built-in), the module global replaced after bootstrap (decoy), a different synthetic built-in substituted in a temporary copy (its first floor is not in the real tree and it has no floor 2), ProjectContext unavailable, the runtime-default module missing (no fallback, and a late look-alike registration cannot become the default), a duplicate runtime-default declaration, an extra non-default built-in, and reordered declarations |
+| `project-pack-intake.mjs` | 140 | the browser-local Project Pack intake (Phase 2L-B2 S3-B1), driven only through the page UI: the three synthetic fixtures load by paste, file and drop into a staged `pack_unreviewed` context while `activeProjectContext`, the preset UI and the calculation result stay unchanged; the preview shows counts, IDs and claimed levels but no raw JSON; invalid JSON, schema-invalid packs and unsafe prose fail transactionally (no previous Pack kept) with a validator path and reason and no echo of the input; the 8 MiB import cap rejects before parsing (UTF-8 bytes) or reading (`file.size`); a drop must carry exactly one item and it must be a JSON file (a file plus a string item, a string alone, two files and non-JSON types are rejected without reading the file); a validator reason that echoes a value after `got` (here `; got <recurrenceYears>`) shows neither the value nor the label or filename, also with the 200-character display cap lifted (so the echo rule, not the cap, is what removes the value); a slower earlier file read cannot overwrite a later load; no storage, network, URL or console output |
 
 `parser-boundary.mjs` is a differential harness, not a pass/fail suite: it
 reports **bypasses** (guard accepts, Chromium builds an element — must be 0)

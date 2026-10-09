@@ -842,11 +842,12 @@ Project Input Package（Phase 2D）・Workspace Package（2G）・Profile Packag
 Review Package（2I）はそのままです。Project Pack はこれらと統合しません
 （Project Input Package の importer は pack を拒否し、pack の validator も `packType` の無い入力を拒否します）。
 
-### runtime へはまだ配線していません
+### runtime では staged preview にだけ使います
 
 `validateProjectPack(pack)` は pure function です（network / storage / filesystem / DOM に触れません）。
-`index.html`・registry・Evidence Closure・probe からは参照されず、file picker / drag-drop / paste の
-UI もありません。画面の挙動と Closure の集計は main と同じです。
+Phase 2L-B1 の時点では runtime から参照されていませんでした。Phase 2L-B2 / S3-B1 から、`index.html` は
+手元の Pack を検証して **staged（未レビュー）として preview するだけ**に使います（下の「Project Pack intake & preview」）。
+registry・Evidence Closure・probe からは引き続き参照されず、計算・案件プリセット・Closure の集計は変わりません。
 
 ### 形
 
@@ -923,7 +924,8 @@ fixture はすべて合成値です（`tests/project-pack.test.js` が、reposit
   `context.origin.registryProjectId` → `PresetRegistry.getBuiltInPreset()` の compatibility bridge を使います。
 - context を作れなかったときは、案件プリセット mode を明示エラーにします（案件 module へ fallback しません）。
   手入力・告示風圧計算・取り込みデータの mode はそのまま使えます。
-- Project Pack はまだ runtime で選択・読込しません（`project-pack.js` は `project-context.js` の依存として読み込むだけ）。
+- Project Pack は runtime の active source になりません。S3-B1 の intake が作るのは staged の preview だけで、
+  `activeProjectContext` は常に runtime default の built-in です（下の「Project Pack intake & preview」）。
 - 実ブラウザでの確認: `node tools/browser-checks/context-runtime.mjs`（合成 built-in への差し替え・
   bootstrap 後の module global 差し替え・context 読込失敗・built-in 2 件を含む）。
 
@@ -1017,6 +1019,70 @@ pack 由来の context には、`ProjectEvidence.canPromoteToVerified()` や
 `EvidenceLedger.createEntry(… verified …)` を通る object が 1 つもありません。adapter は申告を
 canonical Evidence へ変換せず、発行前の形の検証が、pack context に昇格可能な object があれば
 context を作らせません。review 済み pack の attestation は S5 です。
+
+## Project Pack intake & preview（Phase 2L-B2 / S3-B1）
+
+「Project Pack（Unreviewed）」欄（単一ケース / 一括検討のどちらの表示でも出ます）で、手元の Project Pack JSON を
+**検証して内容を確認する**ことができます。**読み込んだ Pack は staged であって active ではありません。**
+計算・入力欄・案件プリセット mode・Evidence 表示・Closure は、引き続き runtime default の built-in（合成サンプル）の
+`activeProjectContext` だけを読みます。読込前・読込成功後・読込失敗後・解除後のいずれでも同じです。
+
+### 経路は 1 つ
+
+```
+raw JSON text → JSON.parse → ProjectPack.validateProjectPack(raw)
+  → ProjectContext.fromProjectPack(validated) → stagedProjectPack / stagedProjectPackContext
+```
+
+- ファイル選択（`.json` / `application/json`、1 つだけ）・貼り付け（「検証して読み込む」を押すまで解析しない）・
+  ドロップ（項目がちょうど 1 つで、それがファイルであること。複数ファイル・フォルダ・ファイル以外の項目を含むドロップは拒否）の
+  3 つは、どれも `loadProjectPackText(text)` を通ります。
+- trust は `pack_unreviewed` だけです（`ProjectContext` が sourceKind から決めます）。sourceClaim は申告
+  （`pack_unreviewed_claim`）で、canonical Evidence・Promotion Gate・`verifiedCases`・Promotion Candidate へは流しません。
+- Pack の計算、Pack → ProjectInput の変換、active source の切替、preset selector、Pack の Closure 判定はしません
+  （`ProjectInput.SOURCE_KINDS` と schemaVersion も変えていません）。
+
+### transactional
+
+- 試行の最初に staged を空にし、検証・変換・preview の作成がすべて通ったときだけ 2 つの参照を同時に置きます。
+- 失敗したら staged は空のままです（**前に読み込んだ Pack も残しません**）。画面には
+  「読み込みに失敗しました。Project Packは現在読み込まれていません。」と、段階・検証器の path・理由だけを出します。
+  入力の値・schema に無い key 名・JSON 本文・stack は表示しません（JSON 構文エラーはブラウザの文面が入力の断片を
+  含むので固定文にします）。検証器・風圧・Evidence の文面が受け取った値を示す `got` 以降（`(got …)` / `, got: …` /
+  `; got …` など）は、区切りの形によらず表示しません。
+- 「Packを解除」で staged の参照を null に戻します。遅いファイル読込が、後から始まった読込や解除を上書きすることはありません。
+
+### 取り込み上限 `MAX_PROJECT_PACK_IMPORT_BYTES`（8 MiB）
+
+- **ブラウザで取り込むときの資源保護のための上限で、Project Pack schema の制限ではありません**
+  （schema の上限は `ProjectPack.LIMITS`）。
+- ファイルは読む前に `file.size` で、貼り付けは `TextEncoder` で数えた UTF-8 の byte 数で判定し、超えたら
+  `JSON.parse` の前に拒否します。切り詰めて読むことはしません。
+
+### memory-only
+
+- ブラウザ内の保存領域（localStorage / sessionStorage / IndexedDB / cookie / Cache API / Service Worker）・
+  URL（query / hash）・通信（fetch / XHR / beacon / upload）を使わず、console へ JSON を出しません。
+- 検証後に raw text を保持しません（貼り付け欄とファイル選択は試行のたびに空へ戻します）。ファイル名は pack にも
+  context にも置かず、画面にも出しません。
+
+### preview
+
+- context だけから作ります（raw JSON は表示しません）: 公開表示名・trust・`pressureModel.mode`・件数（panes /
+  glazing cases / source scopes / evidence records / publication advisories）・caseId / paneId の一覧・mode ごとの件数
+  （notification1458: ケースが参照する階・評価高さ・ケース / project_pressure_map: 正圧の階・負圧の部位・ケース /
+  case_direct: ケース別の設計風圧・ケース）。値（圧力・寸法・高さ）は出さず、計算もしません。
+- 「Source claims (unreviewed)」は申告の水準ごとの件数（`claimed primary: 1` など）です。申告を検証済みとしては表示しません。
+- publication advisory は件数と path・規則名だけです。**0 件でも公開してよいという判断にはなりません**（Human Review が必要です）。
+- 画面にも「Closure判定はこの段階では行いません」と出します。
+
+### fixture と確認
+
+- `tests/fixtures/project-pack/` の 3 つ（notification1458 / project_pressure_map / case_direct）は合成値で、中立 ID
+  （P001 / G001 / S01）・private reference なし・未レビューの申告だけです。`tests/s3b1-project-pack-intake.test.js` が、
+  repository に残る legacy 案件値と 1 つも一致しないことをその場で確かめます。
+- Node: `tests/s3b1-project-pack-intake.test.js`（経路・境界の静的な検査と、`index.html` の intake block を vm で動かす挙動の検査）。
+- 実ブラウザ: `node tools/browser-checks/project-pack-intake.mjs`（UI だけを操作し、harness 側では Pack の検証器・adapter を呼びません）。
 
 ## 設計定数
 
@@ -1125,8 +1191,8 @@ glass_wind_calc_M/
 │   ├── manual.js                 # 「手入力 / Generic」モードの入力契約（Phase 2C）。miyoshi.jsに非依存
 │   ├── registry.js               # generic preset registry（Phase 2D）。built-in presetのみ登録可・unknownはfail closed
 │   ├── project-input.js          # versioned Project Input Package（Phase 2D〜2E）。v2でwindInputを保持
-│   ├── project-pack.js           # Project Pack v1 の schema / validator（Phase 2L-B1）。契約のみ・runtime未配線
-│   └── project-context.js        # ProjectContext 契約 + legacy / pack adapter（Phase 2L-B2 / S2-A）。runtime未配線
+│   ├── project-pack.js           # Project Pack v1 の schema / validator（Phase 2L-B1）。runtime では staged preview だけ（S3-B1）
+│   └── project-context.js        # ProjectContext 契約 + legacy / pack adapter（Phase 2L-B2 / S2-A）
 ├── tests/
 │   ├── calc.test.js              # 汎用計算コアの known-answer test + core purity（node:test）
 │   ├── project-config.test.js    # project-config分離の整合性・Evidence契約・代表ケース回帰テスト
@@ -1142,7 +1208,9 @@ glass_wind_calc_M/
 │   ├── review-package.test.js    # Review Package契約・値の一致・exporter gate・redaction・継承値遮断（Phase 2I）
 │   ├── review-ui.test.js         # Review UIの契約テスト（activeReview単一source・鮮度再計算・印刷関門）（Phase 2I）
 │   ├── project-pack.test.js      # Project Pack v1 契約・3 mode・trust境界・合成fixture（Phase 2L-B1）
-│   └── project-context.test.js   # ProjectContext 契約・adapter・trust不変条件・runtime parity（Phase 2L-B2 / S2-A）
+│   ├── project-context.test.js   # ProjectContext 契約・adapter・trust不変条件・runtime parity（Phase 2L-B2 / S2-A）
+│   ├── s3b1-project-pack-intake.test.js # browser-local Project Pack intake & preview（Phase 2L-B2 / S3-B1）
+│   └── fixtures/project-pack/    # 3 mode の合成 Project Pack（S3-B1）
 ├── package.json
 └── README.md                     # このファイル
 ```
@@ -1376,6 +1444,7 @@ node --test
 | `tests/project-profile.test.js` | プロファイル契約（unverifiedのみ・Z/zone不在・継承による持ち込み不可・floor→Z無し・既定値無し）・effective resolverとdirect pathの等価性・snapshot semantics・Matrix生成と絶対上限（`matrix.add()` 自身の1000件上限を含む）・TSV行単位隔離と余剰セル検査・寸法/extraFactor契約・canonical result-side gate |
 | `tests/review-package.test.js` | Review Package契約（derived-only・import経路なし・exporter gate）・**行と詳細の値が評価結果と一致すること**・summary/governingの一致・Full/Redactedのredaction・Markdown escape・診断privacy・継承値の遮断・export上限 |
 | `tests/review-ui.test.js` | Review UIの契約（描画元は `activeReview` のみ・鮮度はその場で再計算・export/印刷の関門・`@media print`・支配ケースを再選択しない・保存/通信なし） |
+| `tests/s3b1-project-pack-intake.test.js` | Project Pack intake（Phase 2L-B2 / S3-B1）: 経路は 1 つ・staged ≠ active・Pack → ProjectInput なし・取り込み上限は解析前・memory-only・ファイル名を保持しない・失敗表示は path と理由だけ・文言・合成 fixture・intake block を vm で動かす transactional / 上限 / drop / 競合の挙動 |
 
 ### 必須ケース
 

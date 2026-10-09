@@ -82,7 +82,12 @@ test('P2L-S2B-04: active ProjectContext は fromLegacyPreset() でだけ作り�
   assert.equal(/BUILT_IN_PRESET_IDS|candidates/.test(init), false, 'id 一覧から選んでいる');
   // id 一覧は trust の根ではない: context を作るのは fromLegacyPreset だけ
   assert.equal((CODE.match(/fromLegacyPreset\(/g) || []).length, 1);
-  assert.equal(/fromProjectPack|validateProjectPack/.test(CODE), false, 'Project Pack を runtime で扱っている');
+  // S3-B1: Project Pack は staged preview の intake（loadProjectPackText）でだけ扱い、active context にはしない
+  // （intake の境界は tests/s3b1-project-pack-intake.test.js）
+  assert.equal((CODE.match(/fromProjectPack\(|validateProjectPack\(/g) || []).length, 2, 'Project Pack の経路が intake 以外にある');
+  const intake = fnBody('loadProjectPackText');
+  assert.match(intake, /ProjectPack\.validateProjectPack\(raw\)[\s\S]*ProjectContext\.fromProjectPack\(validated\)/);
+  assert.equal(/activeProjectContext/.test(intake), false, 'Project Pack が active context になりうる');
   // 失敗時に案件 module へ fallback しない（明示エラー）
   const apply = fnBody('applyActiveProjectContextToUI');
   assert.match(apply, /読み込めませんでした/);

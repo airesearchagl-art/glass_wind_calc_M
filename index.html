@@ -422,13 +422,35 @@
   }
   .review-kv { margin: 0; font-size: 12px; }
 
+  /* ===== Project Pack（Unreviewed）intake（Phase 2L-B2 / S3-B1） ===== */
+  .pack-wrap { max-width: 1400px; margin: 0 auto; padding: 0 20px 20px; }
+  .pack-note { font-size: 11px; color: var(--text2); line-height: 1.8; margin-bottom: 10px; }
+  .pack-inputs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .pack-drop {
+    border: 1px dashed var(--border); border-radius: var(--radius-sm);
+    padding: 18px 12px; font-size: 12px; color: var(--text2); text-align: center;
+  }
+  .pack-drop.is-dragover { border-color: var(--accent); color: var(--text); }
+  textarea#pack-paste {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text); font-family: var(--font-mono);
+    font-size: 11px; padding: 8px; resize: vertical;
+  }
+  .pack-status { font-size: 12px; margin-top: 12px; line-height: 1.8; white-space: pre-wrap; }
+  .pack-status.is-error { color: var(--warn); }
+  .pack-preview { margin-top: 12px; font-size: 12px; line-height: 1.8; display: grid; gap: 10px; }
+  .pack-preview[hidden] { display: none; }
+  .pack-preview h3 { font-size: 12px; margin: 0 0 4px; color: var(--text2); }
+  .pack-preview ul { margin: 0; padding-left: 18px; }
+  .pack-id-list { font-family: var(--font-mono); font-size: 11px; word-break: break-all; }
+
   /* 印刷不可の文面は画面には出さない */
   #review-print-blocked { display: none; }
 
   @media print {
     /* Reportだけを残す。操作要素は1つも印刷しない。 */
     body { background: #fff; color: #000; }
-    .app-header, .view-switch, .main-wrap, #review-config-card,
+    .app-header, .view-switch, .main-wrap, #project-pack-section, #review-config-card,
     #batch-summary-card, #batch-results-card, button, select, textarea, input {
       display: none !important;
     }
@@ -859,6 +881,56 @@
   </div>
 
 </div>
+
+<!-- ===== Project Pack（Unreviewed）（Phase 2L-B2 / S3-B1） =====
+     手元の Project Pack JSON を検証して内容を確認するだけの欄。読み込んだ Pack は
+     staged（未レビュー）であって active ではない。計算・入力欄・案件プリセット・
+     Evidence 表示には反映しない。単一ケース / 一括検討のどちらの表示でも見える。 -->
+<section class="pack-wrap" id="project-pack-section" aria-labelledby="pack-title">
+  <div class="card" id="project-pack-card">
+    <h2 class="card-title" id="pack-title">Project Pack（Unreviewed）</h2>
+    <p class="pack-note">
+      手元の Project Pack JSON を検証し、内容を確認するための欄です。読み込んだ Pack は未レビュー
+      （pack_unreviewed）として扱い、計算・入力欄・案件プリセットには反映しません。
+      Closure判定はこの段階では行いません。
+    </p>
+    <p class="pack-note">
+      読み込んだ内容はこのタブのメモリ上だけに置き、保存・送信しません。ファイル名も保持しません。
+      取り込み上限は 8 MiB です。これはブラウザで取り込むときの資源保護のための上限で、
+      Project Pack schema の制限ではありません。上限を超えた JSON は切り詰めずに拒否します。
+    </p>
+    <div class="pack-inputs">
+      <div>
+        <div class="form-group">
+          <label for="pack-file">JSONファイルを選択</label>
+          <input type="file" id="pack-file" accept=".json,application/json"
+            onchange="loadProjectPackFromFileInput(this)">
+        </div>
+        <div class="pack-drop" id="pack-drop" aria-label="Project Pack JSON ファイルのドロップ領域"
+          ondragenter="projectPackDragOver(event)" ondragover="projectPackDragOver(event)"
+          ondragleave="projectPackDragLeave(event)" ondrop="projectPackDrop(event)">
+          ここに Project Pack JSON ファイルを 1 つドロップ<br>
+          （複数ファイル・フォルダ・ファイル以外の項目を含むドロップは受け付けません）
+        </div>
+      </div>
+      <div>
+        <div class="form-group">
+          <label for="pack-paste">JSONを貼り付け</label>
+          <textarea id="pack-paste" rows="5" spellcheck="false" autocomplete="off"
+            placeholder="Project Pack JSON を貼り付けて「検証して読み込む」を押してください。押すまでは解析しません。"></textarea>
+        </div>
+        <div class="batch-toolbar">
+          <button type="button" id="btn-pack-load" class="btn-secondary"
+            onclick="loadProjectPackFromPaste()">検証して読み込む</button>
+          <button type="button" id="btn-pack-unload" class="btn-secondary"
+            onclick="unloadProjectPack()">Packを解除</button>
+        </div>
+      </div>
+    </div>
+    <div class="pack-status" id="pack-status" role="status" aria-live="polite">Project Packは読み込まれていません。</div>
+    <div class="pack-preview" id="pack-preview" hidden></div>
+  </div>
+</section>
 
 <!-- ===== Batch / Scenario Workspace（Phase 2G） ===== -->
 <div class="batch-wrap" id="view-batch" hidden>
@@ -1358,6 +1430,461 @@ function applyActiveProjectContextToUI() {
   var dims = contextCapability(ctx, 'sampleDefaultDimensions');
   document.getElementById('inp-W').value = dims.widthMm.value;
   document.getElementById('inp-H').value = dims.heightMm.value;
+}
+
+/* ============================================================
+   Project Pack intake（Phase 2L-B2 / S3-B1）— browser-local・未レビュー・preview のみ
+
+   読み込みの経路はこの 1 つだけ。file / paste / drop のどれも loadProjectPackText を通る:
+     raw JSON text → JSON.parse → ProjectPack.validateProjectPack(raw)
+       → ProjectContext.fromProjectPack(validated) → stagedProjectPack / stagedProjectPackContext
+   - staged は active ではない。activeProjectContext（runtime default の built-in）はここで
+     読みも書きもしない。計算・入力欄・案件プリセット mode・Evidence UI・Closure は staged を
+     読まない。Pack → ProjectInput の変換もしない（S3-B2 以降）。
+   - trust は pack_unreviewed だけ（ProjectContext が sourceKind から決める）。sourceClaim は
+     申告であって canonical Evidence ではない。Promotion Gate・verifiedCases・
+     Promotion Candidate へは流さない。
+   - transactional: 試行の最初に staged を空にし、検証と変換がすべて通ったときだけ 2 つの
+     参照を同時に置く。失敗したら staged は空のまま（前の Pack も残さない）。
+   - 取り込み上限 MAX_PROJECT_PACK_IMPORT_BYTES はブラウザ取り込みの資源保護であって
+     Project Pack schema の制限ではない。file は読む前に file.size で、貼り付けは UTF-8 の
+     byte 数で判定し、超えたら解析せずに拒否する（切り詰めない）。
+   - memory-only。ブラウザ内の保存領域・URL・通信を使わない。raw text と file 名は保持しない
+     （貼り付け欄とファイル選択は試行のたびに空へ戻す）。
+   - 失敗の表示は検証器の path と理由だけ。入力の値・schema に無い key・JSON 本文・stack は
+     出さない（JSON 構文エラーはブラウザの文面が入力の断片を含むので固定文にする）。
+============================================================ */
+
+var MAX_PROJECT_PACK_IMPORT_BYTES = 8 * 1024 * 1024;
+var PROJECT_PACK_ERROR_MAX_LENGTH = 200;
+var PROJECT_PACK_LIST_MAX_ITEMS = 200;
+var PROJECT_PACK_FAILURE_LEAD = '読み込みに失敗しました。Project Packは現在読み込まれていません。';
+var PROJECT_PACK_EMPTY_STATUS = 'Project Packは読み込まれていません。';
+var PROJECT_PACK_STAGE_LABELS = {
+  input: '入力', size: '取り込み上限', json: 'JSON 構文', schema: 'Project Pack 検証',
+  context: 'ProjectContext 変換', preview: 'preview 表示', file: 'ファイル'
+};
+
+var stagedProjectPack = null;
+var stagedProjectPackContext = null;
+var projectPackAttempt = 0;
+var projectPackVocabularyCache = null;
+
+/* 試行を始める: staged を空にし、進行中のファイル読込を無効にする。 */
+function beginProjectPackAttempt() {
+  projectPackAttempt += 1;
+  stagedProjectPack = null;
+  stagedProjectPackContext = null;
+  renderProjectPackPreview(null);
+  return projectPackAttempt;
+}
+
+function projectPackIntakeError(stage, message) {
+  var e = new Error(message);
+  e.projectPackStage = stage;
+  e.projectPackFixedMessage = true;
+  return e;
+}
+
+function projectPackSizeMessage() {
+  return 'Project Pack の取り込み上限（' + (MAX_PROJECT_PACK_IMPORT_BYTES / (1024 * 1024)) +
+    ' MiB）を超えています。これはブラウザで取り込むときの資源保護のための上限で、' +
+    'Project Pack schema の制限ではありません。切り詰めずに拒否しました。';
+}
+
+/* 貼り付けた text の UTF-8 byte 数が上限を超えるか。
+   UTF-8 の byte 数は UTF-16 の code unit 数以上なので、length が上限を超えていれば encode しない。 */
+function projectPackTextExceedsLimit(text) {
+  if (text.length > MAX_PROJECT_PACK_IMPORT_BYTES) return true;
+  return new TextEncoder().encode(text).length > MAX_PROJECT_PACK_IMPORT_BYTES;
+}
+
+/* 唯一の読込経路。成功で true、失敗で false。どちらでも raw text を保持しない。 */
+function loadProjectPackText(text, via) {
+  beginProjectPackAttempt();
+  var stage = 'input';
+  try {
+    if (typeof text !== 'string') throw projectPackIntakeError('input', 'テキストとして受け取れませんでした。');
+    stage = 'size';
+    if (projectPackTextExceedsLimit(text)) throw projectPackIntakeError('size', projectPackSizeMessage());
+    stage = 'input';
+    if (text.trim() === '') throw projectPackIntakeError('input', 'JSON が空です。');
+    stage = 'json';
+    var raw;
+    try {
+      raw = JSON.parse(text);
+    } catch (parseError) {
+      throw projectPackIntakeError('json', 'JSON として読めませんでした（構文エラー）。内容は表示しません。');
+    }
+    text = null;
+    stage = 'schema';
+    var validated = ProjectPack.validateProjectPack(raw);
+    raw = null;
+    stage = 'context';
+    var context = ProjectContext.fromProjectPack(validated);
+    ProjectContext.assertProjectContext(context);
+    if (context.sourceKind !== 'project_pack_unreviewed' || context.trust !== 'pack_unreviewed') {
+      throw projectPackIntakeError('context', 'Project Pack の context が未レビュー（pack_unreviewed）になっていません。');
+    }
+    stage = 'preview';
+    renderProjectPackPreview(context);
+    stagedProjectPack = validated;
+    stagedProjectPackContext = context;
+  } catch (e) {
+    stagedProjectPack = null;
+    stagedProjectPackContext = null;
+    renderProjectPackFailure(describeProjectPackFailure(e, stage));
+    return false;
+  }
+  renderProjectPackStatus('Project Pack（未レビュー）を検証して読み込みました（読み込み経路: ' + via + '）。\n' +
+    'これは内容を見るための staged Pack です。計算・入力欄・案件プリセットには反映していません。', false);
+  return true;
+}
+
+function loadProjectPackFromPaste() {
+  var area = document.getElementById('pack-paste');
+  var text = area ? area.value : '';
+  // 押されるまでは解析しない。押されたら、成否によらず貼り付け欄に raw text を残さない。
+  if (area) area.value = '';
+  return loadProjectPackText(text, '貼り付け');
+}
+
+function loadProjectPackFromFileInput(input) {
+  var files = input && input.files ? input.files : null;
+  var count = files ? files.length : 0;
+  var file = count === 1 ? files[0] : null;
+  // 選んだファイル（名前を含む）をこの要素にも残さない。File object は読み終わるまで手元で持つ。
+  if (input) input.value = '';
+  if (count === 0) return;
+  if (count !== 1) {
+    failProjectPackIntake('file', 'ファイルは 1 つだけ選んでください。');
+    return;
+  }
+  intakeProjectPackFile(file, 'ファイル選択');
+}
+
+function projectPackDragOver(ev) {
+  ev.preventDefault();
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'copy';
+  var zone = document.getElementById('pack-drop');
+  if (zone) zone.classList.add('is-dragover');
+}
+
+function projectPackDragLeave() {
+  var zone = document.getElementById('pack-drop');
+  if (zone) zone.classList.remove('is-dragover');
+}
+
+function projectPackDrop(ev) {
+  ev.preventDefault();
+  ev.stopPropagation();
+  projectPackDragLeave();
+  var dt = ev.dataTransfer;
+  var files = dt && dt.files ? dt.files : null;
+  var items = dt && dt.items ? Array.prototype.slice.call(dt.items) : [];
+  var fileItems = items.filter(function (item) { return item.kind === 'file'; });
+  // items があるときは、項目がちょうど 1 つで、それがファイルであること（ファイル + 文字列の
+  // ように、ファイル以外の項目を含むドロップは受け付けない）。items が無い環境では files だけで判定する。
+  if (!files || files.length !== 1 || (items.length > 0 && (items.length !== 1 || fileItems.length !== 1))) {
+    failProjectPackIntake('file', 'ファイルを 1 つだけドロップしてください（複数ファイル・ファイル以外の項目を含むドロップは受け付けません）。');
+    return;
+  }
+  var entry = (fileItems.length === 1 && typeof fileItems[0].webkitGetAsEntry === 'function')
+    ? fileItems[0].webkitGetAsEntry() : null;
+  if (entry && entry.isDirectory) {
+    failProjectPackIntake('file', 'フォルダは受け付けません。JSON ファイルを 1 つドロップしてください。');
+    return;
+  }
+  intakeProjectPackFile(files[0], 'ドロップ');
+}
+
+/* JSON ファイルだけを受け付ける（application/json、または型不明で拡張子 .json）。 */
+function projectPackFileTypeAcceptable(file) {
+  var type = String(file && file.type || '').toLowerCase();
+  if (type === 'application/json') return true;
+  if (type === '' || type === 'text/json' || type === 'text/plain') {
+    return /\.json$/i.test(String(file && file.name || ''));
+  }
+  return false;
+}
+
+function intakeProjectPackFile(file, via) {
+  var attempt = beginProjectPackAttempt();
+  if (!file || !projectPackFileTypeAcceptable(file)) {
+    renderProjectPackFailure({ stage: 'file', path: null,
+      reason: 'JSON ファイル（.json / application/json）だけを受け付けます。' });
+    return;
+  }
+  // 読む前に大きさで拒否する（巨大な file を memory へ読み込まない）
+  if (!(typeof file.size === 'number' && file.size <= MAX_PROJECT_PACK_IMPORT_BYTES)) {
+    renderProjectPackFailure({ stage: 'size', path: null, reason: projectPackSizeMessage() });
+    return;
+  }
+  if (typeof file.text !== 'function') {
+    renderProjectPackFailure({ stage: 'file', path: null, reason: 'このブラウザではファイルを読み取れません。' });
+    return;
+  }
+  renderProjectPackStatus('ファイルを読み取っています…', false);
+  file.text().then(function (text) {
+    if (attempt !== projectPackAttempt) return; // 後から別の試行・解除があった
+    loadProjectPackText(text, via);
+  }, function () {
+    if (attempt !== projectPackAttempt) return;
+    renderProjectPackFailure({ stage: 'file', path: null, reason: 'ファイルを読み取れませんでした。' });
+  });
+}
+
+function failProjectPackIntake(stage, reason) {
+  beginProjectPackAttempt();
+  renderProjectPackFailure({ stage: stage, path: null, reason: reason });
+}
+
+function unloadProjectPack() {
+  beginProjectPackAttempt();
+  renderProjectPackStatus('Project Packを解除しました。' + PROJECT_PACK_EMPTY_STATUS, false);
+}
+
+/* ---------- 失敗の表示（path と理由だけ） ---------- */
+
+/* schema の語（key 名・mode・単位など）。これに無い token は利用者の入力として伏せる。 */
+function projectPackVocabulary() {
+  if (projectPackVocabularyCache) return projectPackVocabularyCache;
+  var words = Object.create(null);
+  function add(list) { (list || []).forEach(function (w) { words[w] = true; }); }
+  add(ProjectPack.TOP_LEVEL_KEYS);
+  add(ProjectPack.SOURCE_CLAIM_KEYS);
+  add(ProjectPack.PRESSURE_MODES);
+  add(ProjectPack.TRUST_LEVELS);
+  add([ProjectPack.PACK_TYPE]);
+  ProjectPack.PRESSURE_MODES.forEach(function (m) {
+    add(ProjectPack.WIND_FIELDS[m].required);
+    add(ProjectPack.WIND_FIELDS[m].optional);
+    add(ProjectPack.CASE_FIELDS[m].required);
+    add(ProjectPack.CASE_FIELDS[m].optional);
+  });
+  Object.keys(ProjectPack.RECORD_SUBJECTS).forEach(function (k) {
+    words[k] = true;
+    if (ProjectPack.RECORD_SUBJECTS[k].refField) words[ProjectPack.RECORD_SUBJECTS[k].refField] = true;
+  });
+  Object.keys(ProjectPack.UNITS).forEach(function (k) { words[ProjectPack.UNITS[k]] = true; });
+  add(['publicLabel', 'mode', 'paneId', 'widthMm', 'heightMm', 'value', 'unit', 'floor', 'height',
+    'pressure', 'zone', 'magnitude', 'sourceScopeId', 'sourceClaim', 'sourceScopes', 'records',
+    'subject', 'kind', 'quantity', 'YYYY-MM-DD', '__proto__']);
+  projectPackVocabularyCache = words;
+  return words;
+}
+
+/* 構造（JSON data としての形）の検査で出る理由。path に利用者の key が入りうるので、
+   理由は末尾に固定した形でだけ読み、path は schema の語の範囲で止める。 */
+var PROJECT_PACK_STRUCTURAL_REASONS = [
+  /: (nesting is deeper than \d+ levels)$/,
+  /: (contains more than \d+ values)$/,
+  /: (string is longer than \d+ characters)$/,
+  /: (number must be finite)$/,
+  / (must not carry an own "__proto__" field)$/,
+  / (must be a plain object(?: with no inherited properties)?)$/
+];
+
+/* "pack" に続く schema の語（.name）と添字（[n]）だけを path として読む。 */
+function readProjectPackPath(text, vocab) {
+  if (text.slice(0, 4) !== 'pack') return null;
+  var path = 'pack';
+  var i = 4;
+  while (i < text.length) {
+    var rest = text.slice(i);
+    var index = /^\[\d{1,6}\]/.exec(rest);
+    if (index) { path += index[0]; i += index[0].length; continue; }
+    var seg = /^\.([A-Za-z0-9_]{1,40})(?=[.[ ]|: |$)/.exec(rest);
+    if (seg && vocab[seg[1]] === true) { path += seg[0]; i += seg[0].length; continue; }
+    break;
+  }
+  return { path: path, end: i, complete: i === text.length };
+}
+
+function sanitizeProjectPackReason(reason, vocab) {
+  var s = String(reason);
+  // 入力値の echo 以降は出さない。検証器・風圧・Evidence の文面は、受け取った値を必ず
+  // "got" の後に置く（"(got …)" / ", got: …" / "; got …" / "(got eaves …)" など）。区切りの形を
+  // 列挙せず、単語としての "got" とその前の区切りから後ろをすべて落とす。
+  s = s.replace(/[\s(,;:]*\bgot\b[\s\S]*$/i, '');
+  // 引用された token は schema の語だけ残す
+  s = s.replace(/"((?:[^"\\]|\\.)*)("|$)/g, function (all, inner) {
+    return vocab[inner] === true ? '"' + inner + '"' : '"…"';
+  });
+  // 関数名の接頭辞（makeEvidence(): など）は利用者に意味がない
+  s = s.replace(/\b[A-Za-z]+\(\): /g, '');
+  // 印字可能な ASCII（と単位の ²）以外は伏せる
+  s = s.replace(/[^\x20-\x7E²…]+/g, '…');
+  s = s.replace(/\s+/g, ' ').trim();
+  if (s.length > PROJECT_PACK_ERROR_MAX_LENGTH) s = s.slice(0, PROJECT_PACK_ERROR_MAX_LENGTH - 1) + '…';
+  return s;
+}
+
+function sanitizeProjectPackValidatorMessage(message) {
+  var PREFIX = 'Project Pack: ';
+  if (typeof message !== 'string' || message.indexOf(PREFIX) !== 0) return null;
+  var body = message.slice(PREFIX.length);
+  var vocab = projectPackVocabulary();
+  for (var r = 0; r < PROJECT_PACK_STRUCTURAL_REASONS.length; r++) {
+    var m = PROJECT_PACK_STRUCTURAL_REASONS[r].exec(body);
+    if (!m) continue;
+    var where = readProjectPackPath(body.slice(0, m.index), vocab);
+    if (!where) return null;
+    return { path: where.complete ? where.path : where.path + '.…', reason: sanitizeProjectPackReason(m[1], vocab) };
+  }
+  var head = readProjectPackPath(body, vocab);
+  if (!head || body.slice(head.end, head.end + 2) !== ': ') {
+    return head ? { path: head.path + '.…', reason: '' } : null;
+  }
+  return { path: head.path, reason: sanitizeProjectPackReason(body.slice(head.end + 2), vocab) };
+}
+
+function describeProjectPackFailure(e, stage) {
+  if (e && e.projectPackFixedMessage === true && typeof e.message === 'string') {
+    return { stage: e.projectPackStage, path: null, reason: e.message };
+  }
+  var out = { stage: stage, path: null, reason: '' };
+  if (stage === 'schema' || stage === 'context') {
+    var parsed = sanitizeProjectPackValidatorMessage(e && e.message);
+    if (parsed) { out.path = parsed.path; out.reason = parsed.reason; }
+  }
+  if (!out.reason) out.reason = '詳細は表示しません。';
+  return out;
+}
+
+/* ---------- 表示（textContent のみ。preview は context だけから作る） ---------- */
+
+function renderProjectPackStatus(text, isError) {
+  var status = document.getElementById('pack-status');
+  if (!status) return;
+  status.className = isError ? 'pack-status is-error' : 'pack-status';
+  status.textContent = text;
+}
+
+function renderProjectPackFailure(info) {
+  renderProjectPackPreview(null);
+  var lines = [PROJECT_PACK_FAILURE_LEAD];
+  lines.push('段階: ' + (PROJECT_PACK_STAGE_LABELS[info.stage] || '不明'));
+  if (info.path) lines.push('場所: ' + info.path);
+  lines.push('理由: ' + info.reason);
+  renderProjectPackStatus(lines.join('\n'), true);
+}
+
+function packEl(tag, text, className) {
+  var el = document.createElement(tag);
+  if (text !== undefined && text !== null) el.textContent = String(text);
+  if (className) el.className = className;
+  return el;
+}
+
+function packSection(box, title, rows) {
+  var section = packEl('div');
+  section.appendChild(packEl('h3', title));
+  var list = packEl('ul');
+  rows.forEach(function (row) { list.appendChild(packEl('li', row)); });
+  section.appendChild(list);
+  box.appendChild(section);
+  return section;
+}
+
+function packIdList(ids) {
+  var shown = ids.slice(0, PROJECT_PACK_LIST_MAX_ITEMS).join(', ');
+  return ids.length > PROJECT_PACK_LIST_MAX_ITEMS
+    ? shown + ' … ほか ' + (ids.length - PROJECT_PACK_LIST_MAX_ITEMS) + ' 件' : shown;
+}
+
+/* advisory の path は検証器が作る固定の path、rule は lint の規則名。念のため形を確かめてから出す。 */
+function projectPackAdvisoryText(advisory) {
+  var where = readProjectPackPath(String(advisory.path || ''), projectPackVocabulary());
+  var path = where ? (where.complete ? where.path : where.path + '.…') : '…';
+  var rule = /^[a-z0-9-]{1,40}$/.test(String(advisory.rule || '')) ? advisory.rule : '…';
+  return path + ' — ' + rule;
+}
+
+function projectPackModeRows(ctx, caseCount) {
+  // pressureModel の語彙（入力 mode の token とは別）
+  var pressureMode = ctx.pressureModel.mode;
+  if (pressureMode === 'notification1458') {
+    var wind = ProjectContext.requireCapability(ctx, 'notificationCalculation').windConditions;
+    var floors = {};
+    ProjectContext.requireCapability(ctx, 'declaredGlazingCases').glazingCases.forEach(function (c) {
+      floors[c.floor] = true;
+    });
+    return ['ケースが参照する階: ' + Object.keys(floors).length + ' 階',
+      '評価高さ（evaluationHeights）: ' + wind.evaluationHeights.length + ' 件',
+      'ケース: ' + caseCount + ' 件'];
+  }
+  if (pressureMode === 'project_pressure_map') {
+    var map = ProjectContext.requireCapability(ctx, 'projectPressureMap');
+    return ['正圧の階（positivePressures）: ' + map.positivePressures.length + ' 階',
+      '負圧の部位（negativePressures）: ' + map.negativePressures.length + ' 部位',
+      'ケース: ' + caseCount + ' 件'];
+  }
+  if (pressureMode === 'case_direct') {
+    var direct = ProjectContext.requireCapability(ctx, 'caseDirectPressure');
+    return ['ケース別の設計風圧（designPressure）: ' + direct.designPressures.length + ' 件',
+      'ケース: ' + caseCount + ' 件'];
+  }
+  throw new Error('unsupported pressureModel.mode');
+}
+
+function renderProjectPackPreview(ctx) {
+  var box = document.getElementById('pack-preview');
+  if (!box) return;
+  box.textContent = '';
+  if (!ctx) { box.hidden = true; return; }
+  var panes = ProjectContext.requireCapability(ctx, 'declaredPanes').panes;
+  var cases = ProjectContext.requireCapability(ctx, 'declaredGlazingCases').glazingCases;
+  var claims = ProjectContext.requireCapability(ctx, 'evidenceClaims');
+  var advisories = ctx.origin.publicationAdvisories;
+
+  packSection(box, '概要', [
+    '公開表示名: ' + ctx.publicLabel,
+    'trust: ' + ctx.trust + '（未レビュー）',
+    'pressureModel.mode: ' + ctx.pressureModel.mode
+  ]);
+  packSection(box, '件数', [
+    'panes: ' + panes.length,
+    'glazing cases: ' + cases.length,
+    'source scopes: ' + claims.sourceScopes.length,
+    'evidence records: ' + claims.records.length,
+    'publication advisories: ' + advisories.length
+  ]);
+  packSection(box, 'pressure model の内容（件数のみ・計算しません）', projectPackModeRows(ctx, cases.length));
+
+  var ids = packEl('div');
+  ids.appendChild(packEl('h3', 'ケース（caseId）'));
+  ids.appendChild(packEl('div', packIdList(cases.map(function (c) { return c.caseId; })), 'pack-id-list'));
+  ids.appendChild(packEl('h3', 'Pane（paneId）'));
+  ids.appendChild(packEl('div', packIdList(panes.map(function (p) { return p.paneId; })), 'pack-id-list'));
+  box.appendChild(ids);
+
+  var levels = {};
+  claims.sourceScopes.forEach(function (s) {
+    var level = s.sourceClaim.claimedLevel;
+    levels[level] = (levels[level] || 0) + 1;
+  });
+  // 申告の水準ごとの件数。既知の水準を決まった順で、それ以外は名前順で後ろに並べる。
+  var known = ['primary', 'indirect', 'none'];
+  var order = known.filter(function (level) { return levels[level]; })
+    .concat(Object.keys(levels).filter(function (level) { return known.indexOf(level) === -1; }).sort());
+  var claimRows = order.map(function (level) {
+    return 'claimed ' + level + ': ' + levels[level];
+  });
+  if (claimRows.length === 0) claimRows.push('source claim はありません');
+  var claimSection = packSection(box, 'Source claims (unreviewed)', claimRows);
+  claimSection.appendChild(packEl('p', 'Pack が申告している出典の水準です。未レビューの申告であり、' +
+    'Evidence として扱いません（Promotion Gate へは渡しません）。', 'pack-note'));
+
+  var advisoryRows = ['publication advisories: ' + advisories.length + ' 件'];
+  advisories.forEach(function (a) { advisoryRows.push(projectPackAdvisoryText(a)); });
+  var advisorySection = packSection(box, 'Publication advisories', advisoryRows);
+  advisorySection.appendChild(packEl('p', 'advisory は公開面の文言についての注意です。' +
+    '0 件でも、公開してよいという判断にはなりません（Human Review が必要です）。', 'pack-note'));
+
+  box.appendChild(packEl('p', 'この preview は計算しません。風圧・ガラスの判定と案件プリセットへの反映は' +
+    'この段階では行いません。Closure判定はこの段階では行いません。', 'pack-note'));
+  box.hidden = false;
 }
 
 /* ============================================================
