@@ -443,6 +443,12 @@
   .pack-preview h3 { font-size: 12px; margin: 0 0 4px; color: var(--text2); }
   .pack-preview ul { margin: 0; padding-left: 18px; }
   .pack-id-list { font-family: var(--font-mono); font-size: 11px; word-break: break-all; }
+  .pack-exec { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .pack-exec[hidden] { display: none; }
+  .pack-exec-title { font-size: 12px; color: var(--text2); margin: 0 0 6px; }
+  .pack-exec-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .pack-exec-controls label { margin: 0; }
+  .pack-exec-controls select { width: auto; min-width: 180px; }
 
   /* 印刷不可の文面は画面には出さない */
   #review-print-blocked { display: none; }
@@ -929,6 +935,24 @@
     </div>
     <div class="pack-status" id="pack-status" role="status" aria-live="polite">Project Packは読み込まれていません。</div>
     <div class="pack-preview" id="pack-preview" hidden></div>
+    <!-- Project Pack ケース計算（Phase 2L-B2 / S3-B2）: 読み込んだ Pack から 1 ケースだけを、
+         ボタンを押したときだけ計算する。結果は未レビューで、この欄の中だけに出す。 -->
+    <div class="pack-exec" id="pack-exec" hidden>
+      <h3 class="pack-exec-title">Project Pack ケース計算（未レビュー）</h3>
+      <p class="pack-note">
+        読み込んだ Pack から 1 ケースだけを選んで計算します。結果は未レビュー（pack_unreviewed）で、
+        計算済み ≠ 検証済みです。案件プリセット・入力欄・一括検討・Closure には反映しません。
+        Pack を読み込んだだけでは計算しません。
+      </p>
+      <div class="pack-exec-controls">
+        <label for="pack-exec-case">ケース</label>
+        <select id="pack-exec-case" onchange="projectPackExecutionCaseChanged()" disabled></select>
+        <button type="button" id="btn-pack-exec" class="btn-secondary"
+          onclick="executeSelectedProjectPackCase()" disabled>選択ケースを計算（未レビュー）</button>
+      </div>
+      <div class="pack-status" id="pack-exec-status" role="status" aria-live="polite"></div>
+      <div class="pack-preview" id="pack-exec-result" hidden></div>
+    </div>
   </div>
 </section>
 
@@ -1287,6 +1311,7 @@
 <script src="project-config/project-input.js"></script>
 <script src="project-config/project-pack.js"></script>
 <script src="project-config/project-context.js"></script>
+<script src="project-config/project-pack-execution.js"></script>
 <script src="workspace.js"></script>
 <script src="project-profile.js"></script>
 <script src="review-package.js"></script>
@@ -1832,7 +1857,7 @@ function renderProjectPackPreview(ctx) {
   var box = document.getElementById('pack-preview');
   if (!box) return;
   box.textContent = '';
-  if (!ctx) { box.hidden = true; return; }
+  if (!ctx) { box.hidden = true; renderProjectPackExecutionControls(null); return; }
   var panes = ProjectContext.requireCapability(ctx, 'declaredPanes').panes;
   var cases = ProjectContext.requireCapability(ctx, 'declaredGlazingCases').glazingCases;
   var claims = ProjectContext.requireCapability(ctx, 'evidenceClaims');
@@ -1882,8 +1907,151 @@ function renderProjectPackPreview(ctx) {
   advisorySection.appendChild(packEl('p', 'advisory は公開面の文言についての注意です。' +
     '0 件でも、公開してよいという判断にはなりません（Human Review が必要です）。', 'pack-note'));
 
-  box.appendChild(packEl('p', 'この preview は計算しません。風圧・ガラスの判定と案件プリセットへの反映は' +
-    'この段階では行いません。Closure判定はこの段階では行いません。', 'pack-note'));
+  box.appendChild(packEl('p', 'この preview は計算しません。ケースの計算は下の「選択ケースを計算（未レビュー）」を' +
+    '押したときだけ行い、案件プリセットへは反映しません。Closure判定はこの段階では行いません。', 'pack-note'));
+  renderProjectPackExecutionControls(ctx);
+  box.hidden = false;
+}
+
+/* ============================================================
+   Project Pack ケース計算（Phase 2L-B2 / S3-B2）— 選択した 1 ケースだけ・明示操作だけ・未レビュー
+
+   staged の ProjectContext から、利用者が選んだ caseId の 1 ケースだけを
+   ProjectPackExecution.executeCase() で計算し、この欄の中だけに表示する。
+   - 計算は「選択ケースを計算（未レビュー）」を押したときだけ。Pack を読み込んだだけでは計算しない。
+   - 渡すのは stagedProjectPackContext（adapter が発行した context）だけ。生の Pack は渡さない。
+   - 結果は stagedProjectPackExecution に置くだけで、active context・案件プリセット・入力欄・
+     通常の計算・入力 package・一括検討・Closure・Evidence へは流さない。
+   - 新しい Pack の読込開始・読込失敗・解除・ケースの選択変更・計算失敗のどれでも結果を消す
+     （古い結果を残さない）。読込開始・失敗・解除は preview を作り直す経路（下の
+     renderProjectPackExecutionControls）で消える。
+   - 計算失敗では Pack は staged のまま残す（取り込みの失敗とは違う）。失敗の表示は固定文で、
+     例外の文面を出さない。
+   - 結果は「計算済み」であって「検証済み」ではない。trust は結果が持つ pack_unreviewed をそのまま出す。
+============================================================ */
+
+var stagedProjectPackExecution = null;
+var PROJECT_PACK_EXECUTION_FAILURE = '選択ケースを計算できませんでした。未レビューPackの計算結果は現在ありません。';
+
+function renderProjectPackExecutionStatus(text, isError) {
+  var status = document.getElementById('pack-exec-status');
+  if (!status) return;
+  status.className = isError ? 'pack-status is-error' : 'pack-status';
+  status.textContent = text;
+}
+
+/* 計算結果を消す（state と表示の両方）。 */
+function clearProjectPackExecution(statusText) {
+  stagedProjectPackExecution = null;
+  var box = document.getElementById('pack-exec-result');
+  if (box) { box.textContent = ''; box.hidden = true; }
+  renderProjectPackExecutionStatus(statusText || '', false);
+}
+
+/* staged context に合わせてケースの選択肢を作り直す。ctx が null なら欄を閉じる。どちらでも結果は消す。 */
+function renderProjectPackExecutionControls(ctx) {
+  clearProjectPackExecution('');
+  var section = document.getElementById('pack-exec');
+  var select = document.getElementById('pack-exec-case');
+  var button = document.getElementById('btn-pack-exec');
+  if (select) select.textContent = '';
+  if (!ctx) {
+    if (select) select.disabled = true;
+    if (button) button.disabled = true;
+    if (section) section.hidden = true;
+    return;
+  }
+  // 選択肢は caseId と paneId だけ（申告や説明文は出さない）
+  var cases = ProjectContext.requireCapability(ctx, 'declaredGlazingCases').glazingCases;
+  if (select) {
+    cases.forEach(function (c) {
+      var opt = document.createElement('option');
+      opt.value = c.caseId;
+      opt.textContent = c.caseId + ' — ' + c.paneId;
+      select.appendChild(opt);
+    });
+    select.disabled = cases.length === 0;
+  }
+  if (button) button.disabled = cases.length === 0;
+  if (section) section.hidden = false;
+  renderProjectPackExecutionStatus('計算は「選択ケースを計算（未レビュー）」を押したときだけ行います。', false);
+}
+
+function projectPackExecutionCaseChanged() {
+  clearProjectPackExecution('ケースの選択が変わったので、前の計算結果を消しました。');
+}
+
+function executeSelectedProjectPackCase() {
+  clearProjectPackExecution('');
+  var select = document.getElementById('pack-exec-case');
+  var ctx = stagedProjectPackContext;
+  try {
+    if (!ctx || !select || !select.value) throw new Error('no staged Project Pack or no selected case');
+    var result = ProjectPackExecution.executeCase(ctx, select.value);
+    ProjectPackExecution.assertExecutionResult(result);
+    if (result.trust !== 'pack_unreviewed') throw new Error('unexpected trust');
+    renderProjectPackExecutionResult(result);
+    stagedProjectPackExecution = result;
+  } catch (e) {
+    clearProjectPackExecution('');
+    renderProjectPackExecutionStatus(PROJECT_PACK_EXECUTION_FAILURE, true);
+    return false;
+  }
+  renderProjectPackExecutionStatus('ケース ' + stagedProjectPackExecution.case.caseId +
+    ' を計算しました（未レビュー。計算済み ≠ 検証済み）。', false);
+  return true;
+}
+
+function packPressureText(value) {
+  return value.toFixed(1) + ' N/m\u00b2';
+}
+
+function packZoneText(zone) {
+  return Object.prototype.hasOwnProperty.call(ZONE_DISPLAY_LABELS, zone)
+    ? ZONE_DISPLAY_LABELS[zone] + '（' + zone + '）' : zone;
+}
+
+/* 結果の表示（textContent のみ）。値は結果 object からだけ読む。 */
+function renderProjectPackExecutionResult(result) {
+  var box = document.getElementById('pack-exec-result');
+  if (!box) return;
+  box.textContent = '';
+  var p = result.pressure;
+  var calc = result.calculation;
+  packSection(box, '未レビューの計算結果', [
+    'trust: ' + result.trust + '（未レビュー）— 計算済み ≠ 検証済み',
+    '公開表示名: ' + result.publicLabel,
+    'caseId: ' + result.case.caseId + ' / paneId: ' + result.pane.paneId,
+    'W × H: ' + result.pane.widthMm + ' × ' + result.pane.heightMm + ' mm',
+    'glassType: ' + result.case.glassType,
+    'pressureModel.mode: ' + p.mode,
+    '設計風圧（designPressure）: ' + packPressureText(p.designPressure)
+  ]);
+  var rows;
+  if (p.mode === 'notification1458') {
+    rows = ['風圧の出どころ: Pack入力から算定（告示1458号系の式）',
+      '階: ' + floorDisplayLabel(p.floor), '部位: ' + packZoneText(p.zone),
+      '評価高さ: ' + p.evaluationHeightM + ' m',
+      '正圧: ' + packPressureText(p.positivePressure), '負圧: ' + packPressureText(p.negativePressure)];
+  } else if (p.mode === 'project_pressure_map') {
+    rows = ['風圧の出どころ: Pack map lookup（階別正圧・部位別負圧）',
+      '階: ' + floorDisplayLabel(p.floor), '部位: ' + packZoneText(p.zone),
+      '正圧: ' + packPressureText(p.positivePressure),
+      '負圧（絶対値）: ' + packPressureText(p.negativePressureMagnitude)];
+  } else {
+    rows = ['風圧の出どころ: Packがcaseに宣言したdesignPressure',
+      'このケースは設計風圧だけが宣言されています（分けたり推測したりしません）。'];
+  }
+  packSection(box, '風圧', rows);
+  var best = calc.bestCandidate;
+  packSection(box, 'ガラス候補（計算上の候補判定）', [
+    '面積: ' + calc.areaM2.toFixed(3) + ' m\u00b2',
+    best ? '推奨候補（OK の最小構成）: ' + best.label : 'OK の候補はありません',
+    best ? '許容風圧 P: ' + packPressureText(best.P) : '許容風圧 P: —',
+    'OK ' + calc.okCount + ' / NG ' + calc.ngCount + ' / 適用範囲外 ' + calc.outOfScopeCount
+  ]);
+  box.appendChild(packEl('p', 'OK は計算上の候補判定で、Evidence の確認ではありません。この結果は未レビューの Pack から' +
+    '計算したもので、案件プリセット・入力欄・一括検討・Closure には反映しません。', 'pack-note'));
   box.hidden = false;
 }
 

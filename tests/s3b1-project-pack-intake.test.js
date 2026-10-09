@@ -148,10 +148,18 @@ test('P2L-S3B1-04: staged は active ではない（activeProjectContext を読�
   const assignsInit = (init.match(/activeProjectContext\s*=(?!=)/g) || []).length;
   assert.equal(assignsAll, assignsInit + 1, 'initActiveProjectContext と宣言以外で active context を置いている');
   assert.equal(/activeProjectContext\s*=\s*[^;]*staged/.test(CODE), false);
-  // staged を読むのは intake だけ（計算・入力・Evidence・Closure・Review は読まない）
-  const outside = CODE.slice(0, CODE.indexOf('var MAX_PROJECT_PACK_IMPORT_BYTES')) +
-    CODE.slice(CODE.indexOf('\nfunction ', CODE.indexOf('function renderProjectPackPreview(') + 1));
-  assert.equal(/stagedProjectPack/.test(outside), false, 'intake 以外が staged Pack を読んでいる');
+  // staged を読むのは intake と、そのすぐ後に続く S3-B2 の Pack ケース計算 block だけ
+  // （通常の計算・入力・Evidence・Closure・Review は読まない。ケース計算 block の境界は
+  // tests/project-pack-execution-ui.test.js が確かめる）
+  const intakeStart = CODE.indexOf('var MAX_PROJECT_PACK_IMPORT_BYTES');
+  const intakeEnd = CODE.indexOf('\nfunction ', CODE.indexOf('function renderProjectPackPreview(') + 1);
+  const execEnd = CODE.indexOf('\nfunction ', CODE.indexOf('function renderProjectPackExecutionResult(') + 1);
+  assert.equal(intakeStart !== -1 && intakeEnd > intakeStart && execEnd > intakeEnd, true, 'block の範囲を取れない');
+  assert.equal(CODE.slice(intakeEnd, execEnd).split('\nfunction ').slice(1).every((f) =>
+    /^(renderProjectPackExecution|clearProjectPackExecution|projectPackExecution|executeSelectedProjectPackCase|packPressureText|packZoneText)/.test(f)),
+  true, 'intake とケース計算の間に別の関数が入っている');
+  const outside = CODE.slice(0, intakeStart) + CODE.slice(execEnd);
+  assert.equal(/stagedProjectPack/.test(outside), false, 'intake・ケース計算以外が staged Pack を読んでいる');
 });
 
 test('P2L-S3B1-05: Pack → ProjectInput・計算・Evidence 昇格・Closure へ流さない', () => {
