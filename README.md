@@ -962,6 +962,9 @@ fixture はすべて合成値です（`tests/project-pack.test.js` が、reposit
   ときだけ id を返します。0 件・2 件以上・module 未読込は fail closed で、別の built-in や id 一覧の先頭へは fallback
   しません。後から `registerPreset()` した config は runtime default になれません。
 - `index.html` は `project-config/sample.js` だけを読み込みます（以前の案件 module を読み込まず、その global も定義されません）。
+- 案件プリセットの文言は built-in の出どころを前提にしません。風圧プリセットの警告は検証状況（verificationStatus）と
+  採用時の確認だけを述べ、verified case 0 件の注記は「verifiedCases が登録されていない」ことだけを述べます
+  （背後に案件の一次資料や構造計算書があるとは読ませない。特定の built-in 向けの分岐は持たない）。
 - 告示モードの初期値も合成値です: V0 30 m/s、粗度区分 II、建物高さ 12.0 m、軒高 12.0 m、評価高さ Z 9.0 m
   （計算式・validation は変えていません）。ラベル見本は「例: 開口A」、組み合わせ生成の Z 見本は 3.5, 7.5, 11.5 です。
 - `project-state-probe` の `project` / `preset` は**公開 runtime の現在の状態**（runtime default を `index.html` と同じ経路で

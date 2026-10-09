@@ -373,3 +373,51 @@ test('P2L-S3A-13: 以前の案件 preset と Phase 2L-A intake は LEGACY VALIDA
   assert.notDeepEqual(legacyCtx.capabilities.projectPressureMap, runtimeCtx.capabilities.projectPressureMap);
   assert.notDeepEqual(legacyCtx.capabilities.sampleDefaultDimensions, runtimeCtx.capabilities.sampleDefaultDimensions);
 });
+
+/* ============================================================
+   RF-20-01 / RF-20-02
+============================================================ */
+
+/** CODE の中で、needle から end（を含む）までを返す。 */
+function sliceFrom(code, needle, end) {
+  const at = code.indexOf(needle);
+  assert.notEqual(at, -1, needle + ' が無い');
+  const stop = code.indexOf(end, at);
+  assert.notEqual(stop, -1, end + ' が無い');
+  return code.slice(at, stop + end.length);
+}
+
+test('P2L-S3A-14: preset の文言は built-in の出どころを前提にしない（案件資料が背後にあると読ませない）', () => {
+  // 旧文言（実案件の一次資料・構造計算書が背後にある前提）は index.html のどこにも無い
+  ['元の構造計算書', '案件一次資料によるEvidenceが未取得', '原典照合'].forEach((old) =>
+    assert.equal(HTML.includes(old), false, '旧文言が残っている: ' + old));
+  // 0 件の verified case: 登録が無いことだけを述べる
+  const verified = CODE.slice(CODE.indexOf('function renderVerifiedCaseSelector('),
+    CODE.indexOf('\n}', CODE.indexOf('function renderVerifiedCaseSelector(')));
+  assert.match(verified, /'Verified Case は現在 0 件です。このプリセットには verifiedCases が登録されていないため、' \+\n\s*'case selectorは表示しません。<\/div>'/);
+  // 風圧 preset の警告: 検証状況だけを述べ、採用時の確認を促す
+  const warning = sliceFrom(CODE, 'const windStatusWarningHtml', "` : '';");
+  assert.match(warning, /⚠ 設計風圧プリセット — 未検証<br>このプリセットの正圧・負圧は verificationStatus: \$\{windStatus\} です。実案件に使用する場合は、採用する入力条件と根拠を別途確認してください。/);
+  assert.match(warning, /\(mode === 'preset' && windStatus !== 'verified'\)/);
+  // 特定の built-in 向けの分岐を作らない・強い検証表現を作らない
+  [verified, warning].forEach((src) => {
+    assert.equal(/synthetic|合成|sample|registryProjectId|publicLabel|sourceKind|projectId/i.test(src), false, '特定の built-in 向けの分岐がある');
+    assert.equal(/確認済|検証済|一次資料|構造計算書/.test(src), false, '出どころ・検証を前提にした表現がある');
+  });
+});
+
+test('P2L-S3A-15: verification-spec は runtimeDefault の曖昧さを述べ、built-in の件数の曖昧さを述べない', () => {
+  const spec = JSON.parse(read('tools/verification/verification-spec.json'));
+  const a = spec.browserAssertions.find((x) => x.id === 'preset-ui-from-project-context');
+  assert.ok(a, 'preset-ui-from-project-context が無い');
+  // 件数モデル（built-in が 2 件なら失敗 / ちょうど 1 件の built-in）を書かない
+  assert.equal(/two built-ins|2 built-ins|built-ins exist|exactly one built-in(?! must)|first-entry choice/i.test(a.statement), false,
+    'built-in の件数で失敗するという古いモデル: ' + a.statement);
+  // runtimeDefault のモデル
+  ['Several built-ins may coexist', 'exactly one runtimeDefault declaration', 'Zero or duplicate runtimeDefault declarations',
+    'a missing runtime-default module', 'fail closed', 'extra non-default built-in', 'declaration order does not change the selection']
+    .forEach((phrase) => assert.equal(a.statement.includes(phrase), true, 'runtimeDefault のモデルが無い: ' + phrase));
+  // knownNonGoals: S3-A は公開 runtime の preset を意図して変えるので、一般的な「preset change」は non-goal ではない
+  assert.equal(spec.knownNonGoals.some((g) => /(^|, )preset change($|,)/.test(g)), false, '古い non-goal「preset change」が残っている');
+  assert.equal(spec.knownNonGoals.some((g) => /legacy preset mutation/.test(g)), true);
+});

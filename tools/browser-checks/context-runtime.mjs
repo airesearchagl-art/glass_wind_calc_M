@@ -310,6 +310,19 @@ function checkLoaded(tag, o, expect) {
     o.reconRows.every((r) => r[3] !== 'MATCH'), 'reconciliation values from context, no MATCH without Evidence');
   // J
   check(tag + '-J1', !o.verifiedCaseSelect && /0 件/.test(o.verifiedCaseText), o.verifiedCaseText);
+  // J2 / J3: 文言は built-in の出どころを前提にしない（RF-20-01）。どの built-in でも同じ文言で、
+  // 検証状況だけを context から述べる
+  check(tag + '-J2', o.verifiedCaseText ===
+    'Verified Case は現在 0 件です。このプリセットには verifiedCases が登録されていないため、case selectorは表示しません。',
+    o.verifiedCaseText);
+  const windStatus = expect.ctx.capabilities.builtInEvidence.groupStatus.wind;
+  const warned = (t) => t.includes('⚠ 設計風圧プリセット — 未検証') &&
+    t.includes('このプリセットの正圧・負圧は verificationStatus: ' + windStatus + ' です。') &&
+    t.includes('実案件に使用する場合は、採用する入力条件と根拠を別途確認してください。');
+  const sourceImplied = /構造計算書|原典照合|一次資料によるEvidenceが未取得/;
+  check(tag + '-J3', windStatus !== 'verified' && o.calc.length > 0 && o.calc.every((c) => warned(c.resultText)) &&
+    ![o.verifiedCaseText].concat(o.calc.map((c) => c.resultText)).some((t) => sourceImplied.test(t)),
+    'source-agnostic preset warning (verificationStatus: ' + windStatus + ')');
   // K
   check(tag + '-K1', o.manual.pkg.sourceKind === 'manual' && !!o.manual.glass, 'manual ' + o.manual.glass);
   check(tag + '-K2', o.notification.kind === 'notification_calculation' && !!o.notification.glass, 'notification');
