@@ -764,14 +764,17 @@ test('Phase 2F: evidence contractの解決が bare `global` 識別子に依存�
   assert.match(src, /\}\)\(typeof globalThis !== 'undefined' \? globalThis : this, function \(\) \{/);
 });
 
-test('Phase 2F: index.html が evidence.js を miyoshi.js より前に読み込む', () => {
+test('Phase 2F: index.html が evidence.js を built-in preset module より前に読み込む', () => {
+  // S3-A: 公開 runtime の built-in module は合成サンプル（sample.js）。以前の案件 module は読み込まない
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
   const ev = html.indexOf('src="project-config/evidence.js"');
-  const mi = html.indexOf('src="project-config/miyoshi.js"');
+  const bi = html.indexOf('src="project-config/sample.js"');
   const pi = html.indexOf('src="project-config/project-input.js"');
   assert.ok(ev > -1, 'evidence.js のscriptタグが存在すること');
-  assert.ok(ev < mi, 'evidence.js は miyoshi.js より前');
+  assert.ok(bi > -1, 'sample.js のscriptタグが存在すること');
+  assert.ok(ev < bi, 'evidence.js は sample.js より前');
   assert.ok(ev < pi, 'evidence.js は project-input.js より前');
+  assert.equal(html.includes('src="project-config/miyoshi.js"'), false, '以前の案件 module を読み込んでいる');
 });
 
 test('Phase 2F: 既存の verified な値はすべて強化後のpromotion gateを通る', () => {

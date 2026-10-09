@@ -51,8 +51,9 @@ const MATRIX = bodyOf(CODE, 'renderEvidenceClosureMatrix');
 test('P2J-U01: evidence-closure.js を registry.js より後に読み込む', () => {
   assert.match(HTML, /<script src="project-config\/evidence-closure\.js"><\/script>/);
   const closure = HTML.indexOf('project-config/evidence-closure.js');
+  // S3-A: 公開 runtime の built-in module は合成サンプル（sample.js）。以前の案件 module は読み込まない
   ['project-config/evidence.js', 'project-config/evidence-ledger.js',
-    'project-config/miyoshi.js', 'project-config/registry.js'].forEach((dep) => {
+    'project-config/sample.js', 'project-config/registry.js'].forEach((dep) => {
     const at = HTML.indexOf(dep);
     assert.notEqual(at, -1, dep + ' が読み込まれている');
     assert.equal(closure > at, true, 'evidence-closure.js は ' + dep + ' より後');

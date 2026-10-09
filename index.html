@@ -710,7 +710,7 @@
       <div class="mode-field mode-field-notification form-group">
         <label>基準風速 V0</label>
         <div class="input-unit">
-          <input type="number" id="inp-wind-v0" value="34" step="1" min="1">
+          <input type="number" id="inp-wind-v0" value="30" step="1" min="1">
           <span class="unit-label">m/s</span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;">
@@ -722,8 +722,8 @@
         <label>地表面粗度区分 roughnessCategory</label>
         <select id="inp-wind-roughness">
           <option value="I">I</option>
-          <option value="II">II</option>
-          <option value="III" selected>III</option>
+          <option value="II" selected>II</option>
+          <option value="III">III</option>
           <option value="IV">IV（板ガラスではIIIの数値を使用）</option>
         </select>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;">
@@ -734,7 +734,7 @@
       <div class="mode-field mode-field-notification form-group">
         <label>建物高さ buildingHeightM</label>
         <div class="input-unit">
-          <input type="number" id="inp-wind-building-h" value="14.2" step="0.1" min="0">
+          <input type="number" id="inp-wind-building-h" value="12.0" step="0.1" min="0">
           <span class="unit-label">m</span>
         </div>
       </div>
@@ -742,7 +742,7 @@
       <div class="mode-field mode-field-notification form-group">
         <label>軒高 eavesHeightM</label>
         <div class="input-unit">
-          <input type="number" id="inp-wind-eaves-h" value="14.2" step="0.1" min="0">
+          <input type="number" id="inp-wind-eaves-h" value="12.0" step="0.1" min="0">
           <span class="unit-label">m</span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;">
@@ -753,7 +753,7 @@
       <div class="mode-field mode-field-notification form-group">
         <label>評価高さ Z（ガラス／壁部分の地上高さ）</label>
         <div class="input-unit">
-          <input type="number" id="inp-wind-z" value="10" step="0.1" min="0">
+          <input type="number" id="inp-wind-z" value="9.0" step="0.1" min="0">
           <span class="unit-label">m</span>
         </div>
         <div style="font-size:11px;color:var(--text3);margin-top:5px;">
@@ -974,7 +974,7 @@
         <label for="sc-type">ガラス種別</label>
         <select id="sc-type"></select>
       </div>
-      <div class="form-group"><label for="sc-label">ラベル（任意）</label><input type="text" id="sc-label" maxlength="200" placeholder="例: 北面 2F A"></div>
+      <div class="form-group"><label for="sc-label">ラベル（任意）</label><input type="text" id="sc-label" maxlength="200" placeholder="例: 開口A"></div>
     </div>
     <div class="batch-toolbar" style="margin-top:8px;">
       <button type="button" id="btn-scenario-add" class="btn-secondary" onclick="addScenarioRow()">＋ ケースを追加</button>
@@ -993,7 +993,7 @@
       <div class="profile-grid">
         <div class="form-group"><label for="gen-w">幅 W (mm)</label><input type="text" id="gen-w" placeholder="900, 1350" oninput="updateMatrixPreview()"></div>
         <div class="form-group"><label for="gen-h">高さ H (mm)</label><input type="text" id="gen-h" placeholder="1800" oninput="updateMatrixPreview()"></div>
-        <div class="form-group"><label for="gen-z">評価高さ Z (m)</label><input type="text" id="gen-z" placeholder="4.2, 8.4, 12.6" oninput="updateMatrixPreview()"></div>
+        <div class="form-group"><label for="gen-z">評価高さ Z (m)</label><input type="text" id="gen-z" placeholder="3.5, 7.5, 11.5" oninput="updateMatrixPreview()"></div>
         <div class="form-group"><label for="gen-zone">部位</label><input type="text" id="gen-zone" placeholder="general, corner" oninput="updateMatrixPreview()"></div>
         <div class="form-group"><label for="gen-type">ガラス種別</label><input type="text" id="gen-type" placeholder="fl_single" oninput="updateMatrixPreview()"></div>
       </div>
@@ -1208,7 +1208,7 @@
 <script src="wind-pressure.js"></script>
 <script src="project-config/evidence.js"></script>
 <script src="project-config/evidence-ledger.js"></script>
-<script src="project-config/miyoshi.js"></script>
+<script src="project-config/sample.js"></script>
 <script src="project-config/manual.js"></script>
 <script src="project-config/registry.js"></script>
 <script src="project-config/evidence-closure.js"></script>
@@ -1231,15 +1231,17 @@
 ============================================================ */
 
 /* ============================================================
-   Active ProjectContext（Phase 2L-B2 S2-B）
+   Active ProjectContext（Phase 2L-B2 S2-B / S3-A）
 
    案件プリセットの表示・入力・Evidence UI は、この 1 つの context から読む。
    - context は必ず ProjectContext.fromLegacyPreset() で作る（built-in の trust は
      registry が捕まえた instance から来る。形を真似た object は通らない）。
-   - PresetRegistry.BUILT_IN_PRESET_IDS は「候補の発見」にだけ使う。trust の根ではない。
-     selector はまだ無いので、built-in が**ちょうど 1 件**のときだけ自動選択する。
-     0 件・2 件以上は先頭を選ばず fail closed。
-   - 失敗したら案件プリセット mode は明示エラーにする。案件 module へ fallback しない。
+   - どの built-in を使うかは PresetRegistry.getRuntimeDefaultBuiltInPresetId() だけが決める
+     （S3-A）。runtimeDefault の宣言がちょうど 1 件で、その module が読み込まれているときだけ
+     id が返り、そうでなければ fail closed。id 一覧（BUILT_IN_PRESET_IDS）の件数や先頭では
+     選ばない。公開 runtime の標準は合成サンプル（project-config/sample.js）で、
+     以前の案件 preset はこのページでは読み込まない。selector はまだ無い。
+   - 失敗したら案件プリセット mode は明示エラーにする。別の built-in へ fallback しない。
      手入力・告示風圧計算・取り込みデータの mode は context に依存しない。
    - 例外: ProjectInput.fromPreset() と Evidence Closure は canonical な built-in を
      要求するので、context.origin.registryProjectId から getBuiltInPreset() を引く
@@ -1259,14 +1261,9 @@ function initActiveProjectContext() {
     if (typeof PresetRegistry === 'undefined' || !PresetRegistry) {
       throw new Error('PresetRegistry is not available');
     }
-    // 候補の発見だけ。ここに載っていることは built-in であることの証明にならない
-    // （fromLegacyPreset() が registry の捕まえた instance で確かめる）。
-    var candidates = PresetRegistry.BUILT_IN_PRESET_IDS || [];
-    if (candidates.length !== 1) {
-      throw new Error('exactly one built-in preset is required for automatic selection (found ' +
-        candidates.length + '); a preset selector is not implemented yet');
-    }
-    activeProjectContext = ProjectContext.fromLegacyPreset(candidates[0]);
+    // 選択の方針（runtimeDefault）だけを registry に聞く。trust は fromLegacyPreset() が
+    // registry の捕まえた instance で確かめる。曖昧・未読込なら例外で、ここでは選び直さない。
+    activeProjectContext = ProjectContext.fromLegacyPreset(PresetRegistry.getRuntimeDefaultBuiltInPresetId());
   } catch (e) {
     activeProjectContext = null;
     activeProjectContextError = e;
@@ -1443,8 +1440,9 @@ function renderEvidenceStatus(ctx) {
   var widthField = builtInEvidenceField(ctx, 'dimensions.defaultW');
   // 列 3 は Evidence level の表示文字列。圧力 map は全 scope の level を context から集める。
   var rows = [
+    // 注記は context の公開表示名だけ（S3-A: 開示の扱いを UI 側で決め打ちしない）
     ['案件識別情報', identity.verificationStatus, evidenceLevelLabel(identity.evidence.level),
-     '公開リポジトリのため固有名詞は非表示（redacted）'],
+     '公開表示名: ' + ctx.publicLabel],
     ['基準風速 V0', v0.verificationStatus, evidenceLevelLabel(v0.evidence.level),
      v0.value + ' ' + (v0.unit || '')],
     ['地表面粗度区分', roughness.verificationStatus, evidenceLevelLabel(roughness.evidence.level),
@@ -1486,8 +1484,8 @@ function renderVerifiedCaseSelector(ctx) {
   if (!verifiedCases || verifiedCases.length === 0) {
     host.innerHTML =
       '<div style="font-size:11px;color:var(--text3);margin-top:8px;">' +
-      'Verified Case は現在 0 件です。案件一次資料によるEvidenceが未取得のため、' +
-      'case selectorは表示しません（空のselectorを作りません）。</div>';
+      'Verified Case は現在 0 件です。このプリセットには verifiedCases が登録されていないため、' +
+      'case selectorは表示しません。</div>';
     return;
   }
   var options = verifiedCases.map(function (c) {
@@ -2253,8 +2251,10 @@ function renderResults(result) {
   // Evidence status 表に context から表示される。
   // 既存の「告示から自動算定した値ではない」という警告を弱めるものではなく、
   // 追加の注記として表示する。
+  // 文言は built-in の出どころを前提にしない（S3-A RF-20-01: 合成サンプルのように、背後に
+  // 対応する案件資料が無い built-in でも成り立つ。特定の built-in 向けの分岐を作らない）。
   const windStatusWarningHtml = (mode === 'preset' && windStatus !== 'verified') ? `
-      <div class="calc-line" style="margin-top:4px;color:var(--warn);">⚠ 設計風圧プリセット — 原典照合未完了（プリセットの正圧・負圧と、元の構造計算書・各階評価高さZとの厳密な対応付けは未確認。verificationStatus: ${windStatus}）</div>` : '';
+      <div class="calc-line" style="margin-top:4px;color:var(--warn);">⚠ 設計風圧プリセット — 未検証<br>このプリセットの正圧・負圧は verificationStatus: ${windStatus} です。実案件に使用する場合は、採用する入力条件と根拠を別途確認してください。</div>` : '';
 
   // 入力値ブロックの階数/部位行は案件プリセットモードにのみ存在する
   // （手入力モードには floor/zone の概念がない）。

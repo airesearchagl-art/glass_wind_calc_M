@@ -12,10 +12,10 @@ import fs from 'fs';
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 const require = createRequire(import.meta.url);
 
-// A-facts の期待値は page の外で求める（Node 側の built-in instance と、tree から読まない
+// A-facts の期待値は page の外で求める（Node 側の runtime default built-in と、tree から読まない
 // verification-spec.json の evidenceStateExpected）。page 側は active ProjectContext から読む。
 const Registry = require(REPO + 'project-config/registry.js');
-const BUILT_IN = Registry.getBuiltInPreset(Registry.BUILT_IN_PRESET_IDS[0]);
+const BUILT_IN = Registry.getBuiltInPreset(Registry.getRuntimeDefaultBuiltInPresetId());
 const NODE_FACTS = { vc: BUILT_IN.verifiedCases.length, mode: BUILT_IN.dimensions.mode,
   w: BUILT_IN.dimensions.defaultW.value, h: BUILT_IN.dimensions.defaultH.value,
   v0: BUILT_IN.wind.V0.value, r: BUILT_IN.wind.roughnessCategory.value };

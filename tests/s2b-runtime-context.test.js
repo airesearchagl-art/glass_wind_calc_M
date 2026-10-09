@@ -47,7 +47,7 @@ test('P2L-S2B-01: 走査の前提——実行コードを取り出せている�
 test('P2L-S2B-02: script の読み込み順——project-input → project-pack → project-context', () => {
   const at = (f) => HTML.indexOf('<script src="' + f + '"></script>');
   const order = ['calc.js', 'wind-pressure.js', 'project-config/evidence.js', 'project-config/evidence-ledger.js',
-    'project-config/miyoshi.js', 'project-config/manual.js', 'project-config/registry.js',
+    'project-config/sample.js', 'project-config/manual.js', 'project-config/registry.js',
     'project-config/evidence-closure.js', 'project-config/project-input.js',
     'project-config/project-pack.js', 'project-config/project-context.js',
     'workspace.js', 'project-profile.js', 'review-package.js'];
@@ -74,13 +74,12 @@ test('P2L-S2B-03: 案件 module を runtime data source として読まない', 
     (CODE.match(/.{0,60}miyoshi.{0,60}/i) || [''])[0]);
 });
 
-test('P2L-S2B-04: active ProjectContext は fromLegacyPreset() でだけ作り、built-in がちょうど 1 件のときだけ自動選択する', () => {
+test('P2L-S2B-04: active ProjectContext は fromLegacyPreset() でだけ作り、runtime default の built-in だけを選ぶ（S3-A）', () => {
+  // S3-A: 「built-in がちょうど 1 件なら先頭」は終了。選択は registry の runtimeDefault 宣言だけで決まり、
+  // 曖昧・未読込は registry 側で fail closed（id 一覧の件数や位置では選ばない）。
   const init = fnBody('initActiveProjectContext');
-  assert.match(init, /PresetRegistry\.BUILT_IN_PRESET_IDS/);
-  assert.match(init, /candidates\.length !== 1/, '0 件・2 件以上で fail closed していない');
-  assert.match(init, /ProjectContext\.fromLegacyPreset\(candidates\[0\]\)/);
-  assert.equal(init.indexOf('candidates.length !== 1') < init.indexOf('fromLegacyPreset'), true,
-    '件数の確認が fromLegacyPreset より後にある');
+  assert.match(init, /ProjectContext\.fromLegacyPreset\(PresetRegistry\.getRuntimeDefaultBuiltInPresetId\(\)\)/);
+  assert.equal(/BUILT_IN_PRESET_IDS|candidates/.test(init), false, 'id 一覧から選んでいる');
   // id 一覧は trust の根ではない: context を作るのは fromLegacyPreset だけ
   assert.equal((CODE.match(/fromLegacyPreset\(/g) || []).length, 1);
   assert.equal(/fromProjectPack|validateProjectPack/.test(CODE), false, 'Project Pack を runtime で扱っている');

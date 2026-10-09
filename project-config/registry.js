@@ -24,10 +24,20 @@
  *     export する BUILT_IN_PRESET_IDS は参照用の凍結した写しで、権威ではない。
  *     将来 built-in（合成 sample preset を含む）を足すときは、BUILT_IN_PRESET_MODULES に
  *     source として追加する（review を通る経路だけが built-in を作る）。
+ *   - **runtime default は選択の方針であって trust の方針ではない**（Phase 2L-B2 / S3-A）。
+ *     BUILT_IN_PRESET_MODULES の宣言で runtimeDefault: true のものが**ちょうど 1 件**あり、
+ *     その module が今の環境で built-in として捕まえられているときだけ、
+ *     getRuntimeDefaultBuiltInPresetId() がその id を返す。0 件・2 件以上・module 未読込は
+ *     fail closed で、別の built-in や id 一覧の先頭へ fallback しない。後から registerPreset()
+ *     した config は built-in ではないので runtime default になれない。trust の判定は
+ *     引き続き getBuiltInPreset() の同一性だけで決まる。
+ *   - built-in の宣言は 2 件ある。合成サンプル（sample.js、runtimeDefault: true）は公開 browser
+ *     runtime の標準で、index.html はこれだけを読み込む。以前の案件 preset（runtimeDefault: false）は
+ *     legacy validation 用で、Node では require() で捕まえられるが、browser では読み込まない。
  *
  * 静的HTML/JS構成・ビルド不要という制約を維持するため、UMD形式の
  * プレーンJSとして提供する（<script src> と require() の両対応）。
- * ブラウザでは calc.js / miyoshi.js / manual.js の後に読み込むこと。
+ * ブラウザでは calc.js / sample.js / manual.js の後に読み込むこと。
  */
 (function (global, factory) {
   var mod = factory(global);
@@ -42,9 +52,15 @@
 
   // repository内のbuilt-in preset。ここに列挙されたものだけが
   // registered presetになり得る（外部入力からは追加できない）。
+  // runtimeDefault は公開 runtime が既定で使う built-in の宣言（選択の方針。trust ではない）。
   var BUILT_IN_PRESET_MODULES = [
-    { projectId: 'miyoshi', nodePath: './miyoshi.js', globalName: 'MiyoshiProjectConfig' }
+    { projectId: 'miyoshi', nodePath: './miyoshi.js', globalName: 'MiyoshiProjectConfig', runtimeDefault: false },
+    { projectId: 'synthetic-sample', nodePath: './sample.js', globalName: 'SyntheticSampleProjectConfig', runtimeDefault: true }
   ];
+  // 宣言は bootstrap 時に 1 度だけ読む（以後この配列を書き換える経路は無い）。
+  var RUNTIME_DEFAULT_DECLARATIONS = Object.freeze(BUILT_IN_PRESET_MODULES
+    .filter(function (e) { return e.runtimeDefault === true; })
+    .map(function (e) { return e.projectId; }));
 
   var MAX_PROJECT_ID_LENGTH = 64;
   var PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
@@ -172,6 +188,27 @@
     return builtIn;
   }
 
+  /**
+   * 公開 runtime が既定で使う built-in の projectId（Phase 2L-B2 / S3-A）。
+   *
+   * 宣言上 runtimeDefault: true がちょうど 1 件で、その module が今の環境で built-in として
+   * 捕まえられているときだけ返す。そうでなければ例外（fail closed）。別の built-in・
+   * BUILT_IN_PRESET_IDS の先頭・後から registerPreset() された config へは fallback しない。
+   */
+  function getRuntimeDefaultBuiltInPresetId() {
+    if (RUNTIME_DEFAULT_DECLARATIONS.length !== 1) {
+      throw new Error('getRuntimeDefaultBuiltInPresetId(): exactly one built-in must be declared runtimeDefault (found ' +
+        RUNTIME_DEFAULT_DECLARATIONS.length + ')');
+    }
+    var projectId = RUNTIME_DEFAULT_DECLARATIONS[0];
+    if (!Object.prototype.hasOwnProperty.call(builtInPresets, projectId)) {
+      throw new Error('getRuntimeDefaultBuiltInPresetId(): the runtime-default built-in ' + JSON.stringify(projectId) +
+        ' is not loaded in this environment');
+    }
+    getBuiltInPreset(projectId);   // registry との同一性も確かめる（食い違えば例外）
+    return projectId;
+  }
+
   // export object も凍結する: 後から getBuiltInPreset や BUILT_IN_PRESET_IDS を差し替えて
   // built-in の判定を変えることはできない。
   return Object.freeze({
@@ -181,7 +218,9 @@
     hasPreset: function (projectId) { return defaultRegistry.hasPreset(projectId); },
     listPresets: function () { return defaultRegistry.listPresets(); },
     getBuiltInPreset: getBuiltInPreset,
-    // 参照用の凍結した写し。trust の判定には使わない（getBuiltInPreset() を使う）。
+    getRuntimeDefaultBuiltInPresetId: getRuntimeDefaultBuiltInPresetId,
+    // 参照用の凍結した写し。trust の判定にも runtime default の選択にも使わない
+    // （getBuiltInPreset() / getRuntimeDefaultBuiltInPresetId() を使う）。
     BUILT_IN_PRESET_IDS: Object.freeze(BUILT_IN_PRESET_MODULES.map(function (e) { return e.projectId; }))
   });
 });
