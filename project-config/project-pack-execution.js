@@ -40,7 +40,8 @@
  *
  * 静的HTML/JS構成・ビルド不要という制約を維持するため、UMD形式のプレーンJSとして
  * 提供する（<script src> と require() の両対応）。ブラウザでは calc.js・wind-pressure.js・
- * project-config/project-context.js の後に読み込むこと。
+ * project-config/project-context.js の後に読み込むこと。依存は最初の呼び出しで解決するので、
+ * それらが読み込めない page でも読み込み自体は失敗しない（呼び出しが失敗する）。
  */
 (function (global, factory) {
   var mod = factory(global);
@@ -67,10 +68,25 @@
     throw new Error('project-pack-execution.js: ' + label + ' is required but not available');
   }
 
-  var Evidence = resolveDependency('ProjectEvidence', './evidence.js', 'project-config/evidence.js');
-  var Context = resolveDependency('ProjectContext', './project-context.js', 'project-config/project-context.js');
-  var Wind = resolveDependency('WindPressure', '../wind-pressure.js', 'wind-pressure.js');
-  var Glass = resolveDependency('GlassCalc', '../calc.js', 'calc.js');
+  // 依存は呼ばれたときに解決する。読み込みの時点では例外を投げない: ProjectContext などが
+  // 読み込めない page でも、この module のせいで page 全体が止まらないようにする
+  // （そのときは呼び出しが失敗し、画面は固定文の失敗表示になる。fail closed は変わらない）。
+  var Context, Wind, Glass;
+  var dependenciesReady = false;
+  function requireDependencies() {
+    if (dependenciesReady) return;
+    var context = resolveDependency('ProjectContext', './project-context.js', 'project-config/project-context.js');
+    var wind = resolveDependency('WindPressure', '../wind-pressure.js', 'wind-pressure.js');
+    var glass = resolveDependency('GlassCalc', '../calc.js', 'calc.js');
+    // trust は ProjectContext の規則（sourceKind からだけ決まる）と一致していなければ使わない
+    if (!context.TRUST_BY_SOURCE_KIND || context.TRUST_BY_SOURCE_KIND[SOURCE_KIND] !== TRUST) {
+      throw new Error('project-pack-execution.js: ProjectContext trust for ' + SOURCE_KIND + ' is not ' + TRUST);
+    }
+    Context = context;
+    Wind = wind;
+    Glass = glass;
+    dependenciesReady = true;
+  }
 
   // ============================================================
   // Contract
@@ -80,11 +96,6 @@
   var SCHEMA_VERSION = 1;
   var SOURCE_KIND = 'project_pack_unreviewed';
   var TRUST = 'pack_unreviewed';
-
-  // trust は ProjectContext の規則（sourceKind からだけ決まる）と一致していなければ読み込まない
-  if (Context.TRUST_BY_SOURCE_KIND[SOURCE_KIND] !== TRUST) {
-    throw new Error('project-pack-execution.js: ProjectContext trust for ' + SOURCE_KIND + ' is not ' + TRUST);
-  }
 
   var MODE_NOTIFICATION = 'notification1458';
   var MODE_PRESSURE_MAP = 'project_pressure_map';
@@ -140,6 +151,14 @@
 
   function hasOwn(obj, key) {
     return Object.prototype.hasOwnProperty.call(obj, key);
+  }
+
+  function deepFreeze(value) {
+    if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+      Object.freeze(value);
+      Object.keys(value).forEach(function (k) { deepFreeze(value[k]); });
+    }
+    return value;
   }
 
   function isPlainObject(v) {
@@ -213,6 +232,7 @@
    * （built-in の context を拒否する）。
    */
   function requirePackContext(ctx, where) {
+    requireDependencies();
     Context.assertProjectContext(ctx);
     if (ctx.sourceKind !== SOURCE_KIND) fail(where, 'requires a ' + SOURCE_KIND + ' context (got ' + show(ctx.sourceKind) + ')');
     if (ctx.trust !== TRUST) fail(where, 'requires trust ' + TRUST + ' (got ' + show(ctx.trust) + ')');
@@ -225,7 +245,7 @@
   function listCaseIds(ctx) {
     requirePackContext(ctx, 'listCaseIds');
     var cases = Context.requireCapability(ctx, 'declaredGlazingCases').glazingCases;
-    return Evidence.deepFreeze(cases.map(function (c) { return c.caseId; }));
+    return deepFreeze(cases.map(function (c) { return c.caseId; }));
   }
 
   // ============================================================
@@ -385,7 +405,7 @@
         candidates: sorted
       }
     };
-    var out = Evidence.deepFreeze(copyData(result, 'result'));
+    var out = deepFreeze(copyData(result, 'result'));
     assertExecutionResultShape(out);
     issued.add(out);
     return out;
@@ -453,7 +473,7 @@
     return assertExecutionResultShape(r);
   }
 
-  return Evidence.deepFreeze({
+  return deepFreeze({
     EXECUTION_TYPE: EXECUTION_TYPE,
     SCHEMA_VERSION: SCHEMA_VERSION,
     SOURCE_KIND: SOURCE_KIND,

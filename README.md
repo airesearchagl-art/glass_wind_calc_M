@@ -1110,6 +1110,8 @@ ProjectContext（fromProjectPack が発行したものだけ）
   0 件・複数件・単位違いは失敗で、先頭の行・先頭の pane・別の case へは fallback しません。
 - 入力 package（`ProjectInput`）・Closure・出典の申告（evidenceClaims）・active context・DOM・保存・通信を参照しません
   （静的に固定）。`ProjectInput.SOURCE_KINDS`（4 種）と `SCHEMA_VERSION`（2）は変えていません。
+- 依存（ProjectContext・WindPressure・GlassCalc）は最初の呼び出しで解決します。ProjectContext を読み込めない page でも
+  この module の読み込みで page が止まることはなく、呼び出しが失敗します（画面は固定文の失敗表示）。
 
 ### 風圧の解決（mode ごと）
 

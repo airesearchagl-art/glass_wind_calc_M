@@ -456,3 +456,24 @@ test('P2L-S3B2-E19: 0 件・複数件・単位違いは fail closed（先頭行�
   const g = executorWith(directCaps(), 'case_direct', { sourceKind: 'legacy_builtin', trust: 'built_in_current' });
   assert.throws(() => g.Exec.executeCase(g.ctx, 'G002'), /requires a project_pack_unreviewed context/);
 });
+
+test('P2L-S3B2-E20: ProjectContext が無い page でも読み込みは止まらず、呼び出しは fail closed', () => {
+  // index.html は project-context.js を読めないときも他の mode を動かす（context-runtime の failure scenario）。
+  // executor の読み込みがそれを壊さないこと、呼べば失敗すること（別の経路へ fallback しないこと）を確かめる。
+  const sandbox = {};
+  vm.createContext(sandbox);
+  ['project-config/evidence.js', 'wind-pressure.js', 'calc.js'].forEach((rel) =>
+    vm.runInContext(read(rel), sandbox, { filename: rel }));
+  assert.doesNotThrow(() => vm.runInContext(EXEC_SRC, sandbox, { filename: EXEC_SRC_REL }), '読み込みで例外を投げた');
+  const E = sandbox.ProjectPackExecution;
+  assert.equal(typeof E.executeCase, 'function');
+  assert.equal(E.TRUST, 'pack_unreviewed');
+  assert.throws(() => E.executeCase({ sourceKind: 'project_pack_unreviewed', trust: 'pack_unreviewed' }, 'G001'),
+    /project-context\.js is required but not available/);
+  assert.throws(() => E.listCaseIds({}), /project-context\.js is required but not available/);
+  // trust の規則が食い違う ProjectContext では使わない
+  vm.runInContext('var ProjectContext = { TRUST_BY_SOURCE_KIND: { project_pack_unreviewed: "verified" } };', sandbox);
+  assert.throws(() => E.executeCase({}, 'G001'), /trust for project_pack_unreviewed is not pack_unreviewed/);
+  // 公開している定数は凍結されている
+  assert.equal(Object.isFrozen(E) && Object.isFrozen(E.UNITS) && Object.isFrozen(E.FORBIDDEN_KEYS), true);
+});
