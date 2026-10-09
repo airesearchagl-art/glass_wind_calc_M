@@ -284,8 +284,14 @@ test('P2L-S3A-09: index.html は合成サンプルだけを読み込み、runtim
   assert.match(CODE, /ProjectContext\.fromLegacyPreset\(PresetRegistry\.getRuntimeDefaultBuiltInPresetId\(\)\)/);
   assert.equal(/BUILT_IN_PRESET_IDS/.test(CODE), false, '実行コードが id 一覧を使っている');
   assert.equal(HTML.includes(SAMPLE_CONTRACT.projectId), false, 'runtime sample の id を hard-code している');
-  assert.equal(/fromProjectPack|validateProjectPack|ProjectPack\./.test(CODE), false, 'Project Pack の runtime 経路がある');
-  assert.equal(/type="file"[^>]*(pack|Pack)|ondrop|dragover/.test(HTML), false, 'Project Pack の読込 UI がある');
+  // S3-B1: Project Pack は staged preview の intake でだけ扱い、runtime default の選択には関わらない
+  // （intake の境界は tests/s3b1-project-pack-intake.test.js）
+  const initStart = CODE.indexOf('function initActiveProjectContext(');
+  const init = CODE.slice(initStart, CODE.indexOf('\nfunction ', initStart + 1));
+  assert.equal(/ProjectPack|fromProjectPack|staged/.test(init), false, 'runtime default の選択に Project Pack が関わっている');
+  assert.equal((CODE.match(/ProjectPack\.validateProjectPack\(/g) || []).length, 1, 'Project Pack の読込経路が 1 つでない');
+  const markup = STATIC.replace(/<style>[\s\S]*?<\/style>/, '').replace(/<section class="pack-wrap"[\s\S]*?<\/section>/, '');
+  assert.equal(/type="file"|\sondrop=|\sondragover=/.test(markup), false, 'Project Pack 欄の外に読込 UI がある');
 });
 
 /* ============================================================

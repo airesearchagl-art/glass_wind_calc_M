@@ -23,6 +23,8 @@ const EXPECTED_INSTRUMENT_IDS = [
   'browser-w4', 'failopen-w4', 'guard-diff', 'independent-review',
   // Phase 2L-B2 S2-B: the preset UI is wired through ProjectContext
   'context-runtime',
+  // Phase 2L-B2 S3-B1: browser-local Project Pack intake & preview (staged, never active)
+  'project-pack-intake',
   // Human Gate, Phase 2K final: the single 'mutation' entry was split, because
   // one label could not honestly carry both claims at once.
   'mutation-kill', 'mutation-equivalence-analysis',
@@ -243,6 +245,7 @@ test('P2K-M09: 全 instrument の class と admissibility を literal で固定�
     ['npm-test', 'ADMISSIBLE', 'regression'],
     ['parser-boundary', 'UNVERIFIED', 'independent'],
     ['probe-w4', 'UNVERIFIED', 'observational'],
+    ['project-pack-intake', 'UNVERIFIED', 'observational'],
     ['project-state-probe', 'ADMISSIBLE', 'observational'],
     ['publication-lint', 'ADMISSIBLE', 'regression'],
     ['stageA-regression', 'UNVERIFIED', 'observational']

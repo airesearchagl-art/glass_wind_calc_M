@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "packType": "glass_wind_project_pack",
+  "projectMetadata": { "publicLabel": "Synthetic Pack Map" },
+  "pressureModel": { "mode": "project_pressure_map" },
+  "windConditions": {
+    "positivePressures": [
+      { "floor": "1", "pressure": { "value": 1015, "unit": "N/m²" } },
+      { "floor": "2", "pressure": { "value": 1045, "unit": "N/m²" } },
+      { "floor": "3", "pressure": { "value": 1075, "unit": "N/m²" } },
+      { "floor": "5", "pressure": { "value": 1135, "unit": "N/m²" } },
+      { "floor": "R", "pressure": { "value": 1225, "unit": "N/m²" } }
+    ],
+    "negativePressures": [
+      { "zone": "general", "magnitude": { "value": 1565, "unit": "N/m²" } },
+      { "zone": "corner", "magnitude": { "value": 1835, "unit": "N/m²" } }
+    ]
+  },
+  "panes": [
+    { "paneId": "P001", "widthMm": { "value": 1020, "unit": "mm" }, "heightMm": { "value": 2240, "unit": "mm" } },
+    { "paneId": "P002", "widthMm": { "value": 760, "unit": "mm" }, "heightMm": { "value": 1880, "unit": "mm" } },
+    { "paneId": "P003", "widthMm": { "value": 640, "unit": "mm" }, "heightMm": { "value": 1720, "unit": "mm" } }
+  ],
+  "glazingCases": [
+    { "caseId": "G001", "paneId": "P001", "floor": "2", "zone": "general", "glassType": "fl_single", "extraFactor": 1.0 },
+    { "caseId": "G002", "paneId": "P002", "floor": "5", "zone": "corner", "glassType": "tp_single", "extraFactor": 1.0 },
+    { "caseId": "G003", "paneId": "P003", "floor": "R", "zone": "general", "glassType": "lowe_fl", "extraFactor": 1.0 },
+    { "caseId": "G004", "paneId": "P001", "floor": "1", "zone": "corner", "glassType": "fl_fl", "extraFactor": 1.0 }
+  ],
+  "evidence": {
+    "sourceScopes": [
+      { "sourceScopeId": "S01", "sourceClaim": { "claimedLevel": "primary", "claimedCheckedAt": "2026-02-12",
+        "publicDescription": "合成テスト用の出典（実案件ではない）", "claimedPrivateReferenceAvailable": false } },
+      { "sourceScopeId": "S02", "sourceClaim": { "claimedLevel": "indirect", "claimedCheckedAt": "2026-02-13",
+        "publicDescription": "合成テスト用の参考資料（実案件ではない）", "claimedPrivateReferenceAvailable": false } }
+    ],
+    "records": [
+      { "sourceScopeId": "S01", "subject": { "kind": "positive_pressure", "floor": "2" }, "quantity": { "value": 1045, "unit": "N/m²" } },
+      { "sourceScopeId": "S01", "subject": { "kind": "negative_pressure_magnitude", "zone": "corner" }, "quantity": { "value": 1835, "unit": "N/m²" } },
+      { "sourceScopeId": "S02", "subject": { "kind": "pane_height", "paneId": "P002" }, "quantity": { "value": 1880, "unit": "mm" } }
+    ]
+  }
+}

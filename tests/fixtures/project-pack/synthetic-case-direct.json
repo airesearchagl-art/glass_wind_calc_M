@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "packType": "glass_wind_project_pack",
+  "projectMetadata": { "publicLabel": "Synthetic Pack Direct" },
+  "pressureModel": { "mode": "case_direct" },
+  "windConditions": {},
+  "panes": [
+    { "paneId": "P001", "widthMm": { "value": 1020, "unit": "mm" }, "heightMm": { "value": 2240, "unit": "mm" } },
+    { "paneId": "P002", "widthMm": { "value": 760, "unit": "mm" }, "heightMm": { "value": 1880, "unit": "mm" } }
+  ],
+  "glazingCases": [
+    { "caseId": "G001", "paneId": "P001", "glassType": "fl_single", "extraFactor": 1.0,
+      "designPressure": { "value": 1245, "unit": "N/m²" } },
+    { "caseId": "G002", "paneId": "P002", "floor": "2", "glassType": "lowe_fl", "extraFactor": 1.0,
+      "designPressure": { "value": 1365, "unit": "N/m²" } }
+  ],
+  "evidence": {
+    "sourceScopes": [
+      { "sourceScopeId": "S01", "sourceClaim": { "claimedLevel": "indirect", "claimedCheckedAt": "2026-02-14",
+        "publicDescription": "合成テスト用の参考資料（実案件ではない）", "claimedPrivateReferenceAvailable": false } }
+    ],
+    "records": [
+      { "sourceScopeId": "S01", "subject": { "kind": "case_design_pressure", "caseId": "G001" }, "quantity": { "value": 1245, "unit": "N/m²" } }
+    ]
+  }
+}
