@@ -41,21 +41,27 @@ const FIXTURES = { notification1458: FIXTURE('synthetic-notification1458'),
 const FAILURE_TEXT = '選択ケースを計算できませんでした。未レビューPackの計算結果は現在ありません。';
 const STRONG_WORDING = /Verified|承認|確定|安全|問題なし|計算可能|公開可能|確認済|\bsafe\b|\bapproved\b/i;
 
+/** top-level の関数 1 つ（次の top-level の function / var の手前まで）。 */
 function fnBody(name) {
   const start = CODE.indexOf('function ' + name + '(');
   assert.notEqual(start, -1, name + ' が見つからない');
-  const next = CODE.indexOf('\nfunction ', start + 1);
-  return CODE.slice(start, next === -1 ? CODE.length : next);
+  const ends = ['\nfunction ', '\nvar '].map((m) => CODE.indexOf(m, start + 1)).filter((i) => i !== -1);
+  return CODE.slice(start, ends.length > 0 ? Math.min(...ends) : CODE.length);
 }
 
-/** ケース計算 block（実行コード）。intake の preview 関数の直後から結果表示の関数の終わりまで。 */
+/**
+ * ケース計算 block（実行コード）。intake の preview 関数の直後から結果表示の関数の終わりまで
+ * （その後ろに続く S3-B3A の全ケース計算 block は含めない）。
+ */
 function execCode() {
   const start = CODE.indexOf('\nfunction ', CODE.indexOf('function renderProjectPackPreview(') + 1);
   const end = CODE.indexOf('\nfunction ', CODE.indexOf('function renderProjectPackExecutionResult(') + 1);
+  const batchStart = CODE.indexOf('\nvar PACK_BATCH_MODULE');
+  assert.equal(batchStart > start && batchStart < end, true, '全ケース計算 block がケース計算 block の直後に無い');
   assert.equal(start !== -1 && end > start, true, 'ケース計算 block が無い');
   // block 冒頭の state 宣言（preview 関数の後ろ・最初の関数の前）も含める
   const varStart = CODE.lastIndexOf('var stagedProjectPackExecution', start);
-  return CODE.slice(varStart, end);
+  return CODE.slice(varStart, batchStart);
 }
 
 const EXEC_FUNCTIONS = ['renderProjectPackExecutionStatus', 'clearProjectPackExecution',
@@ -100,8 +106,9 @@ test('P2L-S3B2-U04: 古い結果は、読込開始・読込失敗・解除・選
   assert.match(fnBody('beginProjectPackAttempt'), /renderProjectPackPreview\(null\)/);
   assert.match(fnBody('unloadProjectPack'), /beginProjectPackAttempt\(\)/);
   assert.match(fnBody('renderProjectPackFailure'), /renderProjectPackPreview\(null\)/);
-  assert.match(fnBody('renderProjectPackPreview'), /if \(!ctx\) \{ box\.hidden = true; renderProjectPackExecutionControls\(null\); return; \}/);
-  assert.match(fnBody('renderProjectPackPreview'), /renderProjectPackExecutionControls\(ctx\);/);
+  assert.match(fnBody('renderProjectPackPreview'),
+    /if \(!ctx\) \{ box\.hidden = true; renderProjectPackExecutionControls\(null\); renderProjectPackBatchControls\(null\); return; \}/);
+  assert.match(fnBody('renderProjectPackPreview'), /renderProjectPackExecutionControls\(ctx\);\n  renderProjectPackBatchControls\(ctx\);/);
   const controls = fnBody('renderProjectPackExecutionControls');
   assert.equal(controls.indexOf('clearProjectPackExecution(') < controls.indexOf('if (!ctx)'), true, '選択肢を作る前に消していない');
   assert.match(fnBody('projectPackExecutionCaseChanged'), /clearProjectPackExecution\(/);

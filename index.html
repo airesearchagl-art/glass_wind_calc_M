@@ -449,6 +449,15 @@
   .pack-exec-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .pack-exec-controls label { margin: 0; }
   .pack-exec-controls select { width: auto; min-width: 180px; }
+  .pack-batch-progress { width: 200px; }
+  .pack-batch-progress[hidden] { display: none; }
+  .pack-batch-scroll { overflow-x: auto; }
+  .pack-batch-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .pack-batch-table th, .pack-batch-table td {
+    border-bottom: 1px solid var(--border); padding: 4px 6px; text-align: left; white-space: nowrap;
+  }
+  .pack-batch-table th { color: var(--text3); font-weight: 600; }
+  .pack-batch-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 
   /* 印刷不可の文面は画面には出さない */
   #review-print-blocked { display: none; }
@@ -953,6 +962,26 @@
       <div class="pack-status" id="pack-exec-status" role="status" aria-live="polite"></div>
       <div class="pack-preview" id="pack-exec-result" hidden></div>
     </div>
+    <!-- Project Pack 全ケース計算（Phase 2L-B2 / S3-B3A）: 読み込んだ Pack の全ケースを、ボタンを押したときだけ
+         少しずつ計算する。全ケースがそろったときだけ一覧を出す。結果は未レビューで、この欄の中だけに出す。 -->
+    <div class="pack-exec pack-batch" id="pack-batch" hidden>
+      <h3 class="pack-exec-title">Project Pack 全ケース計算（未レビュー）</h3>
+      <p class="pack-note">
+        読み込んだ Pack の全ケースを計算し、ケースごとの要約を一覧にします。結果は未レビュー（pack_unreviewed）で、
+        計算済み ≠ 検証済みです。全ケースの計算が終わったときだけ一覧を表示し、1 ケースでも計算できなければ
+        一覧を出しません。案件プリセット・入力欄・一括検討・Closure には反映しません。
+        Pack を読み込んだだけでは計算しません。
+      </p>
+      <div class="pack-exec-controls">
+        <button type="button" id="btn-pack-batch" class="btn-secondary"
+          onclick="startProjectPackBatch()" disabled>Pack全ケースを計算（未レビュー）</button>
+        <button type="button" id="btn-pack-batch-cancel" class="btn-secondary"
+          onclick="cancelProjectPackBatch()" disabled>計算をキャンセル</button>
+        <progress id="pack-batch-progress" class="pack-batch-progress" max="1" value="0" hidden></progress>
+      </div>
+      <div class="pack-status" id="pack-batch-status" role="status" aria-live="polite"></div>
+      <div class="pack-preview" id="pack-batch-result" hidden></div>
+    </div>
   </div>
 </section>
 
@@ -1312,6 +1341,7 @@
 <script src="project-config/project-pack.js"></script>
 <script src="project-config/project-context.js"></script>
 <script src="project-config/project-pack-execution.js"></script>
+<script src="project-config/project-pack-batch.js"></script>
 <script src="workspace.js"></script>
 <script src="project-profile.js"></script>
 <script src="review-package.js"></script>
@@ -1857,7 +1887,7 @@ function renderProjectPackPreview(ctx) {
   var box = document.getElementById('pack-preview');
   if (!box) return;
   box.textContent = '';
-  if (!ctx) { box.hidden = true; renderProjectPackExecutionControls(null); return; }
+  if (!ctx) { box.hidden = true; renderProjectPackExecutionControls(null); renderProjectPackBatchControls(null); return; }
   var panes = ProjectContext.requireCapability(ctx, 'declaredPanes').panes;
   var cases = ProjectContext.requireCapability(ctx, 'declaredGlazingCases').glazingCases;
   var claims = ProjectContext.requireCapability(ctx, 'evidenceClaims');
@@ -1907,9 +1937,11 @@ function renderProjectPackPreview(ctx) {
   advisorySection.appendChild(packEl('p', 'advisory は公開面の文言についての注意です。' +
     '0 件でも、公開してよいという判断にはなりません（Human Review が必要です）。', 'pack-note'));
 
-  box.appendChild(packEl('p', 'この preview は計算しません。ケースの計算は下の「選択ケースを計算（未レビュー）」を' +
-    '押したときだけ行い、案件プリセットへは反映しません。Closure判定はこの段階では行いません。', 'pack-note'));
+  box.appendChild(packEl('p', 'この preview は計算しません。ケースの計算は下の「選択ケースを計算（未レビュー）」または' +
+    '「Pack全ケースを計算（未レビュー）」を押したときだけ行い、案件プリセットへは反映しません。' +
+    'Closure判定はこの段階では行いません。', 'pack-note'));
   renderProjectPackExecutionControls(ctx);
+  renderProjectPackBatchControls(ctx);
   box.hidden = false;
 }
 
@@ -2052,6 +2084,284 @@ function renderProjectPackExecutionResult(result) {
   ]);
   box.appendChild(packEl('p', 'OK は計算上の候補判定で、Evidence の確認ではありません。この結果は未レビューの Pack から' +
     '計算したもので、案件プリセット・入力欄・一括検討・Closure には反映しません。', 'pack-note'));
+  box.hidden = false;
+}
+
+/* ============================================================
+   Project Pack 全ケース計算（Phase 2L-B2 / S3-B3A）— 明示操作だけ・全ケースがそろったときだけ・未レビュー
+
+   staged の ProjectContext の全ケースを ProjectPackBatch で計算し、ケースごとの要約の一覧を
+   この欄の中だけに表示する。ProjectPackBatch は 1 ケースずつ ProjectPackExecution.executeCase() を
+   呼ぶだけで、風圧・ガラスの計算を持たない。
+   - 計算は「Pack全ケースを計算（未レビュー）」を押したときだけ。読込・preview・ケースの選択では計算しない。
+   - 渡すのは stagedProjectPackContext（adapter が発行した context）だけ。生の Pack は渡さない。
+   - PROJECT_PACK_BATCH_CHUNK ケースずつ計算し、チャンクの間は setTimeout でイベントループへ戻す
+     （進捗の表示・キャンセル・別の操作が割り込める）。計算途中の行は run の中だけにあり、表示しない。
+   - 各チャンクの前と確定の直前に、run token・projectPackAttempt・staged context の同一性を確かめる。
+     どれかが違えば（キャンセル・新しい計算の開始・Pack の読込開始・読込失敗・解除）その run は捨てる。
+     古い run が後の Pack の画面を書き換えることはない。
+   - 全ケースがそろったときだけ stagedProjectPackBatch に置く。1 ケースでも失敗すれば一覧を出さず、
+     固定文だけを出す（例外の文面は出さない）。Pack は staged のまま残し、選択ケースの計算はそのまま使える。
+   - 計算を始めると選択ケースの計算結果は消す（2 つの結果を取り違えないため）。
+   - 一覧は PROJECT_PACK_BATCH_PAGE_SIZE 行ずつ。ページの切替は確定した結果を表示し直すだけで、計算しない。
+   - 結果は「計算済み」であって「検証済み」ではない。active context・案件プリセット・入力欄・通常の計算・
+     入力 package・一括検討・Closure・Evidence へは流さない。保存・送信しない。
+   - ProjectPackBatch はこの script の初期化時に 1 度だけ掴む（後から global を読み直さない）。
+============================================================ */
+
+var PACK_BATCH_MODULE = (typeof ProjectPackBatch === 'object' && ProjectPackBatch) ? ProjectPackBatch : null;
+var PROJECT_PACK_BATCH_CHUNK = 25;
+var PROJECT_PACK_BATCH_PAGE_SIZE = 50;
+var PROJECT_PACK_BATCH_FAILURE = '一括計算を完了できませんでした。未レビューPackの一括結果は現在ありません。';
+var PROJECT_PACK_BATCH_CANCELLED = '全ケースの計算をキャンセルしました。未レビューPackの一括結果は現在ありません。';
+var PROJECT_PACK_BATCH_ABANDONED = 'Pack が変わったため、全ケースの計算を中止しました。未レビューPackの一括結果は現在ありません。';
+var stagedProjectPackBatch = null;
+var projectPackBatchJob = null;
+var projectPackBatchToken = 0;
+var projectPackBatchPage = 0;
+
+function renderProjectPackBatchStatus(text, isError) {
+  var status = document.getElementById('pack-batch-status');
+  if (!status) return;
+  status.className = isError ? 'pack-status is-error' : 'pack-status';
+  status.textContent = text;
+}
+
+/* 進捗（処理済み / 全体）。total が null なら隠す。 */
+function renderProjectPackBatchProgress(done, total) {
+  var bar = document.getElementById('pack-batch-progress');
+  if (!bar) return;
+  if (total === null) { bar.hidden = true; bar.max = 1; bar.value = 0; return; }
+  bar.max = total > 0 ? total : 1;
+  bar.value = done;
+  bar.hidden = false;
+}
+
+/* 一覧と進行中の run を捨てる（state と表示の両方）。token が変わるので、進行中の run は以後何もしない。 */
+function clearProjectPackBatch(statusText, isError) {
+  projectPackBatchToken += 1;
+  if (projectPackBatchJob) projectPackBatchJob.run.cancel();
+  projectPackBatchJob = null;
+  stagedProjectPackBatch = null;
+  projectPackBatchPage = 0;
+  var box = document.getElementById('pack-batch-result');
+  if (box) { box.textContent = ''; box.hidden = true; }
+  renderProjectPackBatchProgress(0, null);
+  var cancel = document.getElementById('btn-pack-batch-cancel');
+  if (cancel) cancel.disabled = true;
+  renderProjectPackBatchStatus(statusText || '', isError === true);
+}
+
+/* staged context に合わせて欄を開閉する。ctx が null なら閉じる。どちらでも一覧と進行中の run は捨てる。 */
+function renderProjectPackBatchControls(ctx) {
+  clearProjectPackBatch('');
+  var section = document.getElementById('pack-batch');
+  var start = document.getElementById('btn-pack-batch');
+  if (!ctx) {
+    if (start) start.disabled = true;
+    if (section) section.hidden = true;
+    return;
+  }
+  if (start) start.disabled = !PACK_BATCH_MODULE;
+  if (section) section.hidden = false;
+  renderProjectPackBatchStatus('全ケースの計算は「Pack全ケースを計算（未レビュー）」を押したときだけ行います。', false);
+}
+
+/* この run がまだ有効か（token・試行・staged context の同一性）。 */
+function projectPackBatchIsCurrent(job) {
+  return job !== null && job === projectPackBatchJob && job.token === projectPackBatchToken &&
+    job.attempt === projectPackAttempt && job.ctx === stagedProjectPackContext;
+}
+
+/* 次のチャンクはイベントループへ戻ってから（入力・描画・キャンセルが割り込める）。 */
+function projectPackBatchYield(next) {
+  setTimeout(next, 0);
+}
+
+function startProjectPackBatch() {
+  clearProjectPackBatch('');
+  if (stagedProjectPackExecution) clearProjectPackExecution('全ケースの計算を始めたので、選択ケースの計算結果を消しました。');
+  var ctx = stagedProjectPackContext;
+  var job;
+  try {
+    if (!ctx || !PACK_BATCH_MODULE) throw new Error('no staged Project Pack');
+    job = { token: projectPackBatchToken, attempt: projectPackAttempt, ctx: ctx,
+      run: PACK_BATCH_MODULE.createBatchRun(ctx) };
+  } catch (e) {
+    clearProjectPackBatch(PROJECT_PACK_BATCH_FAILURE, true);
+    return false;
+  }
+  projectPackBatchJob = job;
+  var cancel = document.getElementById('btn-pack-batch-cancel');
+  if (cancel) cancel.disabled = false;
+  renderProjectPackBatchProgress(0, job.run.total);
+  renderProjectPackBatchStatus('計算中… 0 / ' + job.run.total + ' ケース（未レビュー）', false);
+  projectPackBatchYield(function () { stepProjectPackBatch(job); });
+  return true;
+}
+
+function cancelProjectPackBatch() {
+  if (!projectPackBatchJob) return false;
+  clearProjectPackBatch(PROJECT_PACK_BATCH_CANCELLED, false);
+  return true;
+}
+
+/* 古くなった run を捨てる。まだこの run が欄を持っていれば（token は同じで試行か context が違う）片付ける。 */
+function abandonProjectPackBatch(job) {
+  if (job !== projectPackBatchJob) { job.run.cancel(); return; }
+  clearProjectPackBatch(PROJECT_PACK_BATCH_ABANDONED, false);
+}
+
+/* 1 ケースでも失敗したら一覧を出さない（途中までの行も出さない）。この run が欄を持っているときだけ表示する。 */
+function failProjectPackBatch(job) {
+  if (job !== projectPackBatchJob) { job.run.cancel(); return; }
+  clearProjectPackBatch(PROJECT_PACK_BATCH_FAILURE, true);
+}
+
+function stepProjectPackBatch(job) {
+  if (!projectPackBatchIsCurrent(job)) { abandonProjectPackBatch(job); return; }
+  var done;
+  try {
+    done = job.run.nextChunk(PROJECT_PACK_BATCH_CHUNK);
+  } catch (e) {
+    failProjectPackBatch(job);
+    return;
+  }
+  if (!job.run.isDone()) {
+    renderProjectPackBatchProgress(done, job.run.total);
+    renderProjectPackBatchStatus('計算中… ' + done + ' / ' + job.run.total + ' ケース（未レビュー）', false);
+    projectPackBatchYield(function () { stepProjectPackBatch(job); });
+    return;
+  }
+  var result;
+  try {
+    result = job.run.finish();
+    PACK_BATCH_MODULE.assertBatchResult(result);
+    if (result.trust !== 'pack_unreviewed') throw new Error('unexpected trust');
+    if (result.totalCases !== job.run.total || result.rows.length !== job.run.total) throw new Error('incomplete');
+  } catch (e) {
+    failProjectPackBatch(job);
+    return;
+  }
+  // 確定の直前にもう一度確かめる（finish の間に解除・読込・キャンセルがあれば捨てる）
+  if (!projectPackBatchIsCurrent(job)) { abandonProjectPackBatch(job); return; }
+  try {
+    renderProjectPackBatchResult(result, 0);
+  } catch (e) {
+    failProjectPackBatch(job);
+    return;
+  }
+  projectPackBatchJob = null;
+  stagedProjectPackBatch = result;
+  var cancel = document.getElementById('btn-pack-batch-cancel');
+  if (cancel) cancel.disabled = true;
+  renderProjectPackBatchProgress(result.executedCases, result.totalCases);
+  renderProjectPackBatchStatus('全 ' + result.totalCases + ' ケースを計算しました（未レビュー。計算済み ≠ 検証済み）。', false);
+}
+
+/* ページの切替。確定した一覧を表示し直すだけで、計算しない。 */
+function showProjectPackBatchPage(page) {
+  if (!stagedProjectPackBatch) return false;
+  renderProjectPackBatchResult(stagedProjectPackBatch, page);
+  return true;
+}
+
+function packBatchNumber(value) {
+  return value.toFixed(1);
+}
+
+/* 階・部位は Pack にあるものだけ（無いものは作らない）。 */
+function packBatchPlaceText(row) {
+  var parts = [];
+  if (Object.prototype.hasOwnProperty.call(row, 'floor')) parts.push(floorDisplayLabel(row.floor));
+  if (Object.prototype.hasOwnProperty.call(row, 'zone')) parts.push(packZoneText(row.zone));
+  return parts.length > 0 ? parts.join(' / ') : '—';
+}
+
+/* 設計風圧の出どころ。結果の行にある値だけを出す（case_direct は正圧・負圧に分けない）。 */
+function packBatchPressureText(pressureMode, p) {
+  if (pressureMode === 'notification1458') {
+    return '正圧 ' + packBatchNumber(p.positivePressure) + ' / 負圧 ' + packBatchNumber(p.negativePressure) +
+      '（評価高さ ' + p.evaluationHeightM + ' m）';
+  }
+  if (pressureMode === 'project_pressure_map') {
+    return '正圧 ' + packBatchNumber(p.positivePressure) + ' / 負圧（絶対値） ' + packBatchNumber(p.negativePressureMagnitude);
+  }
+  return 'Packが宣言した設計風圧';
+}
+
+function packBatchCell(tr, tag, text, className) {
+  tr.appendChild(packEl(tag, text, className));
+}
+
+/* 一覧の表示（textContent のみ）。値は確定した結果 object からだけ読む。 */
+function renderProjectPackBatchResult(result, page) {
+  var box = document.getElementById('pack-batch-result');
+  if (!box) return;
+  box.textContent = '';
+  var size = PROJECT_PACK_BATCH_PAGE_SIZE;
+  var pages = Math.max(1, Math.ceil(result.rows.length / size));
+  var current = Math.min(Math.max(0, Math.floor(page) || 0), pages - 1);
+  var from = current * size;
+  var rows = result.rows.slice(from, from + size);
+  var noCandidate = result.rows.filter(function (r) { return r.bestCandidate === null; }).length;
+  packSection(box, '未レビューの一括計算結果', [
+    'trust: ' + result.trust + '（未レビュー）— 計算済み ≠ 検証済み',
+    '公開表示名: ' + result.publicLabel,
+    'pressureModel.mode: ' + result.pressureMode,
+    '計算したケース: ' + result.executedCases + ' / ' + result.totalCases,
+    'OK の候補が無いケース: ' + noCandidate
+  ]);
+
+  var nav = packEl('div', null, 'pack-exec-controls');
+  var prev = packEl('button', '前のページ', 'btn-secondary');
+  prev.type = 'button';
+  prev.disabled = current === 0;
+  prev.onclick = function () { showProjectPackBatchPage(current - 1); };
+  var next = packEl('button', '次のページ', 'btn-secondary');
+  next.type = 'button';
+  next.disabled = current >= pages - 1;
+  next.onclick = function () { showProjectPackBatchPage(current + 1); };
+  nav.appendChild(prev);
+  nav.appendChild(next);
+  nav.appendChild(packEl('span', (rows.length > 0 ? (from + 1) + '–' + (from + rows.length) : '0') + ' / ' +
+    result.totalCases + ' ケース（' + (current + 1) + ' / ' + pages + ' ページ）', 'batch-count'));
+  box.appendChild(nav);
+
+  var showPlace = result.rows.some(function (r) {
+    return Object.prototype.hasOwnProperty.call(r, 'floor') || Object.prototype.hasOwnProperty.call(r, 'zone');
+  });
+  var table = packEl('table', null, 'pack-batch-table');
+  var head = packEl('tr');
+  ['ケース', 'Pane'].concat(showPlace ? ['階/部位'] : [])
+    .concat(['寸法 W×H mm', 'ガラス', '設計風圧 N/m²', '風圧の内訳 N/m²', '推奨候補', '許容風圧 N/m²',
+      '候補数 OK/NG/適用範囲外'])
+    .forEach(function (h) { packBatchCell(head, 'th', h); });
+  var thead = packEl('thead');
+  thead.appendChild(head);
+  table.appendChild(thead);
+  var tbody = packEl('tbody');
+  rows.forEach(function (r) {
+    var tr = packEl('tr');
+    packBatchCell(tr, 'td', r.caseId);
+    packBatchCell(tr, 'td', r.paneId);
+    if (showPlace) packBatchCell(tr, 'td', packBatchPlaceText(r));
+    packBatchCell(tr, 'td', r.widthMm + ' × ' + r.heightMm, 'num');
+    packBatchCell(tr, 'td', r.glassType);
+    packBatchCell(tr, 'td', packBatchNumber(r.designPressure), 'num');
+    packBatchCell(tr, 'td', packBatchPressureText(result.pressureMode, r.pressure));
+    packBatchCell(tr, 'td', r.bestCandidate ? r.bestCandidate.label : '候補なし');
+    packBatchCell(tr, 'td', r.bestCandidate ? packBatchNumber(r.bestCandidate.P) : '—', 'num');
+    packBatchCell(tr, 'td', r.okCount + ' / ' + r.ngCount + ' / ' + r.outOfScopeCount, 'num');
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  var scroll = packEl('div', null, 'pack-batch-scroll');
+  scroll.appendChild(table);
+  box.appendChild(scroll);
+  box.appendChild(packEl('p', 'OK は計算上の候補判定で、Evidence の確認ではありません。この一覧は未レビューの Pack から' +
+    '計算したもので、案件プリセット・入力欄・一括検討・Closure には反映しません。', 'pack-note'));
+  projectPackBatchPage = current;
   box.hidden = false;
 }
 
