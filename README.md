@@ -1110,8 +1110,11 @@ ProjectContext（fromProjectPack が発行したものだけ）
   0 件・複数件・単位違いは失敗で、先頭の行・先頭の pane・別の case へは fallback しません。
 - 入力 package（`ProjectInput`）・Closure・出典の申告（evidenceClaims）・active context・DOM・保存・通信を参照しません
   （静的に固定）。`ProjectInput.SOURCE_KINDS`（4 種）と `SCHEMA_VERSION`（2）は変えていません。
-- 依存（ProjectContext・WindPressure・GlassCalc）は最初の呼び出しで解決します。ProjectContext を読み込めない page でも
-  この module の読み込みで page が止まることはなく、呼び出しが失敗します（画面は固定文の失敗表示）。
+- 依存（ProjectContext・WindPressure・GlassCalc）は **module の初期化時に 1 度だけ**掴み、後から global を読み直しません。
+  ProjectContext は trust の境界、WindPressure / GlassCalc は計算の境界なので、初期化後に差し替えられた・後から現れた
+  global には決めさせません。初期化時に無かった依存はその module instance では使えないままで（後から本物を読み込んでも
+  同じ）、呼び出しが fail closed になります。読み込み自体は失敗しないので、ProjectContext を読み込めない page でも
+  他の mode は動きます（画面は固定文の失敗表示）。
 
 ### 風圧の解決（mode ごと）
 

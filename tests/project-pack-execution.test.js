@@ -471,9 +471,132 @@ test('P2L-S3B2-E20: ProjectContext が無い page でも読み込みは止まら
   assert.throws(() => E.executeCase({ sourceKind: 'project_pack_unreviewed', trust: 'pack_unreviewed' }, 'G001'),
     /project-context\.js is required but not available/);
   assert.throws(() => E.listCaseIds({}), /project-context\.js is required but not available/);
-  // trust の規則が食い違う ProjectContext では使わない
-  vm.runInContext('var ProjectContext = { TRUST_BY_SOURCE_KIND: { project_pack_unreviewed: "verified" } };', sandbox);
-  assert.throws(() => E.executeCase({}, 'G001'), /trust for project_pack_unreviewed is not pack_unreviewed/);
   // 公開している定数は凍結されている
   assert.equal(Object.isFrozen(E) && Object.isFrozen(E.UNITS) && Object.isFrozen(E.FORBIDDEN_KEYS), true);
+  // trust の規則が食い違う ProjectContext を初期化時に掴んだ場合も使わない
+  const mismatch = {};
+  vm.createContext(mismatch);
+  ['project-config/evidence.js', 'wind-pressure.js', 'calc.js'].forEach((rel) =>
+    vm.runInContext(read(rel), mismatch, { filename: rel }));
+  vm.runInContext('var ProjectContext = { TRUST_BY_SOURCE_KIND: { project_pack_unreviewed: "verified" } };', mismatch);
+  vm.runInContext(EXEC_SRC, mismatch, { filename: EXEC_SRC_REL });
+  assert.throws(() => mismatch.ProjectPackExecution.executeCase({}, 'G001'), /trust for project_pack_unreviewed is not pack_unreviewed/);
+});
+
+/* ============================================================
+   RF-22-01: 依存は初期化時に 1 度だけ掴み、後から global を読み直さない
+============================================================ */
+
+/** index.html と同じ順で本物の module を vm に読み込む（skip した module は読まない）。 */
+const PAGE_ORDER = ['calc.js', 'wind-pressure.js', 'project-config/evidence.js', 'project-config/evidence-ledger.js',
+  'project-config/sample.js', 'project-config/manual.js', 'project-config/registry.js',
+  'project-config/evidence-closure.js', 'project-config/project-input.js', 'project-config/project-pack.js',
+  'project-config/project-context.js', EXEC_SRC_REL];
+function pageSandbox(options) {
+  const opts = options || {};
+  const sandbox = {};
+  vm.createContext(sandbox);
+  PAGE_ORDER.forEach((rel) => {
+    if ((opts.skip || []).includes(rel)) return;
+    if (rel === EXEC_SRC_REL && opts.beforeExecutor) opts.beforeExecutor(sandbox);
+    vm.runInContext(read(rel), sandbox, { filename: rel });
+  });
+  sandbox.__ctx = (mode) => vm.runInContext('ProjectContext.fromProjectPack(ProjectPack.validateProjectPack(' +
+    JSON.stringify(rawPack(mode)) + '))', sandbox);
+  return sandbox;
+}
+const plain = (r) => JSON.parse(JSON.stringify(r));
+const GENUINE = {
+  notification1458: plain(Exec.executeCase(ctx('notification1458'), 'G002')),
+  project_pressure_map: plain(Exec.executeCase(ctx('project_pressure_map'), 'G002')),
+  case_direct: plain(Exec.executeCase(ctx('case_direct'), 'G002'))
+};
+
+test('P2L-S3B2-D0: 依存の解決は初期化時の 3 回だけで、呼び出し時に global・require を読まない（静的）', () => {
+  assert.equal((EXEC_CODE.match(/captureDependency\(/g) || []).length, 4, 'captureDependency の定義 + 初期化時の 3 回');
+  ['ProjectContext', 'WindPressure', 'GlassCalc'].forEach((name) =>
+    assert.match(EXEC_CODE, new RegExp("var CAPTURED_\\w+ = captureDependency\\('" + name + "'")));
+  const start = EXEC_CODE.indexOf('function requireDependencies(');
+  const body = EXEC_CODE.slice(start, EXEC_CODE.indexOf('\n  }\n', start));
+  assert.equal(/global|captureDependency|require\(|resolveDependency/.test(body), false,
+    'requireDependencies が global・require を読み直している');
+  // global を読むのは captureDependency の中だけ
+  const outside = EXEC_CODE.replace(/function captureDependency\([\s\S]*?\n  \}\n/, '');
+  assert.equal(/global\s*\[|global\.(ProjectContext|WindPressure|GlassCalc)/.test(outside), false);
+});
+
+test('P2L-S3B2-D1: 初期化後に ProjectContext の global を差し替えても、掴んだ本物を使い偽物は呼ばれない', () => {
+  const sb = pageSandbox();
+  const genuineCtx = sb.__ctx('notification1458');
+  let consulted = 0;
+  const decoy = new Proxy({}, { get: (t, k) => { consulted++; return k === 'TRUST_BY_SOURCE_KIND'
+    ? { project_pack_unreviewed: 'pack_unreviewed' } : () => { throw new Error('DECOY ProjectContext'); }; } });
+  sb.ProjectContext = decoy;
+  assert.equal(vm.runInContext('ProjectContext', sb), decoy, '前提: 差し替えが vm の中から見える');
+  const r = sb.ProjectPackExecution.executeCase(genuineCtx, 'G002');
+  assert.deepEqual(plain(r), GENUINE.notification1458);
+  assert.equal(consulted, 0, '差し替えた ProjectContext が参照された');
+  // 偽の context は、掴んだ本物の gate で拒否される
+  assert.throws(() => sb.ProjectPackExecution.executeCase(JSON.parse(JSON.stringify(genuineCtx)), 'G002'), /ProjectContext/);
+});
+
+test('P2L-S3B2-D2: 初期化後に WindPressure を差し替えても、告示の結果は本物の風圧と同一で偽の値は出ない', () => {
+  const sb = pageSandbox();
+  const genuineCtx = sb.__ctx('notification1458');
+  let calls = 0;
+  const decoy = { calculateWindPressure: () => { calls++;
+    return { positive: { pressure: 31415926.5 }, negative: { pressure: -27182818.5 }, designPressure: 31415926.5,
+      inputs: { decoy: 'DECOY-WIND' }, normalized: {}, geometry: null, trace: [] }; } };
+  sb.WindPressure = decoy;
+  assert.equal(vm.runInContext('WindPressure', sb), decoy, '前提: 差し替えが vm の中から見える');
+  const r = sb.ProjectPackExecution.executeCase(genuineCtx, 'G002');
+  assert.deepEqual(plain(r), GENUINE.notification1458);
+  assert.equal(calls, 0, '差し替えた WindPressure が呼ばれた');
+  assert.equal(/31415926|27182818|DECOY-WIND/.test(JSON.stringify(r)), false);
+});
+
+test('P2L-S3B2-D3: 初期化後に GlassCalc を差し替えても、候補と件数は掴んだ本物のまま', () => {
+  const sb = pageSandbox();
+  const genuineCtx = sb.__ctx('project_pressure_map');
+  let calls = 0;
+  const decoyCandidate = { label: 'DECOY-GLASS', t_max: 1, t_total: 1, P: 123456, status: 'ok', outOfScope: false, detail: {} };
+  const decoyGlass = { GLASS_TYPES: { tp_single: {} },
+    paneAreaM2: () => { calls++; return 42; },
+    generateCandidates: () => { calls++; return [decoyCandidate]; },
+    splitCandidates: () => { calls++; return { okCandidates: [decoyCandidate], ngCandidates: [], outOfScopeCandidates: [] }; },
+    sortCandidates: () => { calls++; return [decoyCandidate]; } };
+  sb.GlassCalc = decoyGlass;
+  assert.equal(vm.runInContext('GlassCalc', sb), decoyGlass, '前提: 差し替えが vm の中から見える');
+  const r = sb.ProjectPackExecution.executeCase(genuineCtx, 'G002');
+  assert.deepEqual(plain(r), GENUINE.project_pressure_map);
+  assert.equal(calls, 0, '差し替えた GlassCalc が呼ばれた');
+  assert.equal(r.calculation.bestCandidate.label, PINNED.mapG002.best.label);
+  assert.equal(JSON.stringify(r).includes('DECOY-GLASS'), false);
+});
+
+test('P2L-S3B2-D4: 初期化時に ProjectContext が無ければ、後から現れた global（本物でも偽物でも）を使わない', () => {
+  // 本物の project-context.js を executor の後で読み込む: staged context は作れるが、executor は使えないまま
+  const sb = pageSandbox({ skip: ['project-config/project-context.js'] });
+  assert.equal(sb.ProjectContext, undefined, '前提: 初期化時に ProjectContext は無い');
+  vm.runInContext(read('project-config/project-context.js'), sb, { filename: 'project-context.js (late)' });
+  const lateCtx = sb.__ctx('case_direct');
+  assert.equal(sb.ProjectContext.isProjectContext(lateCtx), true, '前提: 後から読んだ本物の context');
+  assert.throws(() => sb.ProjectPackExecution.executeCase(lateCtx, 'G002'), /project-context\.js is required but not available/);
+  assert.throws(() => sb.ProjectPackExecution.listCaseIds(lateCtx), /project-context\.js is required but not available/);
+  // 本物らしく振る舞う偽物を置いても同じ
+  sb.ProjectContext = { TRUST_BY_SOURCE_KIND: { project_pack_unreviewed: 'pack_unreviewed' },
+    PRESSURE_CAPABILITY_BY_MODE: { case_direct: 'caseDirectPressure' },
+    assertProjectContext: (c) => c, requireCapability: (c, n) => c.capabilities[n] };
+  assert.throws(() => sb.ProjectPackExecution.executeCase(lateCtx, 'G002'), /project-context\.js is required but not available/);
+});
+
+test('P2L-S3B2-D5: 初期化時に WindPressure / GlassCalc が無ければ、この module instance では使えないまま', () => {
+  [['WindPressure', 'wind-pressure.js'], ['GlassCalc', 'calc.js']].forEach(([name, file]) => {
+    // vm の global からの削除は vm の中で行う（sandbox object 経由の delete は vm の global に届かない）
+    const sb = pageSandbox({ beforeExecutor: (s) => vm.runInContext('globalThis.__saved = ' + name + '; delete globalThis.' + name + ';', s) });
+    vm.runInContext('globalThis.' + name + ' = globalThis.__saved;', sb);   // 初期化の後で本物を戻しても
+    assert.equal(typeof vm.runInContext(name, sb), 'object', '前提: 戻した ' + name + ' が見える');
+    const c = sb.__ctx('case_direct');
+    assert.throws(() => sb.ProjectPackExecution.executeCase(c, 'G002'), new RegExp(file.replace('.', '\\.') + ' is required but not available'), name);
+  });
 });

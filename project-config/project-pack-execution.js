@@ -40,8 +40,8 @@
  *
  * 静的HTML/JS構成・ビルド不要という制約を維持するため、UMD形式のプレーンJSとして
  * 提供する（<script src> と require() の両対応）。ブラウザでは calc.js・wind-pressure.js・
- * project-config/project-context.js の後に読み込むこと。依存は最初の呼び出しで解決するので、
- * それらが読み込めない page でも読み込み自体は失敗しない（呼び出しが失敗する）。
+ * project-config/project-context.js の後に読み込むこと。依存は初期化の時点で 1 度だけ掴み、
+ * 後から global を読み直さない。それらが無い page でも読み込み自体は失敗せず、呼び出しが失敗する。
  */
 (function (global, factory) {
   var mod = factory(global);
@@ -54,37 +54,57 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function (global) {
   'use strict';
 
-  function resolveDependency(globalName, requirePath, label) {
-    if (global && global[globalName]) {
-      return global[globalName];
+  /**
+   * 依存は、この module を初期化した時点で読み込まれている instance を 1 度だけ掴む
+   * （browser では先に読み込まれた global、Node では require()）。無ければ null を持つだけで、
+   * 読み込み自体は失敗させない。
+   *
+   * 掴んだ後は global を読み直さない。ProjectContext は trust の境界、WindPressure / GlassCalc は
+   * 計算の境界であり、最初の呼び出しの時点でたまたま global にある object（後から差し替えられた
+   * もの・後から現れたもの）にそれを決めさせない。初期化時に無かった依存は、この module instance
+   * では最後まで使えない（呼び出しが fail closed になる）。
+   */
+  function captureDependency(globalName, requirePath) {
+    try {
+      if (global && global[globalName]) return global[globalName];
+    } catch (e) {
+      return null;
     }
     if (typeof require === 'function') {
       try {
         return require(requirePath);
       } catch (e) {
-        /* fallthrough */
+        /* unavailable */
       }
     }
-    throw new Error('project-pack-execution.js: ' + label + ' is required but not available');
+    return null;
   }
 
-  // 依存は呼ばれたときに解決する。読み込みの時点では例外を投げない: ProjectContext などが
-  // 読み込めない page でも、この module のせいで page 全体が止まらないようにする
-  // （そのときは呼び出しが失敗し、画面は固定文の失敗表示になる。fail closed は変わらない）。
+  var CAPTURED_CONTEXT = captureDependency('ProjectContext', './project-context.js');
+  var CAPTURED_WIND = captureDependency('WindPressure', '../wind-pressure.js');
+  var CAPTURED_GLASS = captureDependency('GlassCalc', '../calc.js');
+
   var Context, Wind, Glass;
   var dependenciesReady = false;
+
+  function unavailable(label) {
+    return new Error('project-pack-execution.js: ' + label + ' is required but not available ' +
+      '(it was not loaded when this module was initialised)');
+  }
+
+  /** 初期化時に掴んだ依存だけを使う。無ければ fail closed（後から現れた global へ fallback しない）。 */
   function requireDependencies() {
     if (dependenciesReady) return;
-    var context = resolveDependency('ProjectContext', './project-context.js', 'project-config/project-context.js');
-    var wind = resolveDependency('WindPressure', '../wind-pressure.js', 'wind-pressure.js');
-    var glass = resolveDependency('GlassCalc', '../calc.js', 'calc.js');
+    if (!CAPTURED_CONTEXT) throw unavailable('project-config/project-context.js');
+    if (!CAPTURED_WIND) throw unavailable('wind-pressure.js');
+    if (!CAPTURED_GLASS) throw unavailable('calc.js');
     // trust は ProjectContext の規則（sourceKind からだけ決まる）と一致していなければ使わない
-    if (!context.TRUST_BY_SOURCE_KIND || context.TRUST_BY_SOURCE_KIND[SOURCE_KIND] !== TRUST) {
+    if (!CAPTURED_CONTEXT.TRUST_BY_SOURCE_KIND || CAPTURED_CONTEXT.TRUST_BY_SOURCE_KIND[SOURCE_KIND] !== TRUST) {
       throw new Error('project-pack-execution.js: ProjectContext trust for ' + SOURCE_KIND + ' is not ' + TRUST);
     }
-    Context = context;
-    Wind = wind;
-    Glass = glass;
+    Context = CAPTURED_CONTEXT;
+    Wind = CAPTURED_WIND;
+    Glass = CAPTURED_GLASS;
     dependenciesReady = true;
   }
 

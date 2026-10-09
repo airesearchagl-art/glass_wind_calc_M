@@ -17,6 +17,8 @@ import { openBrowser, finishRun } from './harness.mjs';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 const REPO = fileURLToPath(new URL('../../', import.meta.url));
 const require = createRequire(import.meta.url);
@@ -354,6 +356,116 @@ const panel = await page.evaluate(() => document.getElementById('project-pack-se
 const strongPanel = panel.replace(/計算済み ≠ 検証済み/g, '');
 check('E13-wording', !STRONG_WORDING.test(strongPanel) && !/検証済/.test(strongPanel),
   (strongPanel.match(STRONG_WORDING) || ['none'])[0]);
+
+/* ---------- RF-22-01: 依存は初期化時に掴む（後から差し替え・追加された global を使わない） ----------
+   各 scenario は新しい page で、差し替えの後に「その page で最初の」計算を行う。偽物はわざと違う値を返す。 */
+
+async function freshPage(url) {
+  const p = await browser.newPage();
+  const errors = [];
+  p.on('pageerror', (e) => errors.push(e.message));
+  await p.goto(url || FILE);
+  await p.waitForTimeout(300);
+  return { p, errors };
+}
+async function freshPaste(p, text) {
+  await p.evaluate((t) => { document.getElementById('pack-paste').value = t; }, text);
+  await p.click('#btn-pack-load');
+  await p.waitForTimeout(50);
+}
+async function freshExecute(p, caseId) {
+  await p.selectOption('#pack-exec-case', caseId);
+  await p.click('#btn-pack-exec');
+  await p.waitForTimeout(50);
+  return p.evaluate(() => ({
+    hasResult: !!window.stagedProjectPackExecution,
+    rows: [...document.querySelectorAll('#pack-exec-result li')].map((li) => li.textContent),
+    text: document.getElementById('pack-exec-result').innerText,
+    status: document.getElementById('pack-exec-status').textContent,
+    packStaged: !!window.stagedProjectPackContext,
+    hits: window.__decoyHits || 0
+  }));
+}
+const missingRows = (rows, mode) => EXPECT[mode].filter((r) => !rows.includes(r));
+
+// D1: ProjectContext を初期化後・最初の計算前に差し替える
+{
+  const { p, errors } = await freshPage();
+  await freshPaste(p, fixtureText('notification1458'));
+  await p.evaluate(() => {
+    window.__decoyHits = 0;
+    window.ProjectContext = new Proxy({}, { get: (t, k) => { window.__decoyHits++;
+      return k === 'TRUST_BY_SOURCE_KIND' ? { project_pack_unreviewed: 'pack_unreviewed' }
+        : () => { throw new Error('DECOY ProjectContext'); }; } });
+  });
+  const d1 = await freshExecute(p, 'G002');
+  const miss = missingRows(d1.rows, 'notification1458');
+  check('D1-context-decoy', d1.hasResult && miss.length === 0 && d1.hits === 0 && errors.length === 0,
+    `missing=${miss.length} decoy hits=${d1.hits} errors=${errors.length}`);
+  await p.close();
+}
+
+// D2: WindPressure を差し替える（偽物は桁違いの風圧を返す）
+{
+  const { p, errors } = await freshPage();
+  await freshPaste(p, fixtureText('notification1458'));
+  await p.evaluate(() => {
+    window.__decoyHits = 0;
+    window.WindPressure = { calculateWindPressure: () => { window.__decoyHits++;
+      return { positive: { pressure: 31415926.5 }, negative: { pressure: -27182818.5 }, designPressure: 31415926.5,
+        inputs: {}, normalized: {}, geometry: null, trace: [] }; } };
+  });
+  const d2 = await freshExecute(p, 'G002');
+  const miss = missingRows(d2.rows, 'notification1458');
+  check('D2-wind-decoy', d2.hasResult && miss.length === 0 && d2.hits === 0 && !/31415926|27182818/.test(d2.text) &&
+    errors.length === 0, `missing=${miss.length} decoy hits=${d2.hits}`);
+  await p.close();
+}
+
+// D3: GlassCalc を差し替える（偽物は存在しない候補を返す）
+{
+  const { p, errors } = await freshPage();
+  await freshPaste(p, fixtureText('project_pressure_map'));
+  await p.evaluate(() => {
+    window.__decoyHits = 0;
+    const cand = { label: 'DECOY-GLASS', t_max: 1, t_total: 1, P: 123456, status: 'ok', outOfScope: false, detail: {} };
+    const hit = (v) => () => { window.__decoyHits++; return v; };
+    window.GlassCalc = { GLASS_TYPES: { tp_single: {} }, paneAreaM2: hit(42), generateCandidates: hit([cand]),
+      splitCandidates: hit({ okCandidates: [cand], ngCandidates: [], outOfScopeCandidates: [] }), sortCandidates: hit([cand]) };
+  });
+  const d3 = await freshExecute(p, 'G002');
+  const miss = missingRows(d3.rows, 'project_pressure_map');
+  check('D3-glass-decoy', d3.hasResult && miss.length === 0 && d3.hits === 0 && !d3.text.includes('DECOY-GLASS') &&
+    errors.length === 0, `missing=${miss.length} decoy hits=${d3.hits}`);
+  await p.close();
+}
+
+// D4: 初期化時に ProjectContext が無い tree。後から本物（さらに偽物）を置いても executor は使えないまま
+{
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pack-exec-d4-'));
+  fs.cpSync(REPO, dir, { recursive: true, filter: (src) => !/[\\/](\.git|node_modules)([\\/]|$)/.test(src.slice(REPO.length - 1)) });
+  fs.writeFileSync(path.join(dir, 'project-config', 'project-context.js'),
+    '/* intentionally empty: ProjectContext is unavailable when the executor initialises */\n');
+  const { p, errors } = await freshPage('file://' + dir + '/index.html');
+  const boot = await p.evaluate(() => ({ ctx: typeof window.ProjectContext, exec: typeof window.ProjectPackExecution }));
+  check('D4-boot', boot.ctx === 'undefined' && boot.exec === 'object' && errors.length === 0,
+    `ProjectContext=${boot.ctx} executor=${boot.exec} page errors=${errors.length}`);
+  // 本物の project-context.js を executor の後で読み込む: staged context は作れる
+  await p.addScriptTag({ path: path.join(REPO, 'project-config', 'project-context.js') });
+  await freshPaste(p, fixtureText('case_direct'));
+  const d4 = await freshExecute(p, 'G002');
+  check('D4-late-genuine-not-used', d4.packStaged && !d4.hasResult && d4.status === FAILURE_TEXT && d4.rows.length === 0,
+    `staged=${d4.packStaged} result=${d4.hasResult} status=${d4.status}`);
+  // 本物らしく振る舞う偽物でも同じ
+  await p.evaluate(() => {
+    window.ProjectContext = Object.assign({}, window.ProjectContext, { assertProjectContext: (c) => c });
+  });
+  const d4b = await freshExecute(p, 'G002');
+  check('D4-late-fake-not-used', !d4b.hasResult && d4b.status === FAILURE_TEXT, d4b.status);
+  check('D4-no-page-error', errors.length === 0, JSON.stringify(errors.slice(0, 2)));
+  await p.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+}
 
 console.log(results.join('\n'));
 await browser.close();

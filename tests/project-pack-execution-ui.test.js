@@ -353,8 +353,10 @@ test('P2L-S3B2-U14: browser harness は登録され、Pack の検証器・adapte
   const src = read('tools/browser-checks/project-pack-execution.mjs');
   assert.match(src, /openBrowser\(/);
   assert.match(src, /finishRun\(/);
-  assert.equal(/validateProjectPack|fromProjectPack|project-pack\.js|project-context\.js|project-pack-execution\.js|executeCase\(/.test(src), false,
+  // Node 側で検証器・adapter・executor を読み込んだり呼んだりしない（page へ本物を注入する D4 は除く）
+  assert.equal(/validateProjectPack|fromProjectPack|executeCase\(|require\([^)]*(project-pack|project-context|project-pack-execution)/.test(src), false,
     'harness が Pack の検証器・adapter・executor を使っている（新しい trust 経路）');
+  assert.equal(/import[^;]*(project-pack|project-context)/.test(src), false);
   // 期待値は fixture と、Node で直接呼ぶ風圧・ガラスの計算から作る
   assert.match(src, /require\(REPO \+ 'wind-pressure\.js'\)/);
   assert.match(src, /require\(REPO \+ 'calc\.js'\)/);
