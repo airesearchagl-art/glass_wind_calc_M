@@ -1139,7 +1139,7 @@ ProjectContext（fromProjectPack が発行したものだけ）
 ### 画面
 
 - Pack を読み込むと、ケースの選択肢（caseId と paneId だけ）と「選択ケースを計算（未レビュー）」が出ます。**読み込んだだけでは
-  計算しません。** 1 回の操作で 1 ケースだけです（全ケースの一括実行はありません）。
+  計算しません。** 1 回の操作で 1 ケースだけです（全ケースの計算は下の S3-B3A の「Pack全ケースを計算（未レビュー）」です）。
 - 結果は「Project Pack ケース計算（未レビュー）」の中に、trust・計算済み ≠ 検証済み・公開表示名・caseId / paneId・W × H・
   glassType・mode・designPressure・mode ごとの内訳（告示: 正圧 / 負圧 / 評価高さ / 階 / 部位、map: 正圧 / 負圧の絶対値 / 階 / 部位、
   case_direct: designPressure だけ）・推奨候補と許容風圧・OK / NG / 適用範囲外の件数を表示します。
@@ -1157,6 +1157,72 @@ ProjectContext（fromProjectPack が発行したものだけ）
   active へ流さない・文言、および index.html の block を vm で動かす挙動）。
 - 実ブラウザ: `node tools/browser-checks/project-pack-execution.mjs`（UI だけを操作し、harness 側では Pack の検証器・adapter・
   executor を呼びません）。
+
+## Project Pack Multi-Case Execution（Phase 2L-B2 / S3-B3A）
+
+読み込んだ（staged の）Project Pack の**全ケース**を、**「Pack全ケースを計算（未レビュー）」を押したときだけ**計算し、
+ケースごとの要約を Pack 欄の中に一覧で表示します。結果は**未レビュー（`pack_unreviewed`）で、計算済み ≠ 検証済み**です。
+trust の境界は S3-B2 と同じで、Pack は active context にならず、案件プリセット・入力欄・通常の計算・入力 package・
+一括検討（Workspace / Scenario）・export・Review・Closure・Evidence には接続しません。
+
+### 計算の権威は executor だけ
+
+`project-config/project-pack-batch.js`（`ProjectPackBatch`）は、S3-B2 の `ProjectPackExecution` を唯一の計算の権威として使います。
+
+```
+ProjectPackExecution.listCaseIds(ctx)            … ケースの並び（executor の gate を通る）
+  → ケースごとに ProjectPackExecution.executeCase(ctx, caseId)（発行物であることを確かめる）
+  → 要約の行（寸法・設計風圧・mode ごとの風圧の内訳・推奨候補・件数だけ）
+  → 全ケースがそろったときだけ batch result（deep-frozen）
+```
+
+- 風圧・ガラスの式、pressure map の参照、case_direct の扱い、ProjectInput への変換を持ちません（静的に固定）。
+  executor を経由しない計算の経路はありません。
+- `ProjectPackExecution` は **module の初期化時に 1 度だけ**掴みます（RF-22-01 と同じ）。初期化後に差し替えられた・後から
+  現れた global は使わず、初期化時に無ければ呼び出しが fail closed になります（読み込み自体は失敗しません）。
+  context の検査は executor の gate に任せ、別の trust の根を作りません。
+- `createBatchRun(ctx)` が返す run は `nextChunk(n)` で最大 n ケースだけを同期的に計算します。`finish()` は全ケースが計算済みで、
+  行の数・並び・caseId の一意性が `listCaseIds()` と一致するときだけ結果を発行します。1 ケースでも失敗した run・`cancel()` した
+  run は以後使えず、途中までの行は捨てます（部分的な結果を完了として確定しません）。
+- batch result: `batchType`（`glass_wind_project_pack_batch_execution`）・`schemaVersion`（1）・`sourceKind`（`project_pack_unreviewed`）・
+  `trust`（`pack_unreviewed`）・`publicLabel`・`pressureMode`・`units`・`totalCases`・`executedCases`・`rows`。
+  行は `caseId`・`paneId`・`glassType`・`widthMm` / `heightMm`・`designPressure`・`pressure`（告示: 評価高さ・正圧・負圧、map: 正圧・
+  負圧の絶対値、case_direct: 出どころだけ）・`bestCandidate`（label と P、無ければ null）・OK / NG / 適用範囲外の件数、Pack にあるとき
+  だけ `floor` / `zone`。候補の全件・風圧の trace・provenance は写しません。
+- trust は申告（claimedLevel が primary など）で変わりません。verified / approved / attested・canonical Evidence・verifiedCases・
+  Promotion Candidate・Pack Closure の field は置きません。
+
+### 画面
+
+- Pack を読み込むと「Pack全ケースを計算（未レビュー）」と「計算をキャンセル」が出ます。**読み込み・preview・ケースの選択では
+  計算しません。**
+- 25 ケースずつ計算し、チャンクの間は `setTimeout` でイベントループへ戻します（進捗「計算中… 処理済み / 全体」・キャンセル・
+  別の操作が割り込めます）。計算途中の行は表示しません。
+- 新しい Pack の読込開始・読込失敗・解除・もう一度の開始・キャンセルのどれでも、進行中の計算と前の一覧を捨てます。各チャンクの
+  前と確定の直前に、run token・`projectPackAttempt`・staged の ProjectContext が同じ instance であることを確かめ、違えば捨てます。
+  古い run が後の Pack の画面を書き換えることはありません。全ケースの計算を始めると、選択ケースの計算結果は消します。
+- 1 ケースでも計算できなければ一覧を出さず、「一括計算を完了できませんでした。未レビューPackの一括結果は現在ありません。」と
+  だけ表示します（例外の文面は出しません）。Pack は staged のまま残り、選択ケースの計算はそのまま使えます。
+- 一覧は 50 行ずつのページです（ケース・Pane・階/部位（Pack にあるときだけ）・寸法 W×H mm・ガラス・設計風圧・風圧の内訳・
+  推奨候補（無ければ「候補なし」）・許容風圧・候補数 OK/NG/適用範囲外）。ページの切替は確定した結果を表示し直すだけで、計算しません。
+- 結果は memory-only です（保存・通信・URL 反映・console 出力なし）。
+
+### 規模
+
+Project Pack schema の上限 `maxGlazingCases`（2000）をそのまま扱います（新しいケース数の上限は設けていません）。
+Chromium で合成の 2000 ケース（告示 mode）を計算した測定はおおよそ 1.2 秒・チャンク間の最大停止 50 ms 程度でした。
+機械に依存する値なので、browser harness は記録するだけで閾値にはしていません。
+
+### 確認
+
+- Node: `tests/project-pack-batch.test.js`（3 mode の全ケース・G002 の手で固定した値・各行が executor の単独計算と一致・並び / 件数 /
+  一意性・deep-frozen・trust・要約だけ・gate・チャンク・途中の失敗・中止・別ケースや発行物でない結果の拒否・候補なし・2000 ケース・
+  依存の固定・計算を持たないこと）と `tests/project-pack-batch-ui.test.js`（明示操作だけ・staged context だけ・token / 試行 / context の
+  確認の位置・チャンクと yield・文言、および index.html の block を手で進める timer の vm で動かす挙動: キャンセル・Pack の切替・
+  壊れた Pack・解除・もう一度の開始・途中の失敗・確定直前の token 変化・ページ）。多ケースの Pack は
+  `tests/support/synthetic-pack.js` がその場で作る合成のものです（実案件の値ではなく、ファイルに保存しません）。
+- 実ブラウザ: `node tools/browser-checks/project-pack-batch.mjs`（UI だけを操作し、harness 側では Pack の検証器・adapter・executor・
+  batch module を呼びません）。
 
 ## 設計定数
 
@@ -1267,6 +1333,7 @@ glass_wind_calc_M/
 │   ├── project-input.js          # versioned Project Input Package（Phase 2D〜2E）。v2でwindInputを保持
 │   ├── project-pack.js           # Project Pack v1 の schema / validator（Phase 2L-B1）。runtime では staged preview だけ（S3-B1）
 │   ├── project-pack-execution.js # Project Pack Case Execution（Phase 2L-B2 / S3-B2）。選択した 1 ケースだけ・未レビュー
+│   ├── project-pack-batch.js     # Project Pack Multi-Case Execution（Phase 2L-B2 / S3-B3A）。executeCase の繰り返し・全件そろったときだけ
 │   └── project-context.js        # ProjectContext 契約 + legacy / pack adapter（Phase 2L-B2 / S2-A）
 ├── tests/
 │   ├── calc.test.js              # 汎用計算コアの known-answer test + core purity（node:test）
@@ -1287,6 +1354,9 @@ glass_wind_calc_M/
 │   ├── s3b1-project-pack-intake.test.js # browser-local Project Pack intake & preview（Phase 2L-B2 / S3-B1）
 │   ├── project-pack-execution.test.js    # Project Pack Case Execution の pure module（Phase 2L-B2 / S3-B2）
 │   ├── project-pack-execution-ui.test.js # Project Pack ケース計算の UI（明示操作・古い結果を消す・失敗の固定文）
+│   ├── project-pack-batch.test.js        # Project Pack Multi-Case Execution の pure module（Phase 2L-B2 / S3-B3A）
+│   ├── project-pack-batch-ui.test.js     # Project Pack 全ケース計算の UI（明示操作・チャンク・キャンセル・競合・ページ）
+│   ├── support/synthetic-pack.js # 多ケースの合成 Project Pack をその場で作る（S3-B3A。保存しない）
 │   └── fixtures/project-pack/    # 3 mode の合成 Project Pack（S3-B1）
 ├── package.json
 └── README.md                     # このファイル
@@ -1523,6 +1593,7 @@ node --test
 | `tests/review-ui.test.js` | Review UIの契約（描画元は `activeReview` のみ・鮮度はその場で再計算・export/印刷の関門・`@media print`・支配ケースを再選択しない・保存/通信なし） |
 | `tests/s3b1-project-pack-intake.test.js` | Project Pack intake（Phase 2L-B2 / S3-B1）: 経路は 1 つ・staged ≠ active・Pack → ProjectInput なし・取り込み上限は解析前・memory-only・ファイル名を保持しない・失敗表示は path と理由だけ・文言・合成 fixture・intake block を vm で動かす transactional / 上限 / drop / 競合の挙動 |
 | `tests/project-pack-execution.test.js` / `tests/project-pack-execution-ui.test.js` | Project Pack Case Execution（Phase 2L-B2 / S3-B2）: 本物の Pack context だけ・caseId / paneId / 階 / 部位 / 評価高さの完全一致・case_direct を分けない・trust は pack_unreviewed 固定・Evidence / provenance を持たない・入力 package と Closure に依存しない・明示操作だけ・古い結果を消す・計算失敗の固定文 |
+| `tests/project-pack-batch.test.js` / `tests/project-pack-batch-ui.test.js` | Project Pack Multi-Case Execution（Phase 2L-B2 / S3-B3A）: 計算は executeCase の繰り返しだけ・Pack の並び / 件数 / 一意性・全件そろったときだけ確定・途中の失敗で部分結果を出さない・trust は pack_unreviewed 固定・依存は初期化時に固定・明示操作だけ・チャンクの間で yield・キャンセル / Pack の切替 / 解除 / もう一度の開始で古い run を捨てる・確定直前の token 確認・50 行のページ |
 
 ### 必須ケース
 

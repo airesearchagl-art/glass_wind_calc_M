@@ -233,6 +233,29 @@
       "reason": "no browser measurement exists for the current target head"
     },
     {
+      "id": "project-pack-batch",
+      "command": "node tools/browser-checks/project-pack-batch.mjs",
+      "evidenceClass": "observational",
+      "admissibility": "UNVERIFIED",
+      "target": "the explicit multi-case Project Pack execution (S3-B3A): every case of the staged pack_unreviewed ProjectContext is calculated only when the user presses the execute-all button, through ProjectPackBatch, which runs ProjectPackExecution.executeCase() for each caseId in Pack order (ProjectPackExecution captured when the batch module initialised); the run advances in chunks of 25 cases with a setTimeout yield between chunks and shows processed / total progress; the batch result is committed only when every case succeeded, with the row count, order and caseId uniqueness of the Pack, and stays pack_unreviewed with calculated-not-verified wording inside the Pack panel only; G002 of each synthetic fixture matches its single-case oracle; case_direct shows only its declared designPressure; the list is paged 50 rows at a time and paging does not recalculate; cancel, a new Pack load, a failed load, unload and a second start discard the running batch, and the run token, projectPackAttempt and the staged context instance are checked before each chunk and right before the commit; a failing case or a token change right before the commit leaves no batch result and shows a fixed message while the Pack stays staged; the active ProjectContext, preset UI and calculation result do not change; nothing is persisted, sent or written to the URL; time and heap for about 2000 synthetic cases are recorded, not asserted",
+      "oracle": "real Chromium",
+      "sharedDependencies": [
+        "the harness drives the page only through its UI (paste, file, execute-all, cancel, unload and paging buttons) and never calls the Pack validator, adapter, executor or batch module itself; expected cells come from the synthetic fixture literals, from tests/support/synthetic-pack.js (a generator of synthetic Packs, never written to disk) and from wind-pressure.js and calc.js called directly under Node, not from the executor's or the batch module's output; fault injection (a failing middle case, a token change inside finish) wraps a page global from an init script on a fresh page only"
+      ],
+      "positiveControl": "all cases of the three synthetic fixtures (notification1458 3, project_pressure_map 4, case_direct 2) must be listed in Pack order with G002 equal to its single-case oracle, and a 2000-case synthetic Pack must complete with intermediate progress values",
+      "negativeControl": "mutants M1-M13 (first case only, a skipped middle case, the first pane reused, case_direct split into positive/negative, batch trust changed to verified, execution on Pack load, a partial result committed after a middle failure, an old run committing after unload, run A committing after a switch to Pack B, cancel disabled, the batch result assigned to activeProjectContext, sourceClaim turned into Evidence, a ProjectPackExecution global replaced after initialisation adopted) each fail at least one check here or in tests/project-pack-batch.test.js / tests/project-pack-batch-ui.test.js",
+      "proves": "how index.html executes every case of a staged Project Pack in a real browser for the head measured",
+      "doesNotProve": "anything about an unmeasured head; performance on other machines (time and heap are recorded, not asserted); Workspace / Scenario integration, ProjectInput conversion, CSV / JSON export, Review Package, Pack Closure, sourceClaim to Evidence and attestation, none of which exist yet; that a Pack's values are correct (the result is calculated, not verified)",
+      "instrumentFiles": [
+        "tools/browser-checks/project-pack-batch.mjs",
+        "tools/browser-checks/resolve-playwright.mjs",
+        "tools/browser-checks/browser-outcome.mjs",
+        "tests/support/synthetic-pack.js"
+      ],
+      "finding": null,
+      "reason": "no browser measurement exists for the current target head; a verifier must run it at theirs"
+    },
+    {
       "id": "project-pack-execution",
       "command": "node tools/browser-checks/project-pack-execution.mjs",
       "evidenceClass": "observational",
@@ -245,7 +268,7 @@
       "positiveControl": "G002 of each of the three synthetic fixtures (notification1458, project_pressure_map, case_direct) must show its own pane, pressure breakdown and glass candidate rows",
       "negativeControl": "mutants X1-X16 (case_direct to an input package, case_direct split into positive/negative, an inferred zone, the first evaluation height, the first positive row, a fixed general zone, the first pane, trust changed to verified, execution on load, a stale result after a selection change, after a new load, failure or unload, the active context switched to the Pack, wind-formula provenance shown as Pack trust, a primary claim shown as verified, the raw staged Pack passed to the executor, a Closure / Promotion call) and RF-22 R1-R3 (first-call live lookup of the ProjectContext, WindPressure or GlassCalc global instead of the instance captured at initialisation, caught with decoys that return different outputs) each fail at least one check here or in tests/project-pack-execution.test.js / tests/project-pack-execution-ui.test.js",
       "proves": "how index.html executes a selected Project Pack case in a real browser for the head measured",
-      "doesNotProve": "anything about an unmeasured head; execute-all, Workspace / Batch integration, export, Pack Closure, sourceClaim to Evidence and attestation, none of which exist yet; that a Pack's values are correct (the result is calculated, not verified)",
+      "doesNotProve": "anything about an unmeasured head; executing every case of the Pack (measured by project-pack-batch); Workspace / Batch integration, export, Pack Closure, sourceClaim to Evidence and attestation, none of which exist yet; that a Pack's values are correct (the result is calculated, not verified)",
       "instrumentFiles": [
         "tools/browser-checks/project-pack-execution.mjs",
         "tools/browser-checks/resolve-playwright.mjs",
@@ -392,6 +415,11 @@
       "id": "preset-ui-from-project-context",
       "statement": "the preset-mode UI is derived from the active ProjectContext of the runtime-default built-in: options, labels (publicLabel only), initial floor (first context floor), dimensions, calculation, comparison, Evidence panels and Closure follow a substituted synthetic built-in and ignore a replaced module global. Several built-ins may coexist; selection requires exactly one runtimeDefault declaration. Zero or duplicate runtimeDefault declarations, a missing runtime-default module and an unavailable ProjectContext each fail closed (no fallback to another built-in or to the first id). An extra non-default built-in or a different declaration order does not change the selection",
       "instrument": "context-runtime"
+    },
+    {
+      "id": "project-pack-batch-explicit-atomic-unreviewed",
+      "statement": "every case of a staged Project Pack is calculated only when the user presses the execute-all button, through ProjectPackExecution.executeCase() for each caseId in Pack order; progress is shown while chunks run between event-loop yields and the run can be cancelled; the batch result is committed only when every case succeeded, matches the Pack's case count, order and caseIds, stays pack_unreviewed with calculated-not-verified wording and is shown inside the Pack panel only, 50 rows per page; cancel, a new Pack load, a failed load, unload and a second start discard a running batch, an old run never writes a later Pack's screen, and a failing case shows a fixed message with no partial rows while the Pack stays staged; the active ProjectContext, preset UI and calculation result are unchanged; no storage, network, URL or console output",
+      "instrument": "project-pack-batch"
     },
     {
       "id": "project-pack-execution-explicit-unreviewed",
