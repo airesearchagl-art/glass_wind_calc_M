@@ -54,12 +54,15 @@ function fnBody(name) {
   return CODE.slice(start + 1, ends.length > 0 ? Math.min(...ends) : CODE.length);
 }
 
-/** 全ケース計算 block（実行コード）。state 宣言から一覧表示の関数の終わりまで。 */
+/**
+ * 全ケース計算 block（実行コード）。state 宣言から一覧表示の関数の終わりまで
+ * （その後ろに続く S3-B3B1 の派生レポート block は含めない）。
+ */
 function batchCode() {
   const start = CODE.indexOf('\nvar PACK_BATCH_MODULE');
-  const end = CODE.indexOf('\nfunction ', CODE.indexOf('\nfunction renderProjectPackBatchResult(') + 1);
-  assert.equal(start !== -1 && end > start, true, '全ケース計算 block が無い');
-  return CODE.slice(start, end);
+  const reportStart = CODE.indexOf('\nvar PACK_REPORT_MODULE');
+  assert.equal(start !== -1 && reportStart > start, true, '全ケース計算 block が無い');
+  return CODE.slice(start, reportStart);
 }
 
 const BATCH_FUNCTIONS = ['renderProjectPackBatchStatus', 'renderProjectPackBatchProgress', 'clearProjectPackBatch',
@@ -165,7 +168,9 @@ test('P2L-S3B3A-U07: 文言——未レビュー・計算済み ≠ 検証済み
   assert.match(section, /計算済み ≠ 検証済み/);
   assert.match(section, /pack_unreviewed/);
   const literals = (batchCode().match(/'(?:[^'\\]|\\.)*'/g) || []).join('\n');
-  const strong = (section + '\n' + literals).replace(/計算済み ≠ 検証済み/g, '');
+  // S3-B3B1 の派生レポートの注意文（「…公開安全の証明にはなりません」という否定の文）だけは除いて調べる
+  const strong = (section + '\n' + literals).replace(/計算済み ≠ 検証済み/g, '')
+    .replace(/publication advisoryが0件でも公開安全の証明にはなりません。/g, '');
   assert.equal(STRONG_WORDING.test(strong), false, (strong.match(STRONG_WORDING) || [])[0]);
   assert.equal(/検証済/.test(strong), false);
   assert.match(batchCode(), /'trust: ' \+ result\.trust \+ '（未レビュー）— 計算済み ≠ 検証済み'/);

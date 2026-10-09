@@ -458,6 +458,13 @@
   }
   .pack-batch-table th { color: var(--text3); font-weight: 600; }
   .pack-batch-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pack-report { margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--border); }
+  textarea#pack-report-out {
+    width: 100%; margin-top: 8px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text); font-family: var(--font-mono);
+    font-size: 11px; padding: 8px; resize: vertical;
+  }
+  textarea#pack-report-out[hidden] { display: none; }
 
   /* 印刷不可の文面は画面には出さない */
   #review-print-blocked { display: none; }
@@ -981,6 +988,31 @@
       </div>
       <div class="pack-status" id="pack-batch-status" role="status" aria-live="polite"></div>
       <div class="pack-preview" id="pack-batch-result" hidden></div>
+      <!-- Project Pack 派生レポート（Phase 2L-B2 / S3-B3B1）: 全件そろった全ケース計算の結果から、ボタンを押したときだけ
+           JSON / CSV のテキストを作り、この欄に表示する（コピー用）。再計算用の入力ではなく、どこへも読み込まない。 -->
+      <div class="pack-report" id="pack-report">
+        <h3 class="pack-exec-title">Project Pack 派生レポート（未レビュー）</h3>
+        <p class="pack-note">
+          全ケース計算の結果を JSON / CSV のテキストにしてこの欄に表示します（コピー用）。結果は未レビュー
+          （pack_unreviewed）で、計算済み ≠ 検証済みです。OK は計算上の候補判定です。このレポートは計算結果を
+          伝えるためのもので、再計算用の入力ではありません（Project Pack・入力 package・一括検討・Review には
+          読み込めません）。ボタンを押したときだけ作り、保存・送信はしません。
+        </p>
+        <p class="pack-note">このレポートにはガラス寸法・設計風圧などの案件入力値が含まれます。ブラウザからコピーして外部共有する場合は、内容と共有先を確認してください。</p>
+        <p class="pack-note">publication advisoryが0件でも公開安全の証明にはなりません。</p>
+        <p class="pack-note">これらの注意は privacy の判定や検証を意味しません。</p>
+        <div class="pack-exec-controls">
+          <button type="button" id="btn-pack-report-json" class="btn-secondary"
+            onclick="showProjectPackReport('json')" disabled>JSONレポートを表示</button>
+          <button type="button" id="btn-pack-report-csv" class="btn-secondary"
+            onclick="showProjectPackReport('csv')" disabled>CSVレポートを表示</button>
+          <button type="button" id="btn-pack-report-clear" class="btn-secondary"
+            onclick="clearProjectPackReportByUser()" disabled>出力を消去</button>
+        </div>
+        <div class="pack-status" id="pack-report-status" role="status" aria-live="polite"></div>
+        <textarea id="pack-report-out" rows="8" spellcheck="false" autocomplete="off" readonly hidden
+          aria-label="Project Pack 派生レポートの出力"></textarea>
+      </div>
     </div>
   </div>
 </section>
@@ -1342,6 +1374,7 @@
 <script src="project-config/project-context.js"></script>
 <script src="project-config/project-pack-execution.js"></script>
 <script src="project-config/project-pack-batch.js"></script>
+<script src="project-config/project-pack-report.js"></script>
 <script src="workspace.js"></script>
 <script src="project-profile.js"></script>
 <script src="review-package.js"></script>
@@ -2119,6 +2152,7 @@ var stagedProjectPackBatch = null;
 var projectPackBatchJob = null;
 var projectPackBatchToken = 0;
 var projectPackBatchPage = 0;
+var projectPackBatchOrigin = null;
 
 function renderProjectPackBatchStatus(text, isError) {
   var status = document.getElementById('pack-batch-status');
@@ -2143,6 +2177,7 @@ function clearProjectPackBatch(statusText, isError) {
   if (projectPackBatchJob) projectPackBatchJob.run.cancel();
   projectPackBatchJob = null;
   stagedProjectPackBatch = null;
+  projectPackBatchOrigin = null;
   projectPackBatchPage = 0;
   var box = document.getElementById('pack-batch-result');
   if (box) { box.textContent = ''; box.hidden = true; }
@@ -2150,6 +2185,9 @@ function clearProjectPackBatch(statusText, isError) {
   var cancel = document.getElementById('btn-pack-batch-cancel');
   if (cancel) cancel.disabled = true;
   renderProjectPackBatchStatus(statusText || '', isError === true);
+  // 一括の結果が無くなれば、そこから作った派生レポートも消す（S3-B3B1）
+  clearProjectPackReport(projectPackReportOutput ? PROJECT_PACK_REPORT_CLEARED : '');
+  renderProjectPackReportControls();
 }
 
 /* staged context に合わせて欄を開閉する。ctx が null なら閉じる。どちらでも一覧と進行中の run は捨てる。 */
@@ -2253,10 +2291,13 @@ function stepProjectPackBatch(job) {
   }
   projectPackBatchJob = null;
   stagedProjectPackBatch = result;
+  projectPackBatchOrigin = { batch: result, attempt: job.attempt, ctx: job.ctx };
   var cancel = document.getElementById('btn-pack-batch-cancel');
   if (cancel) cancel.disabled = true;
   renderProjectPackBatchProgress(result.executedCases, result.totalCases);
   renderProjectPackBatchStatus('全 ' + result.totalCases + ' ケースを計算しました（未レビュー。計算済み ≠ 検証済み）。', false);
+  renderProjectPackReportControls();
+  renderProjectPackReportStatus(PROJECT_PACK_REPORT_IDLE, false);
 }
 
 /* ページの切替。確定した一覧を表示し直すだけで、計算しない。 */
@@ -2363,6 +2404,101 @@ function renderProjectPackBatchResult(result, page) {
     '計算したもので、案件プリセット・入力欄・一括検討・Closure には反映しません。', 'pack-note'));
   projectPackBatchPage = current;
   box.hidden = false;
+}
+
+/* ============================================================
+   Project Pack 派生レポート（Phase 2L-B2 / S3-B3B1）— 明示操作だけ・確定した一括結果からだけ・未レビュー
+
+   確定した全ケース計算の結果（stagedProjectPackBatch）から ProjectPackReport で派生レポートを作り、
+   JSON / CSV のテキストを readonly の欄に表示する（ブラウザ内でコピーするため）。
+   - 作るのは「JSONレポートを表示」「CSVレポートを表示」を押したときだけ。読込・ケースの選択・計算の開始・
+     計算の完了・ページの切替では作らない。JSON の後に CSV を押せば置き換える（出力は常に 1 つ）。
+   - 作る直前と表示の直前に、batch result が発行物で、現在の stagedProjectPackBatch と同じ object で、
+     作成時の projectPackAttempt・staged context と一致し、計算中の run が無いことを確かめる。違えば失敗。
+   - 新しい Pack の読込開始・読込失敗・解除・計算の開始・キャンセル・計算の失敗では、一括の結果と一緒に
+     消える（clearProjectPackBatch が clearProjectPackReport を呼ぶ）。
+   - 失敗は固定文だけ（例外の文面・生の Pack を出さない）。失敗しても Pack と一括の結果は残す。
+   - ダウンロード・Blob URL・ファイル書き込み・クリップボードへの自動コピーはしない。保存・送信もしない。
+   - レポートは計算の入力ではない。Project Pack・入力 package・一括検討・Scenario・Review へは流さない。
+   - ProjectPackReport はこの script の初期化時に 1 度だけ掴む（後から global を読み直さない）。
+============================================================ */
+
+var PACK_REPORT_MODULE = (typeof ProjectPackReport === 'object' && ProjectPackReport) ? ProjectPackReport : null;
+var PROJECT_PACK_REPORT_FAILURE = 'レポートを生成できませんでした。現在有効な出力はありません。';
+var PROJECT_PACK_REPORT_IDLE = 'JSON / CSV の派生レポートは、ボタンを押したときだけ作ります。';
+var PROJECT_PACK_REPORT_CLEARED = '全ケース計算の結果が変わったので、派生レポートを消しました。現在有効な出力はありません。';
+var PROJECT_PACK_REPORT_LABELS = { json: 'JSON', csv: 'CSV' };
+var projectPackReportOutput = null;
+
+function renderProjectPackReportStatus(text, isError) {
+  var status = document.getElementById('pack-report-status');
+  if (!status) return;
+  status.className = isError ? 'pack-status is-error' : 'pack-status';
+  status.textContent = text;
+}
+
+/* 出力を消す（state と表示の両方）。 */
+function clearProjectPackReport(statusText) {
+  projectPackReportOutput = null;
+  var out = document.getElementById('pack-report-out');
+  if (out) { out.value = ''; out.hidden = true; }
+  var clear = document.getElementById('btn-pack-report-clear');
+  if (clear) clear.disabled = true;
+  renderProjectPackReportStatus(statusText || '', false);
+}
+
+/* 確定した一括結果があって計算中の run が無いときだけ、作成のボタンを押せる。 */
+function renderProjectPackReportControls() {
+  var ready = PACK_REPORT_MODULE !== null && stagedProjectPackBatch !== null && projectPackBatchJob === null;
+  ['btn-pack-report-json', 'btn-pack-report-csv'].forEach(function (id) {
+    var button = document.getElementById(id);
+    if (button) button.disabled = !ready;
+  });
+  var clear = document.getElementById('btn-pack-report-clear');
+  if (clear) clear.disabled = projectPackReportOutput === null;
+}
+
+/* この batch result からレポートを作ってよいか（発行物・現在の結果・作成時の試行と context・計算中でない）。 */
+function projectPackReportIsCurrent(batch) {
+  return PACK_REPORT_MODULE !== null && PACK_BATCH_MODULE !== null && batch !== null &&
+    PACK_BATCH_MODULE.isBatchResult(batch) && batch === stagedProjectPackBatch && projectPackBatchJob === null &&
+    projectPackBatchOrigin !== null && projectPackBatchOrigin.batch === batch &&
+    projectPackBatchOrigin.attempt === projectPackAttempt && projectPackBatchOrigin.ctx === stagedProjectPackContext;
+}
+
+function showProjectPackReport(kind) {
+  clearProjectPackReport('');
+  var batch = stagedProjectPackBatch;
+  var text;
+  try {
+    if (!Object.prototype.hasOwnProperty.call(PROJECT_PACK_REPORT_LABELS, kind)) throw new Error('unknown report kind');
+    if (!projectPackReportIsCurrent(batch)) throw new Error('stale or missing batch result');
+    var report = PACK_REPORT_MODULE.buildReport(batch);
+    text = kind === 'json' ? PACK_REPORT_MODULE.serializeJson(report) : PACK_REPORT_MODULE.toCsv(report);
+    if (typeof text !== 'string' || text === '') throw new Error('empty report');
+    // 表示の直前にもう一度確かめる
+    if (!projectPackReportIsCurrent(batch)) throw new Error('stale batch result');
+    var out = document.getElementById('pack-report-out');
+    if (!out) throw new Error('no output area');
+    out.value = text;
+    out.hidden = false;
+    projectPackReportOutput = { kind: kind, batch: batch, rows: report.totalCases };
+  } catch (e) {
+    clearProjectPackReport('');
+    renderProjectPackReportStatus(PROJECT_PACK_REPORT_FAILURE, true);
+    renderProjectPackReportControls();
+    return false;
+  }
+  renderProjectPackReportControls();
+  renderProjectPackReportStatus(PROJECT_PACK_REPORT_LABELS[kind] + ' レポートを表示しました（全 ' + projectPackReportOutput.rows +
+    ' ケース・未レビュー。計算済み ≠ 検証済み）。コピーして共有する前に内容と共有先を確認してください。', false);
+  return true;
+}
+
+function clearProjectPackReportByUser() {
+  clearProjectPackReport('出力を消去しました。現在有効な出力はありません。');
+  renderProjectPackReportControls();
+  return true;
 }
 
 /* ============================================================

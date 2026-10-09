@@ -245,9 +245,32 @@
       "positiveControl": "all cases of the three synthetic fixtures (notification1458 3, project_pressure_map 4, case_direct 2) must be listed in Pack order with G002 equal to its single-case oracle, and a 2000-case synthetic Pack must complete with intermediate progress values",
       "negativeControl": "mutants M1-M13 (first case only, a skipped middle case, the first pane reused, case_direct split into positive/negative, batch trust changed to verified, execution on Pack load, a partial result committed after a middle failure, an old run committing after unload, run A committing after a switch to Pack B, cancel disabled, the batch result assigned to activeProjectContext, sourceClaim turned into Evidence, a ProjectPackExecution global replaced after initialisation adopted) each fail at least one check here or in tests/project-pack-batch.test.js / tests/project-pack-batch-ui.test.js",
       "proves": "how index.html executes every case of a staged Project Pack in a real browser for the head measured",
-      "doesNotProve": "anything about an unmeasured head; performance on other machines (time and heap are recorded, not asserted); Workspace / Scenario integration, ProjectInput conversion, CSV / JSON export, Review Package, Pack Closure, sourceClaim to Evidence and attestation, none of which exist yet; that a Pack's values are correct (the result is calculated, not verified)",
+      "doesNotProve": "anything about an unmeasured head; performance on other machines (time and heap are recorded, not asserted); the derived JSON / CSV report (measured by project-pack-report); Workspace / Scenario integration, ProjectInput conversion, Review Package, Pack Closure, sourceClaim to Evidence and attestation, none of which exist yet; that a Pack's values are correct (the result is calculated, not verified)",
       "instrumentFiles": [
         "tools/browser-checks/project-pack-batch.mjs",
+        "tools/browser-checks/resolve-playwright.mjs",
+        "tools/browser-checks/browser-outcome.mjs",
+        "tests/support/synthetic-pack.js"
+      ],
+      "finding": null,
+      "reason": "no browser measurement exists for the current target head; a verifier must run it at theirs"
+    },
+    {
+      "id": "project-pack-report",
+      "command": "node tools/browser-checks/project-pack-report.mjs",
+      "evidenceClass": "observational",
+      "admissibility": "UNVERIFIED",
+      "target": "the Project Pack derived report (S3-B3B1): JSON or CSV text is generated only when the user presses the JSON or CSV button, only from the issued batch result that is currently staged (ProjectPackBatch.assertBatchResult through ProjectPackReport, both captured when their modules initialised), with the projectPackAttempt and staged context recorded when that batch was committed and no batch run in progress, checked before building and right before display; the report fixes sourceKind project_pack_unreviewed, trust pack_unreviewed and interpretation calculated_not_verified (in every CSV row as well), projects every field explicitly in a fixed order, keeps full-precision numbers with their sign and leaves mode-inapplicable CSV columns empty (case_direct has no positive / negative pressure); string cells whose first character after leading whitespace, control or invisible characters is a formula trigger are prefixed with a single quote; each output is capped at 8 MiB without truncation; the output is shown in a readonly textarea in the Pack panel only, JSON is replaced by CSV and vice versa, and it is cleared by a new Pack load, a failed load, unload, a new batch, cancel, a batch failure and the clear button; a report failure shows a fixed message and keeps the Pack and the batch result; nothing is generated on load, selection, batch start, batch completion or paging; nothing is downloaded, copied to the clipboard, persisted, sent or written to the URL; the active ProjectContext, preset UI and calculation result do not change",
+      "oracle": "real Chromium",
+      "sharedDependencies": [
+        "the harness drives the page only through its UI (paste, execute-all, cancel, unload, paging, JSON, CSV and clear buttons) and never calls the Pack validator, adapter, executor, batch module or report module itself; expected values come from the synthetic fixture literals, from tests/support/synthetic-pack.js and from wind-pressure.js and calc.js called directly under Node, not from the report's output; computed notification values are compared with a 1e-12 relative tolerance because Node's and Chromium's V8 can differ in the last ulp of Math functions; CSV is read back with a small RFC 4180 parser inside the harness (the textarea value normalises line breaks to LF, as HTML specifies); fault injection (a failing middle case, a failing toCsv) wraps a page global from an init script on a fresh page only"
+      ],
+      "positiveControl": "JSON and CSV of the three synthetic fixtures must list every case in Pack order with G002 equal to its oracle, and a 2000-case synthetic Pack must produce 2000 JSON rows and 2000 CSV records in order",
+      "negativeControl": "mutants R01-R15 (a shape-only batch accepted, trust changed to verified, sourceClaim in the export, WindPressure provenance in the export, case_direct split into positive / negative, a CSV formula passed through, the batch result serialised wholesale without a cap, truncation at 1000 cases, an old report kept after a Pack reload, an old report kept after cancel, automatic export on batch completion, a ProjectPackBatch global replaced after initialisation adopted, the report converted to a ProjectInput, the report sent to the Workspace / Review, output written to storage or the console) each fail at least one check here or in tests/project-pack-report.test.js / tests/project-pack-report-ui.test.js",
+      "proves": "how index.html derives and shows the JSON / CSV report of a committed Project Pack batch in a real browser for the head measured",
+      "doesNotProve": "anything about an unmeasured head; how a spreadsheet application renders the CSV (formula neutralisation is a string-level guarantee; opening the CSV in Excel or LibreOffice is a Human verification item); file download, Workspace / Scenario / Review integration and ProjectInput conversion, none of which exist; that a Pack's values are correct (the report is calculated, not verified); that sharing a report is safe (publication advisories at 0 are not a publication-safety proof)",
+      "instrumentFiles": [
+        "tools/browser-checks/project-pack-report.mjs",
         "tools/browser-checks/resolve-playwright.mjs",
         "tools/browser-checks/browser-outcome.mjs",
         "tests/support/synthetic-pack.js"
@@ -420,6 +443,11 @@
       "id": "project-pack-batch-explicit-atomic-unreviewed",
       "statement": "every case of a staged Project Pack is calculated only when the user presses the execute-all button, through ProjectPackExecution.executeCase() for each caseId in Pack order; progress is shown while chunks run between event-loop yields and the run can be cancelled; the batch result is committed only when every case succeeded, matches the Pack's case count, order and caseIds, stays pack_unreviewed with calculated-not-verified wording and is shown inside the Pack panel only, 50 rows per page; cancel, a new Pack load, a failed load, unload and a second start discard a running batch, an old run never writes a later Pack's screen, and a failing case shows a fixed message with no partial rows while the Pack stays staged; the active ProjectContext, preset UI and calculation result are unchanged; no storage, network, URL or console output",
       "instrument": "project-pack-batch"
+    },
+    {
+      "id": "project-pack-report-explicit-derived-unreviewed",
+      "statement": "the JSON / CSV derived report of a staged Project Pack is generated only when the user presses the JSON or CSV button, only from the issued batch result that is current for the staged Pack and its load attempt with no batch running; it stays pack_unreviewed / calculated_not_verified in the report and in every CSV row, keeps full-precision signed numbers, leaves mode-inapplicable columns empty, neutralises spreadsheet formulas in string cells, is capped at 8 MiB without truncation and is shown in a readonly textarea inside the Pack panel only; a new load, a failed load, unload, a new batch, cancel, a batch failure and the clear button remove it; a report failure shows a fixed message and keeps the Pack and the batch; the report never becomes a Project Pack, ProjectInput, Workspace, Scenario or Review input; no download, clipboard, storage, network, URL or console output; the active ProjectContext, preset UI and calculation result are unchanged",
+      "instrument": "project-pack-report"
     },
     {
       "id": "project-pack-execution-explicit-unreviewed",
