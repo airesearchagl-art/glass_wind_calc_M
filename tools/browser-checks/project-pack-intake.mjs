@@ -213,7 +213,9 @@ async function waitStatus(re, timeout) {
 async function drop(files) {
   await page.evaluate((list) => {
     const dt = new DataTransfer();
-    list.forEach((f) => dt.items.add(new File([f.text], f.name, { type: f.type })));
+    // kind: 'string' はファイルではない項目（ドラッグした文字列など）として足す
+    list.forEach((f) => (f.kind === 'string' ? dt.items.add(f.text, f.type)
+      : dt.items.add(new File([f.text], f.name, { type: f.type }))));
     const zone = document.getElementById('pack-drop');
     zone.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }));
     zone.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
@@ -337,21 +339,24 @@ const noInvention = (s3.context ? s3.context.cases : []).every((c) => {
 check('D1-no-invented-fields', noInvention, '入力に無い floor / zone を作らない');
 check('D1-active', JSON.stringify(await activeSnapshot()) === JSON.stringify(ACTIVE0), 'active は不変');
 
-// drop の拒否: 複数ファイル / ファイル以外
-await drop([{ name: 'a.json', type: 'application/json', text: fixtureText('case_direct') },
-  { name: 'b.json', type: 'application/json', text: fixtureText('case_direct') }]);
-await page.waitForTimeout(50);
-checkFailed('D2-multiple', await state(), 'ファイル', []);
-await page.evaluate(() => {
-  const dt = new DataTransfer();
-  dt.setData('text/plain', '{"schemaVersion":1}');
-  document.getElementById('pack-drop').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
-});
-await page.waitForTimeout(50);
-checkFailed('D3-not-file', await state(), 'ファイル', []);
-await drop([{ name: 'picture.png', type: 'image/png', text: 'PNGDATA' }]);
-await page.waitForTimeout(50);
-checkFailed('D4-not-json', await state(), 'ファイル', ['PNGDATA']);
+// drop の拒否（RF-21-01: 項目がちょうど 1 つのファイルであること）。各拒否の前に有効な Pack を
+// 読み込んでおき、拒否で staged が空になる（前の Pack を残さない）ことも確かめる。
+// D5（フォルダ）は script から作れないので tests/s3b1-project-pack-intake.test.js（vm）で確かめる。
+const CASE_FILE = { name: 'pack.json', type: 'application/json', text: fixtureText('case_direct') };
+async function rejectedDrop(id, items, secrets) {
+  await paste(fixtureText('notification1458'));
+  const reads = (await probe()).blobText;
+  await drop(items);
+  await page.waitForTimeout(50);
+  const s = await state();
+  checkFailed(id, s, 'ファイル', (secrets || []).concat(['Synthetic Pack N1458']));
+  check(id + '-unread', (await probe()).blobText === reads, '拒否したドロップのファイルを読まない');
+}
+await rejectedDrop('D2-file-plus-string', [CASE_FILE, { kind: 'string', type: 'text/plain', text: 'STRING-ITEM-XYZ' }], ['STRING-ITEM-XYZ']);
+await rejectedDrop('D2-string-plus-file', [{ kind: 'string', type: 'text/plain', text: 'STRING-ITEM-XYZ' }, CASE_FILE], ['STRING-ITEM-XYZ']);
+await rejectedDrop('D3-string-only', [{ kind: 'string', type: 'text/plain', text: '{"schemaVersion":1}' }]);
+await rejectedDrop('D4-two-files', [CASE_FILE, CASE_FILE]);
+await rejectedDrop('D6-not-json', [{ name: 'picture.png', type: 'image/png', text: 'PNGDATA' }], ['PNGDATA']);
 
 /* ---------- 5. invalid JSON ---------- */
 
@@ -426,6 +431,21 @@ const s9 = await state();
 checkFailed('U1', s9, 'Project Pack 検証', ['private.example', 'secret-doc', 'https']);
 check('U1-rule', s9.status.includes('url-scheme') && s9.status.includes('場所: pack.evidence.sourceScopes[0].sourceClaim'),
   '規則名と path だけを出す');
+
+// RF-21-02: notification_baseline に recurrenceYears を付けると、風圧側の文面は "; got <値>" で
+// 値を返す。区切りの形によらず、その値・公開表示名・ファイル名・JSON・stack を表示しない。
+const REC_VALUE = '8642.97';
+const rec = fixture('notification1458');
+rec.projectMetadata.publicLabel = 'Synthetic Pack Recurrence Probe';
+rec.windConditions.recurrenceYears = Number(REC_VALUE);
+await chooseFile('recurrence-probe-file-XYZ.json', 'application/json', Buffer.from(JSON.stringify(rec), 'utf8'));
+await waitStatus(/読み込みに失敗|読み込み経路/);
+const sRec = await state();
+checkFailed('G1-got-suffix', sRec, 'Project Pack 検証',
+  [REC_VALUE, '8642', 'Synthetic Pack Recurrence Probe', 'recurrence-probe-file-XYZ', '"windConditions"']);
+check('G1-path-reason', sRec.status.includes('場所: pack.glazingCases[0]') &&
+  sRec.status.includes('notification_baseline does not take recurrenceYears') && !/\bgot\b/i.test(sRec.status),
+  sRec.status.split('\n').slice(2).join(' | ').slice(0, 160));
 
 // advisory は数と path・規則名だけを出し、0 件を安全と言わない
 const adv = fixture('case_direct');

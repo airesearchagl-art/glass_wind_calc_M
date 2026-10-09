@@ -910,7 +910,7 @@
           ondragenter="projectPackDragOver(event)" ondragover="projectPackDragOver(event)"
           ondragleave="projectPackDragLeave(event)" ondrop="projectPackDrop(event)">
           ここに Project Pack JSON ファイルを 1 つドロップ<br>
-          （複数ファイル・フォルダ・ファイル以外は受け付けません）
+          （複数ファイル・フォルダ・ファイル以外の項目を含むドロップは受け付けません）
         </div>
       </div>
       <div>
@@ -1583,8 +1583,10 @@ function projectPackDrop(ev) {
   var files = dt && dt.files ? dt.files : null;
   var items = dt && dt.items ? Array.prototype.slice.call(dt.items) : [];
   var fileItems = items.filter(function (item) { return item.kind === 'file'; });
-  if (!files || files.length !== 1 || (items.length > 0 && fileItems.length !== 1)) {
-    failProjectPackIntake('file', 'ファイルを 1 つだけドロップしてください（複数ファイル・ファイル以外は受け付けません）。');
+  // items があるときは、項目がちょうど 1 つで、それがファイルであること（ファイル + 文字列の
+  // ように、ファイル以外の項目を含むドロップは受け付けない）。items が無い環境では files だけで判定する。
+  if (!files || files.length !== 1 || (items.length > 0 && (items.length !== 1 || fileItems.length !== 1))) {
+    failProjectPackIntake('file', 'ファイルを 1 つだけドロップしてください（複数ファイル・ファイル以外の項目を含むドロップは受け付けません）。');
     return;
   }
   var entry = (fileItems.length === 1 && typeof fileItems[0].webkitGetAsEntry === 'function')
@@ -1701,8 +1703,10 @@ function readProjectPackPath(text, vocab) {
 
 function sanitizeProjectPackReason(reason, vocab) {
   var s = String(reason);
-  // 入力値の echo（"(got …)" / ", got: …"）以降は出さない
-  s = s.replace(/\s*\(got\b[\s\S]*$/, '').replace(/,?\s*got:[\s\S]*$/, '');
+  // 入力値の echo 以降は出さない。検証器・風圧・Evidence の文面は、受け取った値を必ず
+  // "got" の後に置く（"(got …)" / ", got: …" / "; got …" / "(got eaves …)" など）。区切りの形を
+  // 列挙せず、単語としての "got" とその前の区切りから後ろをすべて落とす。
+  s = s.replace(/[\s(,;:]*\bgot\b[\s\S]*$/i, '');
   // 引用された token は schema の語だけ残す
   s = s.replace(/"((?:[^"\\]|\\.)*)("|$)/g, function (all, inner) {
     return vocab[inner] === true ? '"' + inner + '"' : '"…"';

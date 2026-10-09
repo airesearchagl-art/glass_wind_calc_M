@@ -565,23 +565,45 @@ test('P2L-S3B1-17: 後から始まった試行が勝つ（遅いファイル読�
   assert.equal(box.sandbox.activeProjectContext, ACTIVE_SENTINEL);
 });
 
-test('P2L-S3B1-18: drop は 1 ファイルだけ（複数・フォルダ・ファイル以外は拒否）', async () => {
-  const box = intakeSandbox();
+test('P2L-S3B1-18: drop は項目がちょうど 1 つのファイルだけ（RF-21-01: ファイル + 文字列も拒否）', async () => {
   const ev = (files, items) => ({ preventDefault() {}, stopPropagation() {}, dataTransfer: { files, items } });
-  const file = fakeFile(fixtureText('case_direct'));
   const fileItem = (entry) => ({ kind: 'file', webkitGetAsEntry: () => entry });
-  box.sandbox.projectPackDrop(ev([file, file], [fileItem(null), fileItem(null)]));
-  assertSafeFailure(box, [], 'two files');
-  box.sandbox.projectPackDrop(ev([], [{ kind: 'string' }]));
-  assertSafeFailure(box, [], 'text drop');
-  box.sandbox.projectPackDrop(ev([file], [fileItem({ isDirectory: true })]));
-  assertSafeFailure(box, [], 'directory');
-  assert.match(box.status(), /フォルダは受け付けません/);
-  assert.equal(file.reads, 0);
-  box.sandbox.projectPackDrop(ev([file], [fileItem({ isDirectory: false }), { kind: 'string' }]));
-  await settle(5);
-  assert.equal(box.context().pressureModel.mode, 'case_direct');
-  assert.match(box.status(), /読み込み経路: ドロップ/);
+  const stringItem = { kind: 'string' };
+  const accepted = async (label, files, items) => {
+    const box = intakeSandbox();
+    box.sandbox.projectPackDrop(ev(files, items));
+    await settle(5);
+    assert.equal(box.context() && box.context().pressureModel.mode, 'case_direct', label + ': ' + box.status());
+    assert.match(box.status(), /読み込み経路: ドロップ/, label);
+  };
+  const rejected = (label, files, items) => {
+    const box = intakeSandbox();
+    assert.equal(box.sandbox.loadProjectPackText(fixtureText('notification1458'), '貼り付け'), true);
+    box.sandbox.projectPackDrop(ev(files, items));
+    assertSafeFailure(box, ['Synthetic Pack N1458'], label);
+    assert.match(box.status(), /段階: ファイル/, label);
+    return box;
+  };
+  // D1: ファイル 1 つだけ → 受け付ける（items が無い環境では files だけで判定する）
+  const d1 = fakeFile(fixtureText('case_direct'));
+  await accepted('D1 one file item', [d1], [fileItem({ isDirectory: false })]);
+  await accepted('D1 files only (no items)', [fakeFile(fixtureText('case_direct'))], undefined);
+  // D2: ファイル 1 つ + 文字列 1 つ → 拒否（以前はこれを受け付けていた）
+  const d2 = fakeFile(fixtureText('case_direct'));
+  rejected('D2 file + string', [d2], [fileItem({ isDirectory: false }), stringItem]);
+  rejected('D2 string + file', [d2], [stringItem, fileItem({ isDirectory: false })]);
+  assert.equal(d2.reads, 0, 'D2 のファイルを読んだ');
+  // D3: 文字列だけ → 拒否
+  rejected('D3 string only', [], [stringItem]);
+  // D4: ファイル 2 つ → 拒否
+  const d4 = fakeFile(fixtureText('case_direct'));
+  rejected('D4 two files', [d4, d4], [fileItem(null), fileItem(null)]);
+  assert.equal(d4.reads, 0);
+  // D5: フォルダ → 拒否
+  const d5 = fakeFile('');
+  const box5 = rejected('D5 directory', [d5], [fileItem({ isDirectory: true })]);
+  assert.match(box5.status(), /フォルダは受け付けません/);
+  assert.equal(d5.reads, 0);
 });
 
 test('P2L-S3B1-19: advisory は件数と path・規則名だけ。0 件を安全と言わない', () => {
@@ -597,6 +619,55 @@ test('P2L-S3B1-19: advisory は件数と path・規則名だけ。0 件を安全
   assert.equal(box.sandbox.projectPackAdvisoryText({ path: 'pack.projectMetadata.publicLabel', rule: 'Rule XYZ!' }),
     'pack.projectMetadata.publicLabel — …');
   assert.equal(FORBIDDEN_WORDING.test(box.els['pack-preview'].textContent), false);
+});
+
+test('P2L-S3B1-21: 入力値の echo は "got" の後ろを区切りの形によらず落とす（RF-21-02）', () => {
+  const box = intakeSandbox();
+  const vocab = box.sandbox.projectPackVocabulary();
+  const sanitize = (r) => box.sandbox.sanitizeProjectPackReason(r, vocab);
+  // 区切りの形を列挙しない: どの形でも値の手前で止まる
+  [['V0 must be within [1, 200] m/s (got 9876.54)', 'V0 must be within [1, 200] m/s'],
+    ['checkedAt must be a valid "YYYY-MM-DD" date string, got: "Tokyo 9876"', 'checkedAt must be a valid "YYYY-MM-DD" date string'],
+    ['does not take recurrenceYears (industry recommendation); got 9876.54', 'does not take recurrenceYears (industry recommendation)'],
+    ['must not exceed buildingHeightM (got eaves 9876 m > building 12 m)', 'must not exceed buildingHeightM'],
+    ['must be a string; Got 9876', 'must be a string'],
+    ['value rejected: got 9876', 'value rejected'],
+    ['value rejected - got 9876', 'value rejected -']
+  ].forEach(([input, want]) => {
+    const out = sanitize(input);
+    assert.equal(out, want, input);
+    assert.equal(/9876|Tokyo/.test(out), false, input);
+  });
+  // "got" を含む別の単語では切らない（単語としての got だけ）
+  assert.equal(sanitize('forgotten field is not data'), 'forgotten field is not data');
+});
+
+test('P2L-S3B1-22: notification_baseline に recurrenceYears を付けた Pack は失敗し、その値を表示しない（RF-21-02）', async () => {
+  const DISTINCT = 8642.97;
+  const LABEL = 'Synthetic Pack Recurrence Probe';
+  const build = () => {
+    const p = fixture('notification1458');
+    assert.equal(p.windConditions.basis, 'notification_baseline');
+    p.projectMetadata.publicLabel = LABEL;
+    p.windConditions.recurrenceYears = DISTINCT;
+    return JSON.stringify(p);
+  };
+  // 前提: 検証器の文面そのものはこの値を "; got" の後ろに含む（含まなければこの test は何も確かめていない）
+  assert.throws(() => Pack.validateProjectPack(JSON.parse(build())), (e) => e.message.includes('; got ' + DISTINCT));
+  const secrets = [String(DISTINCT), '8642', LABEL, 'recurrence-probe-file-XYZ', '"windConditions"', '{"'];
+  // 貼り付け
+  const box = intakeSandbox();
+  assert.equal(box.sandbox.loadProjectPackText(fixtureText('case_direct'), '貼り付け'), true);
+  assert.equal(box.sandbox.loadProjectPackText(build(), '貼り付け'), false);
+  assertSafeFailure(box, secrets, 'recurrenceYears via paste');
+  assert.match(box.status(), /段階: Project Pack 検証/);
+  assert.match(box.status(), /\n場所: pack\.glazingCases\[0\]\n/);
+  assert.match(box.status(), /理由: wind conditions are not a valid notification-1458 input: notification_baseline does not take recurrenceYears/);
+  // ファイル（ファイル名も表示しない）
+  const box2 = intakeSandbox();
+  box2.sandbox.intakeProjectPackFile(fakeFile(build(), { name: 'recurrence-probe-file-XYZ.json' }), 'ファイル選択');
+  await settle(5);
+  assertSafeFailure(box2, secrets, 'recurrenceYears via file');
 });
 
 test('P2L-S3B1-20: browser harness は登録され、Pack の検証器・adapter を呼ばない', () => {

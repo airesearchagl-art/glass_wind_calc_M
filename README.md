@@ -1035,7 +1035,8 @@ raw JSON text → JSON.parse → ProjectPack.validateProjectPack(raw)
 ```
 
 - ファイル選択（`.json` / `application/json`、1 つだけ）・貼り付け（「検証して読み込む」を押すまで解析しない）・
-  ドロップ（ファイル 1 つだけ。複数ファイル・フォルダ・ファイル以外は拒否）の 3 つは、どれも `loadProjectPackText(text)` を通ります。
+  ドロップ（項目がちょうど 1 つで、それがファイルであること。複数ファイル・フォルダ・ファイル以外の項目を含むドロップは拒否）の
+  3 つは、どれも `loadProjectPackText(text)` を通ります。
 - trust は `pack_unreviewed` だけです（`ProjectContext` が sourceKind から決めます）。sourceClaim は申告
   （`pack_unreviewed_claim`）で、canonical Evidence・Promotion Gate・`verifiedCases`・Promotion Candidate へは流しません。
 - Pack の計算、Pack → ProjectInput の変換、active source の切替、preset selector、Pack の Closure 判定はしません
@@ -1047,7 +1048,8 @@ raw JSON text → JSON.parse → ProjectPack.validateProjectPack(raw)
 - 失敗したら staged は空のままです（**前に読み込んだ Pack も残しません**）。画面には
   「読み込みに失敗しました。Project Packは現在読み込まれていません。」と、段階・検証器の path・理由だけを出します。
   入力の値・schema に無い key 名・JSON 本文・stack は表示しません（JSON 構文エラーはブラウザの文面が入力の断片を
-  含むので固定文にします）。
+  含むので固定文にします）。検証器・風圧・Evidence の文面が受け取った値を示す `got` 以降（`(got …)` / `, got: …` /
+  `; got …` など）は、区切りの形によらず表示しません。
 - 「Packを解除」で staged の参照を null に戻します。遅いファイル読込が、後から始まった読込や解除を上書きすることはありません。
 
 ### 取り込み上限 `MAX_PROJECT_PACK_IMPORT_BYTES`（8 MiB）
