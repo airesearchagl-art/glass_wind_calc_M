@@ -1039,7 +1039,8 @@ raw JSON text → JSON.parse → ProjectPack.validateProjectPack(raw)
   3 つは、どれも `loadProjectPackText(text)` を通ります。
 - trust は `pack_unreviewed` だけです（`ProjectContext` が sourceKind から決めます）。sourceClaim は申告
   （`pack_unreviewed_claim`）で、canonical Evidence・Promotion Gate・`verifiedCases`・Promotion Candidate へは流しません。
-- Pack の計算、Pack → ProjectInput の変換、active source の切替、preset selector、Pack の Closure 判定はしません
+- Pack → ProjectInput の変換、active source の切替、preset selector、Pack の Closure 判定はしません。Pack の計算は
+  S3-B2 の明示操作による 1 ケースだけです（下の「Project Pack Case Execution」）
   （`ProjectInput.SOURCE_KINDS` と schemaVersion も変えていません）。
 
 ### transactional
@@ -1083,6 +1084,79 @@ raw JSON text → JSON.parse → ProjectPack.validateProjectPack(raw)
   repository に残る legacy 案件値と 1 つも一致しないことをその場で確かめます。
 - Node: `tests/s3b1-project-pack-intake.test.js`（経路・境界の静的な検査と、`index.html` の intake block を vm で動かす挙動の検査）。
 - 実ブラウザ: `node tools/browser-checks/project-pack-intake.mjs`（UI だけを操作し、harness 側では Pack の検証器・adapter を呼びません）。
+
+## Project Pack Case Execution（Phase 2L-B2 / S3-B2）
+
+読み込んだ（staged の）Project Pack から、**利用者が選んだ 1 ケースだけ**を、**「選択ケースを計算（未レビュー）」を押したとき
+だけ**計算し、Pack 欄の中だけに表示します。結果は**未レビュー（`pack_unreviewed`）で、計算済み ≠ 検証済み**です。
+Pack は今回も active context になりません。案件プリセット・入力欄・通常の計算・入力 package（ProjectInput）・一括検討
+（Workspace / Scenario）・export・Review・Closure・Evidence には接続しません。
+
+### 独立した pure module
+
+`project-config/project-pack-execution.js`（`ProjectPackExecution`）は入力 package とは別の contract です。
+
+```
+ProjectContext（fromProjectPack が発行したものだけ）
+  → case 解決（caseId 完全一致） → pane 解決（paneId 完全一致）
+  → 風圧の解決（pressureModel.mode ごと） → GlassCalc の候補判定 → Pack Case Execution result（deep-frozen）
+```
+
+- export: `EXECUTION_TYPE`（`glass_wind_project_pack_case_execution`）・`SCHEMA_VERSION`（1）・`listCaseIds(ctx)`・
+  `executeCase(ctx, caseId)`・`isExecutionResult(r)`・`assertExecutionResult(r)`。
+- 入口は `ProjectContext.assertProjectContext(ctx)` を必ず通し、`sourceKind === 'project_pack_unreviewed'` かつ
+  `trust === 'pack_unreviewed'` を要求します。built-in の context・形を真似た object・生の Pack・validate 済みの Pack object は拒否します。
+- case・pane・評価高さ・正圧の階・負圧の部位・ケース別の設計風圧は、すべて**完全一致でちょうど 1 件**を要求します。
+  0 件・複数件・単位違いは失敗で、先頭の行・先頭の pane・別の case へは fallback しません。
+- 入力 package（`ProjectInput`）・Closure・出典の申告（evidenceClaims）・active context・DOM・保存・通信を参照しません
+  （静的に固定）。`ProjectInput.SOURCE_KINDS`（4 種）と `SCHEMA_VERSION`（2）は変えていません。
+- 依存（ProjectContext・WindPressure・GlassCalc）は **module の初期化時に 1 度だけ**掴み、後から global を読み直しません。
+  ProjectContext は trust の境界、WindPressure / GlassCalc は計算の境界なので、初期化後に差し替えられた・後から現れた
+  global には決めさせません。初期化時に無かった依存はその module instance では使えないままで（後から本物を読み込んでも
+  同じ）、呼び出しが fail closed になります。読み込み自体は失敗しないので、ProjectContext を読み込めない page でも
+  他の mode は動きます（画面は固定文の失敗表示）。
+
+### 風圧の解決（mode ごと）
+
+| mode | 使う capability | 風圧 |
+|---|---|---|
+| `notification1458` | `notificationCalculation` | case の floor と完全一致する評価高さで `WindPressure.calculateWindPressure()` を呼ぶ（V0・粗度・建物高さ・軒高・評価高さ・建物タイプ・部位・算定基準、あれば再現期間・短辺）。正圧・負圧（signed のまま）・`designPressure` は風圧側の結果そのもの |
+| `project_pressure_map` | `projectPressureMap` | case の floor と完全一致する正圧、zone と完全一致する負圧（絶対値のまま）。`designPressure = max(|正圧|, 負圧の絶対値)` |
+| `case_direct` | `caseDirectPressure` | caseId と完全一致する `designPressure` だけ。正圧・負圧・負圧の絶対値を作らず、floor / zone を推測しない（case にある floor / zone は case の文脈として持つだけ） |
+
+- 風圧側の `provenance`（計算式の検証状況）は結果へ写しません。計算式の出どころであって、Pack の入力の trust ではない
+  からです。告示 mode では数値と計算の trace（inputs / normalized / positive / negative / geometry / trace）だけを持ちます。
+- ガラスは `GlassCalc.paneAreaM2()`・`generateCandidates()`・`splitCandidates()` を呼ぶだけで、推奨候補は OK の先頭です
+  （式を再実装しません）。OK は**計算上の候補判定**で、Evidence の確認ではありません。
+
+### 結果と trust
+
+- 結果は `trust: 'pack_unreviewed'` 固定で、出典の申告（claimedLevel が primary など）を読みません。申告を強くしても結果は同一です。
+- 結果のどの階層にも verified / approved / reviewed / attested / canonicalEvidence / promotionCandidate / provenance /
+  sourceClaim などの field を置きません（形の検証で拒否）。`executeCase()` が発行した結果だけが `assertExecutionResult()` を通ります。
+- 計算しても Evidence は増えません。Pack Closure・sourceClaim → Observation・canonical Evidence・Promotion・attestation は未実装です。
+
+### 画面
+
+- Pack を読み込むと、ケースの選択肢（caseId と paneId だけ）と「選択ケースを計算（未レビュー）」が出ます。**読み込んだだけでは
+  計算しません。** 1 回の操作で 1 ケースだけです（全ケースの一括実行はありません）。
+- 結果は「Project Pack ケース計算（未レビュー）」の中に、trust・計算済み ≠ 検証済み・公開表示名・caseId / paneId・W × H・
+  glassType・mode・designPressure・mode ごとの内訳（告示: 正圧 / 負圧 / 評価高さ / 階 / 部位、map: 正圧 / 負圧の絶対値 / 階 / 部位、
+  case_direct: designPressure だけ）・推奨候補と許容風圧・OK / NG / 適用範囲外の件数を表示します。
+- 新しい Pack の読込開始・読込失敗・解除・ケースの選択変更・計算失敗のどれでも、前の結果を消します。
+- 計算失敗では「選択ケースを計算できませんでした。未レビューPackの計算結果は現在ありません。」とだけ表示し、例外の文面は
+  出しません。Pack は staged のまま残ります（取り込みの失敗では Pack も消える点と違います）。
+- 結果は memory-only です（保存・通信・URL 反映・console 出力なし）。
+
+### 確認
+
+- Node: `tests/project-pack-execution.test.js`（gate・3 mode の G002・pane・不変性・trust・Evidence 無し・依存の境界・
+  provenance を写さないこと・case_direct を分けないこと・vm で作った不整合な capability での fail closed。期待値は fixture の
+  literal と、風圧・ガラスの計算を直接呼んで固定した値で、executor の出力からは作りません）と
+  `tests/project-pack-execution-ui.test.js`（明示操作だけ・staged context だけを渡す・古い結果を消す・失敗の固定文・
+  active へ流さない・文言、および index.html の block を vm で動かす挙動）。
+- 実ブラウザ: `node tools/browser-checks/project-pack-execution.mjs`（UI だけを操作し、harness 側では Pack の検証器・adapter・
+  executor を呼びません）。
 
 ## 設計定数
 
@@ -1192,6 +1266,7 @@ glass_wind_calc_M/
 │   ├── registry.js               # generic preset registry（Phase 2D）。built-in presetのみ登録可・unknownはfail closed
 │   ├── project-input.js          # versioned Project Input Package（Phase 2D〜2E）。v2でwindInputを保持
 │   ├── project-pack.js           # Project Pack v1 の schema / validator（Phase 2L-B1）。runtime では staged preview だけ（S3-B1）
+│   ├── project-pack-execution.js # Project Pack Case Execution（Phase 2L-B2 / S3-B2）。選択した 1 ケースだけ・未レビュー
 │   └── project-context.js        # ProjectContext 契約 + legacy / pack adapter（Phase 2L-B2 / S2-A）
 ├── tests/
 │   ├── calc.test.js              # 汎用計算コアの known-answer test + core purity（node:test）
@@ -1210,6 +1285,8 @@ glass_wind_calc_M/
 │   ├── project-pack.test.js      # Project Pack v1 契約・3 mode・trust境界・合成fixture（Phase 2L-B1）
 │   ├── project-context.test.js   # ProjectContext 契約・adapter・trust不変条件・runtime parity（Phase 2L-B2 / S2-A）
 │   ├── s3b1-project-pack-intake.test.js # browser-local Project Pack intake & preview（Phase 2L-B2 / S3-B1）
+│   ├── project-pack-execution.test.js    # Project Pack Case Execution の pure module（Phase 2L-B2 / S3-B2）
+│   ├── project-pack-execution-ui.test.js # Project Pack ケース計算の UI（明示操作・古い結果を消す・失敗の固定文）
 │   └── fixtures/project-pack/    # 3 mode の合成 Project Pack（S3-B1）
 ├── package.json
 └── README.md                     # このファイル
@@ -1445,6 +1522,7 @@ node --test
 | `tests/review-package.test.js` | Review Package契約（derived-only・import経路なし・exporter gate）・**行と詳細の値が評価結果と一致すること**・summary/governingの一致・Full/Redactedのredaction・Markdown escape・診断privacy・継承値の遮断・export上限 |
 | `tests/review-ui.test.js` | Review UIの契約（描画元は `activeReview` のみ・鮮度はその場で再計算・export/印刷の関門・`@media print`・支配ケースを再選択しない・保存/通信なし） |
 | `tests/s3b1-project-pack-intake.test.js` | Project Pack intake（Phase 2L-B2 / S3-B1）: 経路は 1 つ・staged ≠ active・Pack → ProjectInput なし・取り込み上限は解析前・memory-only・ファイル名を保持しない・失敗表示は path と理由だけ・文言・合成 fixture・intake block を vm で動かす transactional / 上限 / drop / 競合の挙動 |
+| `tests/project-pack-execution.test.js` / `tests/project-pack-execution-ui.test.js` | Project Pack Case Execution（Phase 2L-B2 / S3-B2）: 本物の Pack context だけ・caseId / paneId / 階 / 部位 / 評価高さの完全一致・case_direct を分けない・trust は pack_unreviewed 固定・Evidence / provenance を持たない・入力 package と Closure に依存しない・明示操作だけ・古い結果を消す・計算失敗の固定文 |
 
 ### 必須ケース
 

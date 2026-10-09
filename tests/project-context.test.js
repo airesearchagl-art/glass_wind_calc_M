@@ -615,7 +615,7 @@ test('P2L-S2A-40: context を作っても runtime / probe の状態は変わら�
   assert.equal(state.hasPromotionCandidate, false);
 });
 
-test('P2L-S2A-41: ProjectContext の consumer は index.html と probe だけで、active context は legacy adapter だけで作る（S2-B / S3-A / S3-B1）', () => {
+test('P2L-S2A-41: ProjectContext の consumer は index.html・probe・Pack executor だけで、active context は legacy adapter だけで作る（S2-B / S3-A / S3-B1 / S3-B2）', () => {
   // S2-B で index.html が唯一の runtime consumer になった。
   // S3-A: project-state-probe も index.html と同じ経路（runtime default → fromLegacyPreset）で現在の状態を読む。
   // S3-B1: index.html は pack adapter を staged preview の intake で 1 か所だけ呼ぶ（active context にはしない。
@@ -630,6 +630,12 @@ test('P2L-S2A-41: ProjectContext の consumer は index.html と probe だけで
   assert.equal(/activeProjectContext\s*=(?!=)\s*[^;]*(fromProjectPack|context\b|staged)/.test(code), false, 'Project Pack を active context にしている');
   assert.match(probe, /ProjectContext\.fromLegacyPreset\(/, 'project-state-probe.mjs');
   assert.equal(/fromProjectPack|validateProjectPack/.test(probe), false, 'probe が Project Pack を扱っている');
+  // S3-B2: project-pack-execution.js は Pack の context を読むだけの consumer。context を作らない
+  // （adapter を呼ばない）。境界は tests/project-pack-execution.test.js
+  const executor = require('./support/inline-script.js').stripComments(
+    fs.readFileSync(path.join(ROOT, 'project-config/project-pack-execution.js'), 'utf8'));
+  assert.equal(/fromLegacyPreset|fromProjectPack|validateProjectPack/.test(executor), false, 'executor が context を作っている');
+  assert.match(executor, /Context\.assertProjectContext\(ctx\)/);
   // それ以外の runtime module は読まない
   const files = ['project-config/registry.js', 'project-config/evidence-closure.js',
     'project-config/project-input.js', 'project-config/project-pack.js', 'project-config/miyoshi.js',
