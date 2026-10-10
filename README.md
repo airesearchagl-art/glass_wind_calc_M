@@ -1184,6 +1184,14 @@ ProjectPackExecution.listCaseIds(ctx)            … ケースの並び（execut
 - `createBatchRun(ctx)` が返す run は `nextChunk(n)` で最大 n ケースだけを同期的に計算します。`finish()` は全ケースが計算済みで、
   行の数・並び・caseId の一意性が `listCaseIds()` と一致するときだけ結果を発行します。1 ケースでも失敗した run・`cancel()` した
   run は以後使えず、途中までの行は捨てます（部分的な結果を完了として確定しません）。
+- **発行元の context の照合（S3-B3B2-A0）**: `assertBatchOrigin(batchResult, ctx)` は、`batchResult` が発行物であることと、
+  それを発行した run に渡された context（executor の gate を通った instance）が `ctx` と**同じ instance**であることを確かめます。
+  違えば固定文で throw します。比較は object の同一性だけで、公開表示名・mode・caseId・値・JSON・hash の一致では通しません
+  （同じ Pack から作り直した、内容がまったく同じ別の context でも拒否します）。発行元は module private の WeakMap に、
+  全ケースが成功して結果の形の検査を通った `finish()` の中でだけ記録します（未完了・キャンセル・失敗の run では記録しません）。
+  記録は結果の object に載せないので、結果の key・`schemaVersion`（1）・JSON / CSV の派生レポートは変わりません。
+  後続の Pack Review（A1）が「この結果はこの context から計算された」ことを確かめるための API で、画面の鮮度管理
+  （`projectPackBatchOrigin`）とは別の、pure module 側の根拠です。
 - batch result: `batchType`（`glass_wind_project_pack_batch_execution`）・`schemaVersion`（1）・`sourceKind`（`project_pack_unreviewed`）・
   `trust`（`pack_unreviewed`）・`publicLabel`・`pressureMode`・`units`・`totalCases`・`executedCases`・`rows`。
   行は `caseId`・`paneId`・`glassType`・`widthMm` / `heightMm`・`designPressure`・`pressure`（告示: 評価高さ・正圧・負圧、map: 正圧・
