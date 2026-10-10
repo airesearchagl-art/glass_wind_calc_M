@@ -466,6 +466,30 @@
   }
   textarea#pack-report-out[hidden] { display: none; }
 
+  /* ===== 結果の鮮度（Phase 2L-B2 / S3-B3B2-B1） ===== */
+  .result-wrap { display: flex; flex-direction: column; gap: 12px; }
+  .result-freshness {
+    border: 2px dashed var(--warn); border-radius: var(--radius-sm); padding: 10px 14px; margin: 0 0 12px;
+    background: rgba(245,158,11,0.08); color: var(--warn); font-size: 13px; font-weight: 700; line-height: 1.7;
+  }
+  .result-wrap > .result-freshness { margin: 0; }
+  .result-freshness[hidden] { display: none; }
+  /* 現在の入力の結果でないものは薄く表示し、判定バッジに文字でも印を付ける（色だけに頼らない） */
+  #result-area[data-result-freshness="stale"], #result-area[data-result-freshness="invalid"],
+  #result-area[data-result-freshness="failed"],
+  #batch-summary-card[data-result-freshness="stale"] #batch-summary, #batch-summary-card[data-result-freshness="stale"] #batch-groups,
+  #batch-summary-card[data-result-freshness="failed"] #batch-summary, #batch-summary-card[data-result-freshness="failed"] #batch-groups,
+  #batch-results-card[data-result-freshness="stale"] #batch-table, #batch-results-card[data-result-freshness="failed"] #batch-table {
+    opacity: 0.55;
+  }
+  #result-area[data-result-freshness="stale"] .judge-badge::after {
+    content: '変更前'; display: block; font-size: 12px; letter-spacing: 0; text-align: center;
+  }
+  #result-area[data-result-freshness="invalid"] .judge-badge::after,
+  #result-area[data-result-freshness="failed"] .judge-badge::after {
+    content: '以前の入力'; display: block; font-size: 12px; letter-spacing: 0; text-align: center;
+  }
+
   /* 印刷不可の文面は画面には出さない */
   #review-print-blocked { display: none; }
 
@@ -896,9 +920,14 @@
   </div>
 
   <!-- ===== 右カラム：結果 ===== -->
-  <div class="result-col" id="result-area">
-    <div class="card placeholder">
-      計算ボタンを押すと結果が表示されます
+  <div class="result-wrap">
+    <!-- 結果の鮮度（Phase 2L-B2 / S3-B3B2-B1）: 表示中の結果が現在の入力条件で計算したものかどうか。
+         renderResults() が #result-area を書き換えても消えないよう、#result-area の外に置く。固定文だけを入れる。 -->
+    <div class="result-freshness" id="single-result-freshness" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+    <div class="result-col" id="result-area" data-result-freshness="none" aria-describedby="single-result-freshness">
+      <div class="card placeholder">
+        計算ボタンを押すと結果が表示されます
+      </div>
     </div>
   </div>
 
@@ -1235,14 +1264,18 @@
     <div class="batch-status" id="batch-json-status"></div>
   </div>
 
-  <div class="card" id="batch-summary-card" hidden>
+  <div class="card" id="batch-summary-card" data-result-freshness="none" hidden>
     <div class="card-title">サマリ</div>
+    <!-- 結果の鮮度（S3-B3B2-B1）: 集計が現在のWorkspaceの内容に対する結果かどうか -->
+    <div class="result-freshness" id="batch-summary-freshness" role="status" aria-live="polite" aria-atomic="true" hidden></div>
     <div id="batch-summary"></div>
     <div id="batch-groups" style="margin-top:14px;"></div>
   </div>
 
-  <div class="card" id="batch-results-card" hidden>
+  <div class="card" id="batch-results-card" data-result-freshness="none" hidden>
     <div class="card-title">検討結果</div>
+    <!-- 結果の鮮度（S3-B3B2-B1）: 一覧が現在のWorkspaceの内容に対する結果かどうか（読み上げはサマリ側の 1 か所） -->
+    <div class="result-freshness" id="batch-results-freshness" hidden></div>
     <div class="batch-toolbar" style="margin-bottom:10px;">
       <label style="font-size:12px;">表示
         <select id="batch-filter" onchange="batchRender()">
@@ -3404,15 +3437,21 @@ function renderResults(result) {
           <div class="calc-line">部位 = <span class="val">${zoneLabel}</span></div>` : '';
 
   const presetLabelText = activeProjectContext ? activeProjectContext.publicLabel : '';
+  // 出どころは mode ごとに書き分ける（S3-B3B2-B1: 告示風圧計算を「手入力値」と表示しない）。
   const windSelectionTitle =
     mode === 'preset' ? '設計風圧の選定（案件プリセット: ' + escHtml(presetLabelText) + '）'
     : mode === 'imported' ? '設計風圧の選定（取り込みデータ・未検証）'
+    : mode === 'notification' ? '設計風圧の選定（告示風圧計算: 入力した風条件から算定）'
     : '設計風圧の選定（手入力値）';
   const windSelectionNote =
     mode === 'preset'
       ? '※ 正圧・負圧は告示から自動算定した値ではなく、現在の案件プリセットの値です。'
     : mode === 'imported'
       ? '※ 正圧・負圧は外部から取り込んだ値です（sourceKind: imported_unverified）。取り込み元の主張に関わらず、本ツールは未検証として扱います。'
+    : mode === 'notification'
+      ? '※ 正圧・負圧は、入力した風条件から告示1458号系の算定式で計算した値です（sourceKind: notification_calculation）。' +
+        '算定式は一次資料で確認していますが、入力した風条件（V0・粗度区分・高さ等）は本ツールでは検証していません' +
+        '（verificationStatus: ' + escHtml(windStatus) + '）。'
       : '※ 正圧・負圧は現在画面に表示されている値（source: user_input）です。初期表示値も含め、案件原典との照合は本ツールでは行っていません。';
 
   const windHtml = `
@@ -3581,10 +3620,124 @@ function renderPresetContextUnavailable() {
 }
 
 /* ============================================================
+   単一ケースの結果の鮮度（Phase 2L-B2 / S3-B3B2-B1）
+
+   表示中の結果が、現在の入力条件で計算したものかどうかを示す。
+   - 最後に**成功した**計算の入力を snapshot として持つ。snapshot は、計算に実際に使った正規化済みの
+     Project Input Package（ProjectInput.serialize() の決定的な文字列。数値は丸めない）に、計算値は
+     変えないが結果の表示に効く設定（案件プリセットの階・部位の選択、告示 mode の参考比較の表示）を加えたもの。
+   - 判定は毎回、現在の入力から buildCurrentProjectInput() で作り直した snapshot との比較で行う。
+     変更イベントは表示を早く更新するための便宜で、判定の根拠ではない（イベントの無い値の変更も、
+     次に判定したときに検出される）。
+   - 入力を変えただけでは計算し直さない（GlassCalc を自動で呼ばない）。mode 切替と初期表示の自動計算は従来どおり。
+   - 正規化できない入力・計算の失敗の後は、以前の結果を現在の結果として扱わない。
+   - snapshot はこの page の memory 上だけに置く（保存・送信・console 出力をしない）。表示は固定文を textContent で入れる。
+============================================================ */
+
+var SINGLE_RESULT_FRESHNESS = {
+  NONE: 'none',        // 成功した計算がまだ無い（未計算・結果の代わりにエラーを表示している）
+  FRESH: 'fresh',      // 現在の入力条件で計算した結果
+  STALE: 'stale',      // 入力が変わった（変更前の結果）
+  INVALID: 'invalid',  // 現在の入力を正規化できない（以前の結果と比べられない）
+  FAILED: 'failed'     // 直前の計算が完了しなかった
+};
+var SINGLE_RESULT_FRESHNESS_TEXT = {
+  none: '',
+  fresh: '',
+  stale: '入力が変更されました。この結果は変更前の入力によるものです。再計算してください。',
+  invalid: '現在の入力では計算できません。表示中の結果は以前の入力によるもので、現在の入力に対する結果ではありません。',
+  failed: '直前の計算を完了できませんでした。表示中の結果は以前の入力によるもので、現在の入力に対する結果ではありません。'
+};
+var lastSuccessfulSingleInputSnapshot = null;
+var lastSingleCalcSucceeded = false;
+
+/** 結果の表示に効く入力から、比較用の文字列を作る。 */
+function singleInputSnapshot(mode, pkg) {
+  return JSON.stringify({
+    mode: mode,
+    input: ProjectInput.serialize(pkg),
+    display: {
+      floor: mode === 'preset' ? document.getElementById('inp-floor').value : null,
+      zone: mode === 'preset' ? document.getElementById('inp-zone').value : null,
+      presetComparison: mode === 'notification' ? document.getElementById('inp-wind-compare').value : null
+    }
+  });
+}
+
+/** 現在の入力の snapshot。runCalc() が計算しない入力（正規化できない入力）なら null。 */
+function currentSingleInputSnapshot() {
+  try {
+    var mode = getInputMode();
+    if (mode === 'preset' && !activeProjectContext) return null;
+    var W = parseFloat(document.getElementById('inp-W').value);
+    var H = parseFloat(document.getElementById('inp-H').value);
+    if (!W || !H || W <= 0 || H <= 0) return null;
+    return singleInputSnapshot(mode, buildCurrentProjectInput());
+  } catch (e) {
+    return null;
+  }
+}
+
+/** 表示中の結果の鮮度を、現在の入力からその場で判定する。 */
+function getSingleResultFreshness() {
+  if (lastSuccessfulSingleInputSnapshot === null) return SINGLE_RESULT_FRESHNESS.NONE;
+  var current = currentSingleInputSnapshot();
+  if (current === null) return SINGLE_RESULT_FRESHNESS.INVALID;
+  if (!lastSingleCalcSucceeded) return SINGLE_RESULT_FRESHNESS.FAILED;
+  return current === lastSuccessfulSingleInputSnapshot ? SINGLE_RESULT_FRESHNESS.FRESH : SINGLE_RESULT_FRESHNESS.STALE;
+}
+
+function renderSingleResultFreshness() {
+  var state = getSingleResultFreshness();
+  var area = document.getElementById('result-area');
+  var host = document.getElementById('single-result-freshness');
+  if (area) area.setAttribute('data-result-freshness', state);
+  if (host) {
+    var text = SINGLE_RESULT_FRESHNESS_TEXT[state];
+    // 同じ文を書き直さない（読み上げを繰り返させない）
+    if (host.textContent !== text) host.textContent = text;
+    host.hidden = text === '';
+  }
+  return state;
+}
+
+/** runCalc() の開始時。この計算が成功するまで、表示中の結果を現在の結果として扱わない。 */
+function beginSingleCalcAttempt() {
+  lastSingleCalcSucceeded = false;
+}
+
+/** runCalc() が結果を描画した後。計算に使った package から snapshot を記録する。 */
+function noteSingleCalcSuccess(mode, pkg) {
+  lastSuccessfulSingleInputSnapshot = singleInputSnapshot(mode, pkg);
+  lastSingleCalcSucceeded = true;
+  renderSingleResultFreshness();
+}
+
+/** 案件プリセットを読み込めず、結果の代わりにエラーを表示したとき（表示中の結果は無い）。 */
+function noteSingleCalcUnavailable() {
+  lastSuccessfulSingleInputSnapshot = null;
+  renderSingleResultFreshness();
+}
+
+// 入力が変わったら鮮度の表示をすぐ更新する（判定は上の比較で、ここは表示を早めるだけ）。
+// 入力欄の change の処理（mode 切替の自動計算など）は対象の要素で先に走り、ここはその後に通る。
+// ボタン（計算・Import）の後にも合わせるので、runCalc() が例外で止まっても前の結果を現在扱いしない。
+window.addEventListener('DOMContentLoaded', function () {
+  var view = document.getElementById('view-single');
+  if (!view) return;
+  ['input', 'change', 'click'].forEach(function (type) {
+    view.addEventListener(type, function () { renderSingleResultFreshness(); });
+  });
+});
+
+/* ============================================================
    メイン計算処理
 ============================================================ */
 
 function runCalc() {
+  // 結果の鮮度（S3-B3B2-B1）: この計算が成功するまで、表示中の結果を現在の結果として扱わない
+  beginSingleCalcAttempt();
+
   // 入力値取得（モード非依存の共通項目）
   const mode        = getInputMode(); // 'preset' | 'manual' | 'notification' | 'imported'
   const W           = parseFloat(document.getElementById('inp-W').value);
@@ -3596,11 +3749,13 @@ function runCalc() {
   // （案件 module へ fallback しない。明示エラーを出す）。
   if (mode === 'preset' && !activeProjectContext) {
     renderPresetContextUnavailable();
+    noteSingleCalcUnavailable();
     return;
   }
 
   // バリデーション
   if (!W || !H || W <= 0 || H <= 0) {
+    renderSingleResultFreshness();
     alert('幅・高さに正の数値を入力してください。');
     return;
   }
@@ -3612,6 +3767,7 @@ function runCalc() {
   try {
     pkg = buildCurrentProjectInput();
   } catch (e) {
+    renderSingleResultFreshness();
     alert('入力値が不正です: ' + e.message);
     return;
   }
@@ -3668,6 +3824,8 @@ function runCalc() {
     isUnverifiedDefault,
     windTrace
   });
+  // 結果の鮮度（S3-B3B2-B1）: 計算に使った package を、この結果の入力として記録する
+  noteSingleCalcSuccess(mode, pkg);
 }
 
 /* ============================================================
@@ -4065,6 +4223,83 @@ var batchResults = [];
 // のいずれにも渡らない。
 var batchInvalidDiagnostics = [];
 
+/* ============================================================
+   Workspace の結果の鮮度（Phase 2L-B2 / S3-B3B2-B1）
+
+   batchResults（サマリと一覧）が、現在の Workspace の内容に対する結果かどうかを示す。
+   - 最後に**成功した** batchEvaluate() の入力を snapshot として持つ。snapshot は
+     WorkspaceCore.serializeWorkspace() の正規の入力と、表示用の import 診断（batchInvalidDiagnostics）の
+     文字列そのもの（弱い hash に置き換えない）。Review Package の snapshot とは別のもので、そちらには触れない。
+   - 判定は毎回、現在の Workspace と診断から作り直した snapshot との比較で行う。件数・追加の操作だけを見ない
+     （件数が同じで内容が変わった場合も、診断だけが変わった場合も検出する）。
+   - 古い結果は消さず・書き換えず、サマリと一覧の両方で「変更前の結果」と示す。正常に一括計算し直したときだけ戻る。
+   - 結果 CSV は、現在の Workspace の結果であるときだけ出力する（出力の直前に判定する）。
+============================================================ */
+
+var WORKSPACE_RESULT_FRESHNESS = {
+  NONE: 'none',      // 一括計算した結果がまだ無い
+  FRESH: 'fresh',    // 現在の Workspace の内容に対する結果
+  STALE: 'stale',    // Workspace が変わった（変更前の結果）
+  FAILED: 'failed'   // 直前の一括計算が完了しなかった（現在の結果と判定できない）
+};
+var WORKSPACE_RESULT_FRESHNESS_TEXT = {
+  summary: {
+    stale: 'Workspaceが変更されています。表示中の集計は変更前の結果です。一括計算し直してください。',
+    failed: '一括計算を完了できませんでした。表示中の集計は以前のWorkspaceの結果で、現在の内容に対する結果ではありません。'
+  },
+  results: {
+    stale: 'Workspaceが変更されています。表示中の一覧は変更前の結果です。一括計算し直してください。',
+    failed: '一括計算を完了できませんでした。表示中の一覧は以前のWorkspaceの結果で、現在の内容に対する結果ではありません。'
+  }
+};
+var WORKSPACE_CSV_NOT_CURRENT_TEXT =
+  'CSVを出力しませんでした。表示中の結果は現在のWorkspaceの内容と一致していません。一括計算し直してから出力してください。';
+var WORKSPACE_CSV_OUTPUT_STALE_TEXT =
+  'この欄の結果CSVは変更前のWorkspaceの結果です。現在の内容のCSVが必要な場合は、一括計算し直してから出力してください。';
+var lastEvaluatedWorkspaceSnapshot = null;
+var lastWorkspaceEvaluationSucceeded = true;
+var lastWorkspaceCsvOutput = null;   // { text: 出力欄に書いた CSV, snapshot: その CSV の元になった入力 }
+
+/** 現在の Workspace の入力と診断の snapshot。作れなければ null。 */
+function currentWorkspaceSnapshot() {
+  try {
+    return JSON.stringify([WorkspaceCore.serializeWorkspace(batchWorkspace), batchInvalidDiagnostics]);
+  } catch (e) {
+    return null;
+  }
+}
+
+/** 表示中の Workspace の結果の鮮度を、現在の内容からその場で判定する。 */
+function getWorkspaceResultFreshness() {
+  if (!lastWorkspaceEvaluationSucceeded) return WORKSPACE_RESULT_FRESHNESS.FAILED;
+  if (lastEvaluatedWorkspaceSnapshot === null) return WORKSPACE_RESULT_FRESHNESS.NONE;
+  var current = currentWorkspaceSnapshot();
+  if (current === null) return WORKSPACE_RESULT_FRESHNESS.FAILED;
+  return current === lastEvaluatedWorkspaceSnapshot ? WORKSPACE_RESULT_FRESHNESS.FRESH : WORKSPACE_RESULT_FRESHNESS.STALE;
+}
+
+function renderWorkspaceResultFreshness() {
+  var state = getWorkspaceResultFreshness();
+  [['batch-summary-card', 'batch-summary-freshness', 'summary'],
+   ['batch-results-card', 'batch-results-freshness', 'results']].forEach(function (spec) {
+    var card = document.getElementById(spec[0]);
+    var host = document.getElementById(spec[1]);
+    if (card) card.setAttribute('data-result-freshness', state);
+    if (host) {
+      var text = WORKSPACE_RESULT_FRESHNESS_TEXT[spec[2]][state] || '';
+      if (host.textContent !== text) host.textContent = text;
+      host.hidden = text === '';
+    }
+  });
+  // 出力欄に残っている結果 CSV が変更前の Workspace のものなら、そのことを示す（欄の中身は消さない・書き換えない）
+  var out = document.getElementById('batch-json');
+  if (lastWorkspaceCsvOutput && out && out.value === lastWorkspaceCsvOutput.text &&
+      currentWorkspaceSnapshot() !== lastWorkspaceCsvOutput.snapshot) {
+    batchSetStatus('batch-json-status', WORKSPACE_CSV_OUTPUT_STALE_TEXT, true);
+  }
+  return state;
+}
+
 function setView(view) {
   var single = document.getElementById('view-single');
   var batch = document.getElementById('view-batch');
@@ -4078,6 +4313,9 @@ function setView(view) {
   tabBatch.classList.toggle('is-active', isBatch);
   tabSingle.setAttribute('aria-selected', String(!isBatch));
   tabBatch.setAttribute('aria-selected', String(isBatch));
+  // 表示を切り替えたら、表示する側の結果の鮮度を判定し直す（S3-B3B2-B1）
+  if (isBatch) renderWorkspaceResultFreshness();
+  else renderSingleResultFreshness();
 }
 
 function batchSetStatus(elementId, message, isError) {
@@ -4096,6 +4334,8 @@ function batchUpdateCount() {
       document.getElementById('rep-detail-list')) {
     refreshReportSelectors();
   }
+  // 結果の鮮度（S3-B3B2-B1）。ここだけが検知の経路ではない（判定は内容の比較で、表示のたびに行う）
+  renderWorkspaceResultFreshness();
 }
 
 /** §37: import errorは行番号・安全なcaseId・field・理由だけを出す。生データは出さない。 */
@@ -4149,13 +4389,20 @@ function batchClear() {
   var removed = batchWorkspace.clear();
   batchInvalidDiagnostics = [];
   batchResults = [];
+  // 結果を消したので、表示中の結果は無い（未計算に戻す）
+  lastEvaluatedWorkspaceSnapshot = null;
+  lastWorkspaceEvaluationSucceeded = true;
   batchUpdateCount();
   batchRender();
   batchSetStatus('batch-status', removed + ' 件を削除しました（この画面の一覧のみ）。', false);
 }
 
 function batchEvaluate() {
+  // 結果の鮮度（S3-B3B2-B1）: 成功するまで、表示中の結果を現在の Workspace の結果として扱わない
+  lastWorkspaceEvaluationSucceeded = false;
   try {
+    // 評価する入力（評価の前に取る）
+    var evaluatedSnapshot = currentWorkspaceSnapshot();
     // 妥当caseの評価 + import診断のINVALID行 をまとめて表示用listにする。
     // INVALID行を作るのは workspace.js 側の canonical helper であり、
     // ここでその場しのぎの行を組み立てない（§5）。
@@ -4163,13 +4410,18 @@ function batchEvaluate() {
       WorkspaceCore.evaluateWorkspace(batchWorkspace),
       batchInvalidDiagnostics
     );
+    // 評価できた入力を記録してから描画する（描画の途中で「失敗」を表示しない）
+    lastEvaluatedWorkspaceSnapshot = evaluatedSnapshot;
+    lastWorkspaceEvaluationSucceeded = evaluatedSnapshot !== null;
     batchRender();
     var summary = WorkspaceCore.summarize(batchResults);
     batchSetStatus('batch-status',
       summary.totalCases + ' 件を表示しています（OK ' + summary.okCount +
       ' / 解なし ' + summary.noSolutionCount + ' / 入力エラー ' + summary.invalidCount + '）。', false);
   } catch (e) {
+    lastWorkspaceEvaluationSucceeded = false;
     batchSetStatus('batch-status', '計算できませんでした: ' + e.message, true);
+    renderWorkspaceResultFreshness();
   }
 }
 
@@ -4247,7 +4499,16 @@ function batchImportJson() {
 function batchExportCsv() {
   try {
     if (batchResults.length === 0) batchEvaluate();
-    document.getElementById('batch-json').value = WorkspaceCore.toCsv(batchResults);
+    // 結果の鮮度（S3-B3B2-B1）: 変更前の結果を、現在の Workspace の結果として CSV に書き出さない。
+    // 古い結果のときは出力欄を書き換えない（入力中の JSON や前の出力を消さない）。
+    if (renderWorkspaceResultFreshness() !== WORKSPACE_RESULT_FRESHNESS.FRESH) {
+      batchSetStatus('batch-json-status', WORKSPACE_CSV_NOT_CURRENT_TEXT, true);
+      return;
+    }
+    var out = document.getElementById('batch-json');
+    out.value = WorkspaceCore.toCsv(batchResults);
+    // textarea は改行を正規化して返すので、比較には読み戻した値を使う
+    lastWorkspaceCsvOutput = { text: out.value, snapshot: lastEvaluatedWorkspaceSnapshot };
     batchSetStatus('batch-json-status',
       '結果CSVを出力しました。CSVは結果の出力専用で、入力として読み戻すことはできません。', false);
   } catch (e) {
@@ -4354,6 +4615,8 @@ function batchRender() {
   var host = document.getElementById('batch-table');
   host.textContent = '';
   batchRenderSummary(batchResults);
+  // 結果の鮮度（S3-B3B2-B1）: 描画のたびに、表示する結果が現在の Workspace のものかを示す
+  renderWorkspaceResultFreshness();
 
   if (batchResults.length === 0) { card.hidden = true; return; }
   card.hidden = false;
