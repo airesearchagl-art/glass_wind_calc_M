@@ -1336,6 +1336,84 @@ JSON 約 1.1 MB・CSV 約 0.5 MB で、上限の内側です。
 - Human verification: CSV を Excel / LibreOffice などで開いたときに、数式の中和されたセルが文字列として表示されることは、
   表計算ソフト側の挙動なので人が確かめる項目として残します。
 
+## Project Pack Review — pure contract（Phase 2L-B2 / S3-B3B2-A1）
+
+確定した全ケース計算の結果（S3-B3A）を、**確認しやすい形にまとめた review** を作る pure module です。
+`project-config/project-pack-review.js`（`ProjectPackReview`）。結果は**未レビュー（`pack_unreviewed`）で、計算済み ≠ 検証済み**です。
+今回は pure contract だけで、画面（index.html）・Markdown / JSON の出力・印刷にはまだ接続していません。Workspace・Review Package は
+変更せず、使いません。
+
+### 流れ
+
+```
+ProjectPackBatch.assertBatchOrigin(batchResult, ctx)   … 発行物で、ctx（同じ instance）から発行された batch だけ（最初の gate）
+  → 全ケースの行（batch の行を 1 field ずつ写し、余裕比・余裕差を加える）
+  → summary・grouping（推奨候補・階・部位）・2 ケースの比較（指定されたときだけ）
+  → 選んだケースの詳細（同じ ctx で ProjectPackExecution.executeCase() し直し、batch の行と完全に照合）
+  → review（deep-frozen・この module の発行物）
+```
+
+- **一覧と集計の正本は batch result** です。詳細だけを、発行元と確かめた同じ context から計算し直します。
+- `buildPackReview(batchResult, ctx, options)`。発行物でない batch（JSON の複製・浅い copy・形だけの object・別の Pack の結果・
+  生の Pack・未完了 / キャンセル / 失敗の run）と、内容が同じでも別の instance の context・built-in の context は、最初の gate で
+  拒否します。画面の鮮度用の `projectPackBatchOrigin` は根拠にしません。
+- 計算式を持たず、WindPressure・GlassCalc・Workspace・Review Package を代わりの計算経路として呼びません（静的に固定）。
+- 依存（`ProjectPackBatch`・`ProjectPackExecution`）は **module の初期化時に 1 度だけ**掴みます（RF-22-01 と同じ）。初期化後に
+  差し替えられた・後から現れた global は使わず、初期化時に無ければ呼び出しが fail closed になります（読み込み自体は失敗しません）。
+- 途中で 1 つでも失敗すれば review を返しません（部分的な review・前の review を返しません）。batch result と context は書き換えません。
+
+### review
+
+- top-level: `reviewType`（`glass_wind_pack_review`）・`schemaVersion`（1）・`sourceKind`（`project_pack_unreviewed`）・
+  `trust`（`pack_unreviewed`）・`interpretation`（`calculated_not_verified`）・`publicLabel`・`pressureMode`・`units`（長さ・高さ・
+  風圧・面積）・`totalCases`・`rows`・`summary`・`groups`・`selectedDetails`・`comparison`。入力の正本ではない派生物です。
+- **行**: 全ケースを batch の並びのまま（省かない・並べ替えない・2000 件でも切り詰めない）。`caseId`・`paneId`・`floor` / `zone`
+  （batch の行にあるときだけ）・`glassType`・`widthMm` / `heightMm`・`designPressure`・`pressureSource`・mode ごとの風圧（告示: 評価高さ・
+  正圧・符号付きの負圧、pressure map: 正圧・負圧の大きさ、case_direct: なし）・`bestCandidate`（label と P、無ければ null）・
+  OK / NG / 適用範囲外の件数・`marginRatio`・`marginPressure`。
+- **余裕比・余裕差**（定義はこの module）: `marginRatio = bestCandidate.P / designPressure`、`marginPressure = bestCandidate.P − designPressure`。
+  推奨候補が無いケースは両方 null（0 で埋めません）。設計風圧は正、結果は有限でなければ失敗します。丸めません。
+  確認用の指標であって、安全性の判定・承認ではありません。
+- **summary**: `totalCases`・`withOkCandidateCount`・`withoutOkCandidateCount`・`outOfScopePresentCount`・`maxDesignPressure` と
+  `maxDesignPressureCaseIds`（全ケースが対象）・`minMarginRatio` と `minMarginRatioCaseIds`（推奨候補があるケースだけが対象。
+  1 件も無ければ null と空）。同じ値のケースはすべて batch の並びで残します。**最大設計風圧と最小余裕比は別の指標**で、
+  互いに代用しません。「支配ケース」「安全なケース」「最も危険なケース」は作りません（定義していません）。
+- **grouping**: 推奨候補の label ごと（推奨候補の無いケースは `label: null` の別の組）、宣言された階ごと・部位ごと（宣言の無い
+  ケースは `declared: false` の別の組。値を推測しません）。組の並びは batch の中で最初に現れた順で、null / 未宣言の組は最後です。
+  各組の caseId は batch の並びで、組の合計は全件です。case_direct の floor / zone は任意で、宣言されたものだけを文脈として写し、
+  設計風圧には使いません。
+- **比較**（`options.comparisonCaseIds`）: ちょうど 2 つの異なる caseId（batch にあるもの）を指定したときだけ作ります。指定しなければ
+  `comparison: null`。1 件・3 件以上・重複・batch に無い caseId は拒否します。2 ケースの行（`a`・`b`）と、数値の差（`B − A`。寸法・
+  設計風圧・mode ごとの風圧・許容風圧・余裕比・余裕差）、文字列の一致（pane・ガラス・推奨候補の label・階・部位）だけを並べます。
+  片方に値が無い（推奨候補なし・未宣言）ときは差も一致も null で、作り話の差は出しません。順位・優劣は付けません。
+- **選んだケースの詳細**（`options.detailCaseIds`、最大 `MAX_DETAIL_CASES` = 50）: 指定しなければ 0 件。51 件以上は切り詰めずに
+  拒否し、重複・batch に無い caseId も拒否します。選んだ順のまま、ケースごとに同じ ctx で `executeCase()` → `assertExecutionResult()`
+  → batch の行との**完全照合**を行います。照合する field: caseId・paneId・ガラス・寸法・floor / zone の有無と値・mode・
+  `pressureSource`・設計風圧・mode ごとの風圧（告示の負圧は符号まで、pressure map は負圧の大きさ、case_direct は設計風圧だけで
+  正圧・負圧が無いこと）・推奨候補の有無 / label / P・3 つの件数・`publicLabel`・単位。数値は `===` で比べ、許容誤差を置きません。
+  1 つでも違えば review 全体を固定文で拒否します。詳細は、計算し直した結果から allowlist の field だけを写します（`extraFactor`・
+  `areaM2`・風圧の内訳・推奨候補・余裕・件数・候補の一覧は label / P / status だけ）。候補の detail・告示の trace・計算式の
+  provenance は写しません。適用範囲外の候補は OK として扱いません。
+- 例外の文面は固定で、publicLabel・caseId・入力値・例外の中身を含めません。
+- trust は申告（claimedLevel が primary など）で変わりません。verified / approved / attested・canonical Evidence・verifiedCases・
+  Promotion Candidate・sourceClaim・生の Pack・context は review に置きません。
+
+### 後続（未実装）
+
+画面での表示（phase B）、Markdown / JSON の出力、印刷、Redacted、Workspace との相互変換は、この PR では行っていません。
+画面は `buildPackReview(stagedProjectPackBatch, stagedProjectContext, options)` を呼び、発行物の確認には
+`isPackReview` / `assertPackReview` を使う想定です。鮮度（Pack の再読込・再計算・キャンセルでの無効化）は画面側の責務です。
+
+### 確認
+
+- Node: `tests/project-pack-review.test.js`（R01–R22: 最初の gate・別 instance の context と偽の batch の拒否・3 mode の全行・
+  2 / 50 / 1000 / 1001 / 2000 ケース・並び / 件数 / 一意性・余裕比と余裕差（固定値・全行・告示 mode は Workspace の評価と一致）・
+  推奨候補なし・最大設計風圧と最小余裕比の区別・grouping・case_direct の floor / zone・比較・不正な選択・50 件の上限・詳細の
+  完全一致・別の genuine な context の結果を返す executor での照合の失敗・符号 / 出どころ / P の 1 ulp・trust・deep-freeze と
+  発行物の gate・別 instance と初期化後の global・Workspace / Review Package / DOM に触れないこと・privacy）。期待値は review の出力
+  からは作らず、固定値・executor の単独計算・素朴な集計・Workspace（test の中だけ）から取ります。
+- 画面を持たないので、browser harness は追加していません。
+
 ## 設計定数
 
 ### 設計風圧（正圧・負圧）＝「みよし案件プリセット」値
@@ -1447,6 +1525,7 @@ glass_wind_calc_M/
 │   ├── project-pack-execution.js # Project Pack Case Execution（Phase 2L-B2 / S3-B2）。選択した 1 ケースだけ・未レビュー
 │   ├── project-pack-batch.js     # Project Pack Multi-Case Execution（Phase 2L-B2 / S3-B3A）。executeCase の繰り返し・全件そろったときだけ
 │   ├── project-pack-report.js    # Project Pack Derived Report（Phase 2L-B2 / S3-B3B1）。JSON / CSV・一方向・未レビュー
+│   ├── project-pack-review.js    # Project Pack Review（Phase 2L-B2 / S3-B3B2-A1）。pure contract・origin gate・詳細の完全照合
 │   └── project-context.js        # ProjectContext 契約 + legacy / pack adapter（Phase 2L-B2 / S2-A）
 ├── tests/
 │   ├── calc.test.js              # 汎用計算コアの known-answer test + core purity（node:test）
@@ -1471,6 +1550,7 @@ glass_wind_calc_M/
 │   ├── project-pack-batch-ui.test.js     # Project Pack 全ケース計算の UI（明示操作・チャンク・キャンセル・競合・ページ）
 │   ├── project-pack-report.test.js       # Project Pack Derived Report の pure module（Phase 2L-B2 / S3-B3B1）
 │   ├── project-pack-report-ui.test.js    # Project Pack 派生レポートの UI（明示操作・鮮度・消える経路・失敗の固定文）
+│   ├── project-pack-review.test.js       # Project Pack Review の pure contract（Phase 2L-B2 / S3-B3B2-A1）
 │   ├── support/synthetic-pack.js # 多ケースの合成 Project Pack をその場で作る（S3-B3A。保存しない）
 │   └── fixtures/project-pack/    # 3 mode の合成 Project Pack（S3-B1）
 ├── package.json
@@ -1710,6 +1790,7 @@ node --test
 | `tests/project-pack-execution.test.js` / `tests/project-pack-execution-ui.test.js` | Project Pack Case Execution（Phase 2L-B2 / S3-B2）: 本物の Pack context だけ・caseId / paneId / 階 / 部位 / 評価高さの完全一致・case_direct を分けない・trust は pack_unreviewed 固定・Evidence / provenance を持たない・入力 package と Closure に依存しない・明示操作だけ・古い結果を消す・計算失敗の固定文 |
 | `tests/project-pack-batch.test.js` / `tests/project-pack-batch-ui.test.js` | Project Pack Multi-Case Execution（Phase 2L-B2 / S3-B3A）: 計算は executeCase の繰り返しだけ・Pack の並び / 件数 / 一意性・全件そろったときだけ確定・途中の失敗で部分結果を出さない・trust は pack_unreviewed 固定・依存は初期化時に固定・明示操作だけ・チャンクの間で yield・キャンセル / Pack の切替 / 解除 / もう一度の開始で古い run を捨てる・確定直前の token 確認・50 行のページ |
 | `tests/project-pack-report.test.js` / `tests/project-pack-report-ui.test.js` | Project Pack Derived Report（Phase 2L-B2 / S3-B3B1）: batch の発行物だけ・field の明示的な写し・trust / interpretation 固定（CSV の各行にも）・JSON の key 順と full precision・CSV の固定列と空欄・数式の中和・8 MiB の上限で切り詰めない・2000 ケース・一方向（入力へ戻らない）・依存は初期化時に固定・明示操作だけ・鮮度の確認・消える経路・失敗の固定文 |
+| `tests/project-pack-review.test.js` | Project Pack Review（Phase 2L-B2 / S3-B3B2-A1）: batch の発行元の gate（同じ context instance だけ）・全行を batch の並びで・余裕比 / 余裕差の定義・summary は最大設計風圧と最小余裕比を分ける・grouping・2 ケースの比較・詳細は同じ context での再計算と完全照合（1 field でも違えば全体を拒否）・50 件の上限・trust 固定・deep-frozen と発行物の gate・依存は初期化時に固定・Workspace / Review Package に触れない・privacy |
 
 ### 必須ケース
 
