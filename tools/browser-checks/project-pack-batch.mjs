@@ -245,7 +245,7 @@ function checkModeResult(id, s, mode) {
   const g = s.rows.find((x) => x[0] === 'G002');
   check(id + '-G002', JSON.stringify(g) === JSON.stringify(want.G002), JSON.stringify(g));
   check(id + '-header', JSON.stringify(s.header) === JSON.stringify(HEADER), s.header.join('|'));
-  const strong = s.sectionText.replace(/計算済み ≠ 検証済み/g, '');
+  const strong = s.sectionText.replace(/計算済み ≠ 検証済み/g, '').replace(/publication advisoryが0件でも公開安全の証明にはなりません。/g, '');
   check(id + '-wording', !STRONG_WORDING.test(strong) && !/検証済/.test(strong) &&
     s.summary.includes('trust: pack_unreviewed（未レビュー）— 計算済み ≠ 検証済み'), (strong.match(STRONG_WORDING) || ['none'])[0]);
   check(id + '-status', !s.statusError && s.status === '全 ' + want.order.length + ' ケースを計算しました（未レビュー。計算済み ≠ 検証済み）。' &&
@@ -454,7 +454,8 @@ check('B15-no-url', url.hash === '' && url.search === '' && url.href === FILE &&
 check('B15-no-console', consoleMessages.length === 0 && pageErrors.length === 0,
   `console=${consoleMessages.length} pageErrors=${pageErrors.length}`);
 const panel = await page.evaluate(() => document.getElementById('project-pack-section').innerText);
-const strongPanel = panel.replace(/計算済み ≠ 検証済み/g, '');
+// S3-B3B1 の派生レポートの注意文（「…公開安全の証明にはなりません」という否定の文）だけは除いて調べる
+const strongPanel = panel.replace(/計算済み ≠ 検証済み/g, '').replace(/publication advisoryが0件でも公開安全の証明にはなりません。/g, '');
 check('B16-wording', !STRONG_WORDING.test(strongPanel) && !/検証済/.test(strongPanel), (strongPanel.match(STRONG_WORDING) || ['none'])[0]);
 
 /* ---------- 故障の注入（新しい page） ---------- */

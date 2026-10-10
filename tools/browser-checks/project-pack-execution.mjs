@@ -353,7 +353,8 @@ check('E12-no-url', url.hash === '' && url.search === '' && url.href === FILE &&
 check('E12-no-console', consoleMessages.length === 0 && pageErrors.length === 0,
   `console=${consoleMessages.length} pageErrors=${pageErrors.length}`);
 const panel = await page.evaluate(() => document.getElementById('project-pack-section').innerText);
-const strongPanel = panel.replace(/計算済み ≠ 検証済み/g, '');
+// S3-B3B1 の派生レポートの注意文（「…公開安全の証明にはなりません」という否定の文）だけは除いて調べる
+const strongPanel = panel.replace(/計算済み ≠ 検証済み/g, '').replace(/publication advisoryが0件でも公開安全の証明にはなりません。/g, '');
 check('E13-wording', !STRONG_WORDING.test(strongPanel) && !/検証済/.test(strongPanel),
   (strongPanel.match(STRONG_WORDING) || ['none'])[0]);
 

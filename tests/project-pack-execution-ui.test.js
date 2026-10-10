@@ -153,7 +153,9 @@ test('P2L-S3B2-U07: 文言——未レビュー・計算済み ≠ 検証済み�
   assert.match(section, /計算済み ≠ 検証済み/);
   assert.match(section, /pack_unreviewed/);
   const literals = (execCode().match(/'(?:[^'\\]|\\.)*'/g) || []).join('\n');
-  const strong = (section + '\n' + literals).replace(/計算済み ≠ 検証済み/g, '');
+  // S3-B3B1 の派生レポートの注意文（「…公開安全の証明にはなりません」という否定の文）だけは除いて調べる
+  const strong = (section + '\n' + literals).replace(/計算済み ≠ 検証済み/g, '')
+    .replace(/publication advisoryが0件でも公開安全の証明にはなりません。/g, '');
   assert.equal(STRONG_WORDING.test(strong), false, (strong.match(STRONG_WORDING) || [])[0]);
   assert.equal(/検証済/.test(strong), false, '「計算済み ≠ 検証済み」以外で検証済みと書いている');
   assert.match(execCode(), /'trust: ' \+ result\.trust \+ '（未レビュー）— 計算済み ≠ 検証済み'/);

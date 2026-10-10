@@ -149,15 +149,16 @@ test('P2L-S3B1-04: staged は active ではない（activeProjectContext を読�
   assert.equal(assignsAll, assignsInit + 1, 'initActiveProjectContext と宣言以外で active context を置いている');
   assert.equal(/activeProjectContext\s*=\s*[^;]*staged/.test(CODE), false);
   // staged を読むのは intake と、そのすぐ後に続く S3-B2 の Pack ケース計算 block・S3-B3A の全ケース計算
-  // block だけ（通常の計算・入力・Evidence・Closure・Review は読まない。ケース計算 block・全ケース計算
-  // block の境界は tests/project-pack-execution-ui.test.js・tests/project-pack-batch-ui.test.js が確かめる）
+  // block・S3-B3B1 の派生レポート block だけ（通常の計算・入力・Evidence・Closure・Review は読まない。
+  // 各 block の境界は tests/project-pack-execution-ui.test.js・tests/project-pack-batch-ui.test.js・
+  // tests/project-pack-report-ui.test.js が確かめる）
   const intakeStart = CODE.indexOf('var MAX_PROJECT_PACK_IMPORT_BYTES');
   const intakeEnd = CODE.indexOf('\nfunction ', CODE.indexOf('function renderProjectPackPreview(') + 1);
-  const execEnd = CODE.indexOf('\nfunction ', CODE.indexOf('function renderProjectPackBatchResult(') + 1);
+  const execEnd = CODE.indexOf('\nfunction ', CODE.indexOf('function clearProjectPackReportByUser(') + 1);
   assert.equal(intakeStart !== -1 && intakeEnd > intakeStart && execEnd > intakeEnd, true, 'block の範囲を取れない');
   assert.equal(CODE.slice(intakeEnd, execEnd).split('\nfunction ').slice(1).every((f) =>
-    /^(renderProjectPackExecution|clearProjectPackExecution|projectPackExecution|executeSelectedProjectPackCase|packPressureText|packZoneText|renderProjectPackBatch|clearProjectPackBatch|projectPackBatch|startProjectPackBatch|cancelProjectPackBatch|abandonProjectPackBatch|failProjectPackBatch|stepProjectPackBatch|showProjectPackBatchPage|packBatch)/.test(f)),
-  true, 'intake とケース計算・全ケース計算の間に別の関数が入っている');
+    /^(renderProjectPackExecution|clearProjectPackExecution|projectPackExecution|executeSelectedProjectPackCase|packPressureText|packZoneText|renderProjectPackBatch|clearProjectPackBatch|projectPackBatch|startProjectPackBatch|cancelProjectPackBatch|abandonProjectPackBatch|failProjectPackBatch|stepProjectPackBatch|showProjectPackBatchPage|packBatch|renderProjectPackReport|clearProjectPackReport|projectPackReport|showProjectPackReport)/.test(f)),
+  true, 'intake とケース計算・全ケース計算・派生レポートの間に別の関数が入っている');
   const outside = CODE.slice(0, intakeStart) + CODE.slice(execEnd);
   assert.equal(/stagedProjectPack/.test(outside), false, 'intake・ケース計算以外が staged Pack を読んでいる');
 });

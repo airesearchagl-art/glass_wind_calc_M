@@ -1163,7 +1163,7 @@ ProjectContext（fromProjectPack が発行したものだけ）
 読み込んだ（staged の）Project Pack の**全ケース**を、**「Pack全ケースを計算（未レビュー）」を押したときだけ**計算し、
 ケースごとの要約を Pack 欄の中に一覧で表示します。結果は**未レビュー（`pack_unreviewed`）で、計算済み ≠ 検証済み**です。
 trust の境界は S3-B2 と同じで、Pack は active context にならず、案件プリセット・入力欄・通常の計算・入力 package・
-一括検討（Workspace / Scenario）・export・Review・Closure・Evidence には接続しません。
+一括検討（Workspace / Scenario）・Review・Closure・Evidence には接続しません（結果のテキスト出力は下の S3-B3B1 の派生レポートだけです）。
 
 ### 計算の権威は executor だけ
 
@@ -1223,6 +1223,110 @@ Chromium で合成の 2000 ケース（告示 mode）を計算した測定はお
   `tests/support/synthetic-pack.js` がその場で作る合成のものです（実案件の値ではなく、ファイルに保存しません）。
 - 実ブラウザ: `node tools/browser-checks/project-pack-batch.mjs`（UI だけを操作し、harness 側では Pack の検証器・adapter・executor・
   batch module を呼びません）。
+
+## Project Pack Derived Report — CSV / JSON（Phase 2L-B2 / S3-B3B1）
+
+確定した全ケース計算の結果（S3-B3A）から、**伝達用の派生レポート**を JSON / CSV のテキストにして Pack 欄の readonly の出力欄に
+表示します（ブラウザ内でコピーするため）。**再計算用の入力ではありません**: Project Pack・入力 package（ProjectInput）・Workspace・
+Scenario・Review Package のどれにも変換せず、どの取り込み口も受け付けません。結果は**未レビュー（`pack_unreviewed`）で、
+計算済み ≠ 検証済み**です。
+
+Workspace（schemaVersion 1・最大 1000 ケース・ProjectInput v2 を評価）や Review Package（Workspace から作り直す派生物）とは別の
+契約です。Pack の結果をそれらへ変換・分割・downgrade しません。`WorkspaceCore.toCsv()` も使いません（result の契約と sourceKind の
+意味が違い、case_direct の意味を保てないため）。
+
+### pure module
+
+`project-config/project-pack-report.js`（`ProjectPackReport`）。
+
+```
+ProjectPackBatch.assertBatchResult(batchResult)   … 発行物だけ（形・文字列の一致だけでは通らない）
+  → buildReport(batchResult)   … field を 1 つずつ明示的に写した report（deep-frozen・この module の発行物）
+  → serializeJson(report) / toCsv(report)
+```
+
+- export: `REPORT_TYPE`（`glass_wind_pack_derived_report`）・`SCHEMA_VERSION`（1）・`SOURCE_KIND`・`TRUST`・`INTERPRETATION`・
+  `MAX_OUTPUT_BYTES`・`CSV_COLUMNS`・`buildReport`・`isReport`・`assertReport`・`serializeJson`・`toCsv`・`neutralizeFormula`。
+- 拒否するもの: 形だけ似せた object・JSON の複製・生の Project Pack・ProjectContext・単一ケースの計算結果・部分的な batch・
+  trust を偽った object（どれも ProjectPackBatch の発行物ではない）。
+- `ProjectPackBatch` は **module の初期化時に 1 度だけ**掴みます（RF-22-01 と同じ）。後から差し替えた・現れた global は使わず、
+  初期化時に無ければ呼び出しが fail closed になります（読み込み自体は失敗しません）。別の trust の根を作りません。
+- 風圧・ガラスの計算はしません。batch result を丸ごと `JSON.stringify()` しません（`JSON.stringify` は発行された report だけに使う）。
+
+### JSON
+
+```
+{ reportType: 'glass_wind_pack_derived_report', schemaVersion: 1,
+  sourceKind: 'project_pack_unreviewed', trust: 'pack_unreviewed', interpretation: 'calculated_not_verified',
+  publicLabel, pressureMode, units: { length: 'mm', height: 'm', pressure: 'N/m²' },
+  totalCases, executedCases, rows: [...] }
+```
+
+行の key は次の順で固定です（Pack に無い floor / zone は作りません）:
+
+`caseId`・`paneId`・（`floor`）・（`zone`）・`glassType`・`widthMm`・`heightMm`・`designPressure`・`pressureSource`・
+mode ごとの風圧（下表）・`bestCandidate`（`{ label, P }`、無ければ `null`）・`okCount`・`ngCount`・`outOfScopeCount`
+
+| mode | 風圧の field |
+|---|---|
+| `notification1458` | `evaluationHeightM`・`positivePressure`・`negativePressure`（符号付き） |
+| `project_pressure_map` | `positivePressure`・`negativePressureMagnitude`（絶対値のまま。符号を付けない） |
+| `case_direct` | なし（設計風圧と出どころだけ。正圧・負圧を作らない） |
+
+数値は full precision（JavaScript の number をそのまま書く）で、圧力の符号と単位を保ちます。候補の全件・風圧の trace・
+WindPressure の provenance・出典の申告（sourceClaim）・生の Pack・ファイル名・private reference は含みません。
+
+### CSV
+
+列の順は固定です（RFC 4180 相当の quote、行の区切りは CRLF）:
+
+```
+caseId,paneId,floor,zone,sourceKind,trust,interpretation,pressureMode,pressureSource,widthMm,heightMm,glassType,
+designPressure,evaluationHeightM,positivePressure,negativePressure,negativePressureMagnitude,bestCandidate,
+allowablePressure,okCount,ngCount,outOfScopeCount,publicLabel
+```
+
+- 各行に `sourceKind`・`trust`・`interpretation`・`pressureMode` を書きます（一部の行だけをコピーしても trust が失われないように）。
+- mode に無い列は空欄です（架空の 0 や符号を入れません）。`bestCandidate` が無ければ `bestCandidate` / `allowablePressure` は空欄です。
+- 数値セルは number のまま書きます（負数の `-` を文字列として中和しません）。
+- **数式の中和**: 文字列セルは、先頭の空白・制御文字（タブ・CR・LF など）・Unicode の不可視の書式文字を読み飛ばした先が
+  `=` `+` `-` `@`（全角の `＝` `＋` `－` `＠`、数学記号の minus なども）なら、先頭に `'` を付けて文字列として扱わせます（値は削りません）。
+  先頭が制御文字であるだけでも中和します。Pack の入力である `publicLabel` に数式を書いても、CSV ではそのまま文字列になります。
+- 画面の出力欄（textarea）は HTML の仕様で改行を LF に正規化して表示・コピーします。
+
+### 出力の上限
+
+JSON / CSV それぞれ **8 MiB**（`MAX_OUTPUT_BYTES`）。ブラウザで出力するときの資源保護の上限で、Project Pack schema の上限では
+ありません。超えたら切り詰めず、一部も出さずに失敗します（画面は固定文で、前の出力も消えます）。合成 2000 ケースでは
+JSON 約 1.1 MB・CSV 約 0.5 MB で、上限の内側です。
+
+### 画面
+
+- 「Project Pack 派生レポート（未レビュー）」の「JSONレポートを表示」「CSVレポートを表示」「出力を消去」。全ケース計算の結果が
+  確定するまで押せません。**読込・ケースの選択・計算の開始・計算の完了・ページの切替では作りません。**
+- JSON の後に CSV を押せば置き換えます（出力は常に 1 つ）。作る直前と表示の直前に、batch result が発行物で、現在の
+  `stagedProjectPackBatch` と同じ object で、確定時の `projectPackAttempt`・staged context と一致し、計算中の run が無いことを
+  確かめます。違えば失敗です。
+- 新しい Pack の読込開始・読込失敗・解除・計算の開始（再生成）・キャンセル・計算の失敗では、一括の結果と一緒に出力も消えます。
+- 失敗は「レポートを生成できませんでした。現在有効な出力はありません。」だけで、例外の文面・生の Pack を出しません。
+  レポートの失敗では Pack と一括の結果を捨てません。
+- 出力欄の近くに「このレポートにはガラス寸法・設計風圧などの案件入力値が含まれます。ブラウザからコピーして外部共有する場合は、
+  内容と共有先を確認してください。」と「publication advisoryが0件でも公開安全の証明にはなりません。」を表示します
+  （これらの注意は privacy の判定や検証を意味しません）。
+- ファイルのダウンロード・Blob URL・OS へのファイル書き込み・クリップボードへの自動コピーはしません。保存・送信もしません。
+
+### 確認
+
+- Node: `tests/project-pack-report.test.js`（契約・3 mode の行・executor の単独計算との一致・発行物の gate・trust・JSON の key 順と
+  full precision・CSV の列と空欄・数式の中和・上限（上限だけを小さくした module で切り詰めないことを確認）・合成 2000 ケース・
+  依存の固定・一方向（3 ケースの小さな report を ProjectInput / Project Pack / Workspace の取り込み口が受け付けない）・静的な境界）と
+  `tests/project-pack-report-ui.test.js`（明示操作だけ・鮮度の確認の位置・消える経路・失敗・2000 ケース・index.html の block を
+  vm で動かす挙動）。
+- 実ブラウザ: `node tools/browser-checks/project-pack-report.mjs`（UI だけを操作し、harness 側では Pack の検証器・adapter・executor・
+  batch・report module を呼びません）。告示 mode の計算値は、Node と Chromium の V8 で Math 関数の最下位の桁がずれることがあるため、
+  harness では相対 1e-12 で比べます（report は page の中で計算した値をそのまま全桁で書きます）。
+- Human verification: CSV を Excel / LibreOffice などで開いたときに、数式の中和されたセルが文字列として表示されることは、
+  表計算ソフト側の挙動なので人が確かめる項目として残します。
 
 ## 設計定数
 
@@ -1334,6 +1438,7 @@ glass_wind_calc_M/
 │   ├── project-pack.js           # Project Pack v1 の schema / validator（Phase 2L-B1）。runtime では staged preview だけ（S3-B1）
 │   ├── project-pack-execution.js # Project Pack Case Execution（Phase 2L-B2 / S3-B2）。選択した 1 ケースだけ・未レビュー
 │   ├── project-pack-batch.js     # Project Pack Multi-Case Execution（Phase 2L-B2 / S3-B3A）。executeCase の繰り返し・全件そろったときだけ
+│   ├── project-pack-report.js    # Project Pack Derived Report（Phase 2L-B2 / S3-B3B1）。JSON / CSV・一方向・未レビュー
 │   └── project-context.js        # ProjectContext 契約 + legacy / pack adapter（Phase 2L-B2 / S2-A）
 ├── tests/
 │   ├── calc.test.js              # 汎用計算コアの known-answer test + core purity（node:test）
@@ -1356,6 +1461,8 @@ glass_wind_calc_M/
 │   ├── project-pack-execution-ui.test.js # Project Pack ケース計算の UI（明示操作・古い結果を消す・失敗の固定文）
 │   ├── project-pack-batch.test.js        # Project Pack Multi-Case Execution の pure module（Phase 2L-B2 / S3-B3A）
 │   ├── project-pack-batch-ui.test.js     # Project Pack 全ケース計算の UI（明示操作・チャンク・キャンセル・競合・ページ）
+│   ├── project-pack-report.test.js       # Project Pack Derived Report の pure module（Phase 2L-B2 / S3-B3B1）
+│   ├── project-pack-report-ui.test.js    # Project Pack 派生レポートの UI（明示操作・鮮度・消える経路・失敗の固定文）
 │   ├── support/synthetic-pack.js # 多ケースの合成 Project Pack をその場で作る（S3-B3A。保存しない）
 │   └── fixtures/project-pack/    # 3 mode の合成 Project Pack（S3-B1）
 ├── package.json
@@ -1594,6 +1701,7 @@ node --test
 | `tests/s3b1-project-pack-intake.test.js` | Project Pack intake（Phase 2L-B2 / S3-B1）: 経路は 1 つ・staged ≠ active・Pack → ProjectInput なし・取り込み上限は解析前・memory-only・ファイル名を保持しない・失敗表示は path と理由だけ・文言・合成 fixture・intake block を vm で動かす transactional / 上限 / drop / 競合の挙動 |
 | `tests/project-pack-execution.test.js` / `tests/project-pack-execution-ui.test.js` | Project Pack Case Execution（Phase 2L-B2 / S3-B2）: 本物の Pack context だけ・caseId / paneId / 階 / 部位 / 評価高さの完全一致・case_direct を分けない・trust は pack_unreviewed 固定・Evidence / provenance を持たない・入力 package と Closure に依存しない・明示操作だけ・古い結果を消す・計算失敗の固定文 |
 | `tests/project-pack-batch.test.js` / `tests/project-pack-batch-ui.test.js` | Project Pack Multi-Case Execution（Phase 2L-B2 / S3-B3A）: 計算は executeCase の繰り返しだけ・Pack の並び / 件数 / 一意性・全件そろったときだけ確定・途中の失敗で部分結果を出さない・trust は pack_unreviewed 固定・依存は初期化時に固定・明示操作だけ・チャンクの間で yield・キャンセル / Pack の切替 / 解除 / もう一度の開始で古い run を捨てる・確定直前の token 確認・50 行のページ |
+| `tests/project-pack-report.test.js` / `tests/project-pack-report-ui.test.js` | Project Pack Derived Report（Phase 2L-B2 / S3-B3B1）: batch の発行物だけ・field の明示的な写し・trust / interpretation 固定（CSV の各行にも）・JSON の key 順と full precision・CSV の固定列と空欄・数式の中和・8 MiB の上限で切り詰めない・2000 ケース・一方向（入力へ戻らない）・依存は初期化時に固定・明示操作だけ・鮮度の確認・消える経路・失敗の固定文 |
 
 ### 必須ケース
 

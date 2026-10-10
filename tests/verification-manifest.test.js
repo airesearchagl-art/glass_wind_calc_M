@@ -29,6 +29,8 @@ const EXPECTED_INSTRUMENT_IDS = [
   'project-pack-execution',
   // Phase 2L-B2 S3-B3A: explicit multi-case Project Pack execution (atomic, unreviewed)
   'project-pack-batch',
+  // Phase 2L-B2 S3-B3B1: Project Pack derived JSON / CSV report (explicit, unreviewed, one-way)
+  'project-pack-report',
   // Human Gate, Phase 2K final: the single 'mutation' entry was split, because
   // one label could not honestly carry both claims at once.
   'mutation-kill', 'mutation-equivalence-analysis',
@@ -252,6 +254,7 @@ test('P2K-M09: 全 instrument の class と admissibility を literal で固定�
     ['project-pack-batch', 'UNVERIFIED', 'observational'],
     ['project-pack-execution', 'UNVERIFIED', 'observational'],
     ['project-pack-intake', 'UNVERIFIED', 'observational'],
+    ['project-pack-report', 'UNVERIFIED', 'observational'],
     ['project-state-probe', 'ADMISSIBLE', 'observational'],
     ['publication-lint', 'ADMISSIBLE', 'regression'],
     ['stageA-regression', 'UNVERIFIED', 'observational']
