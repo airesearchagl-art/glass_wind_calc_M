@@ -8,6 +8,8 @@
  *   - Workspace: 最後に成功した一括計算の入力（serializeWorkspace と診断）を snapshot として持ち、サマリと一覧の両方で
  *     「変更前」を示す。結果 CSV は現在の結果のときだけ出す
  *   - 告示風圧計算の結果を「手入力値」と表示しない
+ *   - RF-27-01: 出力欄に残った古い結果 CSV の警告は専用の欄（#batch-csv-freshness）に出し、操作の status
+ *     （#batch-json-status）に書かない（Import の失敗などの status で消えない）
  *
  * 前半は実行コードの静的な検査、後半は index.html の該当 block を vm で動かす挙動の検査（最小の偽 DOM と、
  * 実際の ProjectInput / WorkspaceCore / registry。入力の組み立ては index.html の buildCurrentProjectInput() そのもの）。
@@ -79,6 +81,8 @@ test('P2L-S3B3B2B1-F01: 鮮度の表示は #result-area の外・role=status / a
   assert.match(STATIC, /<div class="card" id="batch-summary-card" data-result-freshness="none" hidden>[\s\S]{0,300}<div class="result-freshness" id="batch-summary-freshness" role="status" aria-live="polite" aria-atomic="true" hidden><\/div>/);
   // 一覧の側は読み上げを重ねない（サマリ側の 1 か所だけが live region）
   assert.match(STATIC, /<div class="card" id="batch-results-card" data-result-freshness="none" hidden>[\s\S]{0,300}<div class="result-freshness" id="batch-results-freshness" hidden><\/div>/);
+  // RF-27-01: 出力欄に残った古い CSV の警告は、操作の status の隣の専用の欄（live region）
+  assert.match(STATIC, /<textarea id="batch-json" rows="6" spellcheck="false" aria-describedby="batch-csv-freshness"[\s\S]{0,200}<\/textarea>\s*<div class="batch-status" id="batch-json-status"><\/div>\s*<!--[\s\S]*?-->\s*<div class="result-freshness" id="batch-csv-freshness" role="status" aria-live="polite" aria-atomic="true" hidden><\/div>/);
   // [hidden] を display で上書きしない（AC-01 と同じ落とし穴）
   assert.match(HTML, /\.result-freshness\[hidden\]\s*\{\s*display:\s*none;\s*\}/);
   // 変更前・以前の入力は、薄くするだけでなく文字でも示す
@@ -136,8 +140,20 @@ test('P2L-S3B3B2B1-F04: Workspace の snapshot は serializeWorkspace と診断�
   const csv = fnBody('batchExportCsv');
   assert.equal(csv.indexOf('renderWorkspaceResultFreshness()') < csv.indexOf('WorkspaceCore.toCsv('), true);
   assert.match(csv, /!== WORKSPACE_RESULT_FRESHNESS\.FRESH\) \{\s*batchSetStatus\('batch-json-status', WORKSPACE_CSV_NOT_CURRENT_TEXT, true\);\s*return;/);
-  // Workspace JSON の Export は計算結果ではないので gate を掛けない
-  assert.equal(/Freshness|FRESHNESS/.test(fnBody('batchExportJson')), false);
+  // Workspace JSON の Export は計算結果ではないので gate を掛けない（判定で止めない・常に出力欄へ書く）。
+  // 書いた後に、以前の結果 CSV の注記を外すだけ（RF-27-01）
+  const json = codeOnly(fnBody('batchExportJson'));
+  assert.equal(/WORKSPACE_RESULT_FRESHNESS|renderWorkspaceResultFreshness|getWorkspaceResultFreshness|return|if \(/.test(json), false, 'JSON の Export に gate がある');
+  assert.equal(json.indexOf('WorkspaceCore.serializeWorkspace(batchWorkspace);') < json.indexOf('renderWorkspaceCsvOutputFreshness();'), true);
+  // RF-27-01: 古い CSV の警告は専用の欄。操作の status（#batch-json-status）には書かない
+  assert.equal(/batchSetStatus\([^)]*WORKSPACE_CSV_OUTPUT_STALE_TEXT/.test(CODE), false, '古い CSV の警告を status に書いている');
+  const warn = fnBody('renderWorkspaceCsvOutputFreshness');
+  assert.match(warn, /document\.getElementById\('batch-csv-freshness'\)/);
+  assert.match(warn, /out\.value === lastWorkspaceCsvOutput\.text &&\s*currentWorkspaceSnapshot\(\) !== lastWorkspaceCsvOutput\.snapshot/);
+  assert.match(warn, /host\.textContent = text/);
+  assert.match(fnBody('renderWorkspaceResultFreshness'), /renderWorkspaceCsvOutputFreshness\(\);\s*return state;/);
+  assert.equal(csv.indexOf('lastWorkspaceCsvOutput = {') < csv.indexOf('renderWorkspaceCsvOutputFreshness();'), true, '新しい CSV で警告を外していない');
+  assert.match(codeOnly(workspaceBlock()), /view\.addEventListener\(type, function \(\) \{ renderWorkspaceCsvOutputFreshness\(\); \}\)/);
 });
 
 test('P2L-S3B3B2B1-F05: 告示風圧計算の出どころは「手入力値」ではなく、風条件から算定した値として書く（verified にしない）', () => {
@@ -187,7 +203,7 @@ test('P2L-S3B3B2B1-F07: browser harness は登録され、Pack の検証器・ad
 
 function fakeElement(value) {
   return {
-    value, hidden: true, textContent: '', attrs: {}, className: '', classList: { add() {}, remove() {}, contains() { return false; } },
+    value, hidden: true, textContent: '', attrs: {}, className: '', classList: { add() {}, remove() {}, toggle() {}, contains() { return false; } },
     setAttribute(k, v) { this.attrs[k] = String(v); }, getAttribute(k) { return this.attrs[k] === undefined ? null : this.attrs[k]; },
     addEventListener() {}
   };
@@ -385,16 +401,19 @@ test('P2L-S3B3B2B1-S16: 表示は固定文・属性だけで、状態ごとに�
 function workspaceSandbox() {
   const els = {};
   ['batch-summary-card', 'batch-results-card', 'batch-summary-freshness', 'batch-results-freshness', 'batch-json', 'batch-json-status',
-    'batch-status'].forEach((id) => { els[id] = fakeElement(''); });
+    'batch-status', 'batch-csv-freshness', 'view-single', 'view-batch', 'view-tab-single', 'view-tab-batch'].forEach((id) => { els[id] = fakeElement(''); });
   const statuses = [];
   const sandbox = {
     WorkspaceCore, document: { getElementById: (id) => els[id] || null },
+    window: { addEventListener() {} },
     batchWorkspace: WorkspaceCore.createWorkspace(), batchInvalidDiagnostics: [], batchResults: [],
     batchSetStatus(id, message, isError) { statuses.push([id, message, !!isError]); els[id].textContent = message; },
+    renderSingleResultFreshness() {},
     renders: 0
   };
   vm.createContext(sandbox);
-  vm.runInContext([workspaceBlock(), fnBody('batchEvaluate'), fnBody('batchExportCsv'), fnBody('batchClear'),
+  vm.runInContext([workspaceBlock(), fnBody('setView'), fnBody('batchEvaluate'), fnBody('batchExportCsv'), fnBody('batchClear'),
+    fnBody('batchExportJson'), fnBody('batchImportJson'), fnBody('batchFormatErrors'),
     'function batchUpdateCount() { renderWorkspaceResultFreshness(); }',
     'function batchRender() { renders++; renderWorkspaceResultFreshness(); }'].join('\n'), sandbox);
   return { sb: sandbox, els, statuses };
@@ -458,7 +477,9 @@ test('P2L-S3B3B2B1-W10/W11: 古い結果の CSV は出さず出力欄を書き�
   sb.batchWorkspace.addCase(manualPkg(1100));
   sb.renderWorkspaceResultFreshness();
   assert.equal(els['batch-json'].value, written, '出力欄は書き換えない');
-  assert.equal(els['batch-json-status'].textContent, WS_TEXT.csvOutputStale);
+  assert.equal(els['batch-csv-freshness'].textContent, WS_TEXT.csvOutputStale);
+  assert.equal(els['batch-csv-freshness'].hidden, false);
+  assert.notEqual(els['batch-json-status'].textContent, WS_TEXT.csvOutputStale, '操作の status には書かない');
   // 未計算のまま押すと、従来どおり一括計算してから出す（現在の結果だけ）
   const fresh = workspaceSandbox();
   fresh.sb.batchWorkspace.addCase(manualPkg(900));
@@ -486,4 +507,74 @@ test('P2L-S3B3B2B1-W-failed / W-clear: 一括計算の失敗の後は現在扱�
   sb.batchClear();
   assert.equal(sb.getWorkspaceResultFreshness(), 'none');
   assert.equal(els['batch-summary-card'].getAttribute('data-result-freshness'), 'none');
+});
+
+test('P2L-S3B3B2B1-RF27-01..07: 出力欄に残った古い CSV の警告は専用の欄。status に消されず、再計算・view の切替でも残り、新しい CSV・欄の置き換えで外れる', () => {
+  const { sb, els, statuses } = workspaceSandbox();
+  const warn = els['batch-csv-freshness'];
+  const shown = () => warn.hidden === false && warn.textContent === WS_TEXT.csvOutputStale;
+  const cleared = () => warn.hidden === true && warn.textContent === '';
+  sb.batchWorkspace.addCase(manualPkg(900));
+  sb.batchEvaluate();
+  sb.batchExportCsv();
+  const firstCsv = els['batch-json'].value;
+  assert.equal(cleared(), true, '現在の CSV には警告を出さない');
+  // 1: 現在の CSV → Workspace の変更 → 警告
+  sb.batchWorkspace.addCase(manualPkg(1000));
+  sb.batchUpdateCount();
+  assert.equal(shown(), true, '1: Workspace を変えたのに警告が無い');
+  // 2: 古い CSV が残ったまま Import（CSV は Workspace JSON として読めない）→ エラーの status、警告は残る
+  sb.batchImportJson();
+  assert.equal(els['batch-json-status'].textContent.startsWith('読み込めませんでした: '), true);
+  assert.equal(statuses[statuses.length - 1][2], true);
+  assert.equal(shown(), true, '2: Import の失敗で警告が消えた');
+  // 3: 一括計算し直しても、以前の CSV が残る間は警告
+  sb.batchEvaluate();
+  assert.equal(sb.getWorkspaceResultFreshness(), 'fresh');
+  assert.equal(els['batch-json'].value, firstCsv);
+  assert.equal(shown(), true, '3: 一括計算で警告が消えた');
+  // 7a: 現在の結果でないときの CSV は gate の status（エラー）と警告が別々に出る
+  sb.batchWorkspace.addCase(manualPkg(1100));
+  sb.batchExportCsv();
+  assert.equal(els['batch-json-status'].textContent, WS_TEXT.csvNotCurrent);
+  assert.equal(els['batch-json'].value, firstCsv);
+  assert.equal(shown(), true, '7: gate の status で警告が消えた');
+  // 4: 新しい現在の CSV で外れる
+  sb.batchEvaluate();
+  sb.batchExportCsv();
+  const secondCsv = els['batch-json'].value;
+  assert.notEqual(secondCsv, firstCsv);
+  assert.equal(els['batch-json-status'].textContent.startsWith('結果CSVを出力しました。'), true);
+  assert.equal(cleared(), true, '4: 新しい CSV で警告が外れない');
+  // 5: 出力欄が Workspace JSON などに置き換わったら出さない（欄に CSV が戻れば内容で判定し直す）
+  sb.batchWorkspace.addCase(manualPkg(1200));
+  sb.renderWorkspaceResultFreshness();
+  assert.equal(shown(), true);
+  sb.batchExportJson();
+  assert.equal(els['batch-json'].value, WorkspaceCore.serializeWorkspace(sb.batchWorkspace));
+  assert.equal(els['batch-json-status'].textContent, 'Workspace JSONを出力しました（入力のみ。計算結果は含みません）。');
+  assert.equal(cleared(), true, '5: JSON に置き換わったのに警告が残る');
+  els['batch-json'].value = secondCsv;
+  assert.equal(sb.renderWorkspaceCsvOutputFreshness(), true);
+  els['batch-json'].value = secondCsv + ' ';
+  assert.equal(sb.renderWorkspaceCsvOutputFreshness(), false, '前回の CSV そのものでなければ出さない');
+  assert.equal(cleared(), true);
+  // 6: setView で切り替えても状態が正しい（単一ケースの表示中に、イベントを伴わずに Workspace を変えた場合も）
+  els['batch-json'].value = secondCsv;
+  sb.setView('single');
+  sb.setView('batch');
+  assert.equal(shown(), true, '6: view の切替で警告が消えた');
+  sb.setView('single');
+  const extra = sb.batchWorkspace.listCases().slice(-1)[0];
+  sb.batchWorkspace.removeCase(extra.caseId);
+  assert.equal(shown(), true, '（まだ判定していない）');
+  sb.setView('batch');
+  assert.equal(cleared(), true, '6: CSV を出したときの内容に戻ったのに警告が残る');
+  sb.setView('single');
+  sb.batchWorkspace = WorkspaceCore.createWorkspace();
+  sb.setView('batch');
+  assert.equal(shown(), true, '6: view を戻したときに判定し直していない');
+  // 7: 警告の文は status に入らず、status の文は警告の欄に入らない
+  assert.equal(statuses.some(([, m]) => m === WS_TEXT.csvOutputStale), false);
+  assert.equal(statuses.some(([id]) => id === 'batch-csv-freshness'), false);
 });

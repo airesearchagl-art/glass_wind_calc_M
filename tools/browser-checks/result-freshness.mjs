@@ -17,6 +17,9 @@
 //   Workspace W01–W12: 未計算 / 計算後は現在 / 追加で「変更前」（サマリと一覧の両方）/ 再計算で戻る / 削除・複製 /
 //     TSV・JSON の取り込み / 診断の増減 / 件数が同じで内容が違う / 古い結果の CSV は出さない / 現在の結果の CSV /
 //     出力欄の古い CSV の注記 / 計算の失敗 / 設計レビュー資料の鮮度・印刷の gate は従来どおり
+//   RF27-1–7（RF-27-01）: 出力欄に残った古い結果 CSV の警告は専用の欄（#batch-csv-freshness）に出し、
+//     操作の status（#batch-json-status）とは干渉しない / Import の失敗・一括計算し直し・view の切替で消えない /
+//     新しい現在の CSV で外れる / 出力欄が Workspace JSON などに置き換わったら出さない
 //   出どころの表示 L01–L06: preset / manual / notification / imported の見出しと注記、数値、検証状況
 //   加えて: 固定文だけ（入力値を写さない）・保存・通信・URL・console なし
 import { openBrowser, finishRun } from './harness.mjs';
@@ -510,10 +513,111 @@ check('W05-reevaluated-fresh', wsFresh(w2) && w2.rows === 2, `rows=${w2.rows}`);
     columns: WorkspaceCore.CSV_COLUMNS.join(',') }));
   const lines = csv.value.split('\n');
   check('W11-fresh-csv-unchanged', csv.value === csv.expected && lines[0] === csv.columns && lines.length === 5, `lines=${lines.length}`);
-  // 出力欄に残った CSV が古くなったら、欄を書き換えずに注記する
+  // 出力欄に残った CSV が古くなったら、欄を書き換えずに専用の欄で注記する（操作の status には書かない）
   await clickText('＋ 現在の入力条件を追加');
-  const note = await page.evaluate(() => ({ value: document.getElementById('batch-json').value, status: document.getElementById('batch-json-status').textContent }));
-  check('W11-old-csv-output-noted', note.value === csv.value && note.status === WS_TEXT.csvOutputStale, note.status);
+  const note = await page.evaluate(() => ({ value: document.getElementById('batch-json').value,
+    warn: document.getElementById('batch-csv-freshness').textContent, warnHidden: document.getElementById('batch-csv-freshness').hidden,
+    status: document.getElementById('batch-json-status').textContent }));
+  check('W11-old-csv-output-noted', note.value === csv.value && note.warn === WS_TEXT.csvOutputStale && !note.warnHidden &&
+    note.status !== WS_TEXT.csvOutputStale, note.warn);
+  await evaluateBatch();
+}
+
+// RF27-1–7（RF-27-01）: 出力欄に残った古い結果 CSV の警告は専用の欄。操作の status とは干渉しない
+{
+  const csvState = () => page.evaluate(() => {
+    const w = document.getElementById('batch-csv-freshness');
+    const st = document.getElementById('batch-json-status');
+    const field = document.getElementById('batch-json');
+    return { warnHidden: w.hidden, warnText: w.textContent, shown: !w.hidden && w.getBoundingClientRect().height > 0,
+      role: w.getAttribute('role'), live: w.getAttribute('aria-live'), describedBy: field.getAttribute('aria-describedby'),
+      status: st.textContent, statusError: st.classList.contains('is-error'), value: field.value };
+  });
+  const warned = (c) => !c.warnHidden && c.shown && c.warnText === WS_TEXT.csvOutputStale;
+  const clear = (c) => c.warnHidden && c.warnText === '';
+  const CSV_DONE = '結果CSVを出力しました。';
+  const JSON_DONE = 'Workspace JSONを出力しました（入力のみ。計算結果は含みません）。';
+  const seen = [];
+  const snap = async () => { const c = await csvState(); seen.push(c); return c; };
+
+  // 1: 現在の CSV を出す → Workspace を変える → 警告
+  await clickText('⬇ 結果CSVを出力');
+  const issued = await snap();
+  await clickText('＋ 現在の入力条件を追加');
+  const changed = await snap();
+  check('RF27-1-fresh-csv-then-change-warns', clear(issued) && issued.status.startsWith(CSV_DONE) && warned(changed) &&
+    changed.value === issued.value && changed.role === 'status' && changed.live === 'polite' && changed.describedBy === 'batch-csv-freshness',
+    `${issued.warnHidden} ${changed.warnHidden}`);
+
+  // 2: 古い CSV が残ったまま Import（CSV は Workspace JSON として読めない）→ エラーの status が出ても警告は残る
+  await clickText('⬆ Workspace JSONをImport');
+  const badImport = await snap();
+  check('RF27-2-invalid-json-import-keeps-warning', badImport.status.startsWith('読み込めませんでした: ') && badImport.statusError &&
+    warned(badImport) && badImport.value === issued.value, `${badImport.statusError} ${badImport.warnHidden}`);
+
+  // 3: 一括計算し直しても、以前の CSV が出力欄に残る間は警告を出し続ける
+  await evaluateBatch();
+  const reevaluated = await snap();
+  const w3 = await ws();
+  check('RF27-3-reevaluate-keeps-warning-while-old-csv', wsFresh(w3) && warned(reevaluated) && reevaluated.value === issued.value, w3.summaryAttr);
+
+  // 7a: 現在の結果でないときに CSV を押す → gate の status（エラー）と警告が別々に出る
+  await clickText('＋ 現在の入力条件を追加');
+  await clickText('⬇ 結果CSVを出力');
+  const refused = await snap();
+  await evaluateBatch();
+
+  // 4: 新しい現在の CSV を出すと警告は外れる
+  await clickText('⬇ 結果CSVを出力');
+  const reissued = await snap();
+  check('RF27-4-new-fresh-csv-clears-warning', clear(reissued) && reissued.value !== issued.value && reissued.status.startsWith(CSV_DONE) &&
+    !reissued.statusError, `${reissued.warnHidden}`);
+
+  // 5: 出力欄が Workspace JSON などに置き換わったら、以前の CSV の警告は出さない
+  //    （Export のボタン / 貼り付け / イベントを伴わない batchExportJson()。欄に CSV が戻れば内容で判定し直す）
+  await clickText('＋ 現在の入力条件を追加');
+  const beforeReplace = await snap();
+  await clickText('⬇ Workspace JSONをExport');
+  const exported = await snap();
+  await page.fill('#batch-json', reissued.value);
+  const restored = await snap();
+  await page.fill('#batch-json', '{"pasted":"text"}');
+  const pasted = await snap();
+  await page.fill('#batch-json', reissued.value);
+  const restoredAgain = await snap();
+  await page.evaluate(() => batchExportJson());
+  const programmatic = await snap();
+  check('RF27-5-json-export-replace-no-false-warning', warned(beforeReplace) && clear(exported) && exported.value.startsWith('{') &&
+    exported.status === JSON_DONE && warned(restored) && clear(pasted) && warned(restoredAgain) && clear(programmatic) &&
+    programmatic.value.startsWith('{'), [beforeReplace, exported, restored, pasted, restoredAgain, programmatic].map((c) => (c.warnHidden ? '-' : 'W')).join(''));
+
+  // 6: setView で切り替えても状態が正しい（単一ケースの表示中に、イベントを伴わずに Workspace を変えた場合も）
+  await page.fill('#batch-json', reissued.value);
+  const pre6 = await snap();
+  await page.click('#view-tab-single');
+  await page.click('#view-tab-batch');
+  const back = await snap();
+  await page.click('#view-tab-single');
+  await page.evaluate(() => {
+    const cs = batchWorkspace.listCases();
+    window.__rf27Case = cs[cs.length - 1].inputPackage;
+    batchWorkspace.removeCase(cs[cs.length - 1].caseId);   // CSV を出したときの内容へ戻す（イベントなし）
+  });
+  await page.click('#view-tab-batch');
+  const matched = await snap();
+  await page.click('#view-tab-single');
+  await page.evaluate(() => { batchWorkspace.addCase(window.__rf27Case); delete window.__rf27Case; });   // また変える（イベントなし）
+  await page.click('#view-tab-batch');
+  const changedAgain = await snap();
+  check('RF27-6-setview-warning-state', warned(pre6) && warned(back) && clear(matched) && warned(changedAgain),
+    [pre6, back, matched, changedAgain].map((c) => (c.warnHidden ? '-' : 'W')).join(''));
+
+  // 7: 操作の status と専用の警告は干渉しない（gate の拒否・Import の失敗と警告が並ぶ、Export の status は警告を書き換えない、
+  //    警告の文は status に入らず、status の文は警告の欄に入らない）
+  check('RF27-7-status-and-warning-independent', refused.status === WS_TEXT.csvNotCurrent && refused.statusError && warned(refused) &&
+    refused.value === issued.value && warned(badImport) && badImport.statusError && exported.status === JSON_DONE &&
+    seen.every((c) => c.status !== WS_TEXT.csvOutputStale && (c.warnText === '' || c.warnText === WS_TEXT.csvOutputStale)),
+    `${refused.statusError} ${refused.warnHidden} ${seen.length}`);
   await evaluateBatch();
 }
 

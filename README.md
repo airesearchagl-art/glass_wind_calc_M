@@ -1448,7 +1448,9 @@ ProjectPackBatch.assertBatchOrigin(batchResult, ctx)   … 発行物で、ctx（
   出し、古い結果は消さずに薄く表示します。正常に一括計算し直したときだけ戻ります。計算が完了しなかった場合も現在の結果として扱いません。
 - **結果 CSV**は、表示中の結果が現在の Workspace のものであるときだけ出力します。古い結果のときは出力せず、出力欄
   （Workspace JSON の入出力と共用）も書き換えません。出力欄に残っている結果 CSV が変更前の Workspace のものになったら、
-  欄を書き換えずにその旨を表示します。未計算のまま押した場合は、従来どおり一括計算してから出力します。
+  欄を書き換えずにその旨を表示します。この警告は操作の結果の status とは別の欄に出すので、Import の失敗・Export の
+  status・一括計算し直し・表示の切替では消えません。現在の内容で CSV を出し直すか、出力欄が Workspace JSON などに
+  置き換わったときに外れます（RF-27-01）。未計算のまま押した場合は、従来どおり一括計算してから出力します。
   Workspace JSON の Export は計算結果ではないので、この gate の対象外です。
 - 設計レビュー資料の鮮度・Export・印刷の gate（`getReviewFreshness()` / `beforeprint`）は従来どおりで、この表示とは別です。
 
@@ -1844,7 +1846,7 @@ node --test
 | `tests/project-pack-execution.test.js` / `tests/project-pack-execution-ui.test.js` | Project Pack Case Execution（Phase 2L-B2 / S3-B2）: 本物の Pack context だけ・caseId / paneId / 階 / 部位 / 評価高さの完全一致・case_direct を分けない・trust は pack_unreviewed 固定・Evidence / provenance を持たない・入力 package と Closure に依存しない・明示操作だけ・古い結果を消す・計算失敗の固定文 |
 | `tests/project-pack-batch.test.js` / `tests/project-pack-batch-ui.test.js` | Project Pack Multi-Case Execution（Phase 2L-B2 / S3-B3A）: 計算は executeCase の繰り返しだけ・Pack の並び / 件数 / 一意性・全件そろったときだけ確定・途中の失敗で部分結果を出さない・trust は pack_unreviewed 固定・依存は初期化時に固定・明示操作だけ・チャンクの間で yield・キャンセル / Pack の切替 / 解除 / もう一度の開始で古い run を捨てる・確定直前の token 確認・50 行のページ |
 | `tests/project-pack-report.test.js` / `tests/project-pack-report-ui.test.js` | Project Pack Derived Report（Phase 2L-B2 / S3-B3B1）: batch の発行物だけ・field の明示的な写し・trust / interpretation 固定（CSV の各行にも）・JSON の key 順と full precision・CSV の固定列と空欄・数式の中和・8 MiB の上限で切り詰めない・2000 ケース・一方向（入力へ戻らない）・依存は初期化時に固定・明示操作だけ・鮮度の確認・消える経路・失敗の固定文 |
-| `tests/result-freshness-ui.test.js` | 結果の鮮度（Phase 2L-B2 / S3-B3B2-B1）: 単一ケースは最後に成功した計算の正規化済み入力と表示に効く設定の snapshot と、現在の入力の比較（旗ではない）・入力を変えても自動で計算しない・正規化できない入力と計算の失敗は現在扱いしない・選んでいない mode の入力は無関係・Workspace は serializeWorkspace と診断の snapshot（件数だけを見ない）・サマリと一覧の両方に表示・古い結果の CSV を出さない・告示風圧計算を「手入力値」と表示しない・固定文 |
+| `tests/result-freshness-ui.test.js` | 結果の鮮度（Phase 2L-B2 / S3-B3B2-B1）: 単一ケースは最後に成功した計算の正規化済み入力と表示に効く設定の snapshot と、現在の入力の比較（旗ではない）・入力を変えても自動で計算しない・正規化できない入力と計算の失敗は現在扱いしない・選んでいない mode の入力は無関係・Workspace は serializeWorkspace と診断の snapshot（件数だけを見ない）・サマリと一覧の両方に表示・古い結果の CSV を出さない・出力欄に残った古い CSV の警告は status と別の欄（RF-27-01）・告示風圧計算を「手入力値」と表示しない・固定文 |
 | `tests/project-pack-review.test.js` | Project Pack Review（Phase 2L-B2 / S3-B3B2-A1）: batch の発行元の gate（同じ context instance だけ）・全行を batch の並びで・余裕比 / 余裕差の定義・summary は最大設計風圧と最小余裕比を分ける・grouping・2 ケースの比較・詳細は同じ context での再計算と完全照合（1 field でも違えば全体を拒否）・50 件の上限・trust 固定・deep-frozen と発行物の gate・依存は初期化時に固定・Workspace / Review Package に触れない・privacy |
 
 ### 必須ケース

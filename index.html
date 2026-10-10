@@ -473,6 +473,7 @@
     background: rgba(245,158,11,0.08); color: var(--warn); font-size: 13px; font-weight: 700; line-height: 1.7;
   }
   .result-wrap > .result-freshness { margin: 0; }
+  #batch-csv-freshness { margin: 8px 0 0; }
   .result-freshness[hidden] { display: none; }
   /* 現在の入力の結果でないものは薄く表示し、判定バッジに文字でも印を付ける（色だけに頼らない） */
   #result-area[data-result-freshness="stale"], #result-area[data-result-freshness="invalid"],
@@ -1259,9 +1260,11 @@
       <button type="button" class="btn-secondary" onclick="batchImportJson()">⬆ Workspace JSONをImport</button>
       <button type="button" class="btn-secondary" onclick="batchExportCsv()">⬇ 結果CSVを出力</button>
     </div>
-    <textarea id="batch-json" rows="6" spellcheck="false"
+    <textarea id="batch-json" rows="6" spellcheck="false" aria-describedby="batch-csv-freshness"
       placeholder="ここにWorkspace JSON / 結果CSVが出力されます。Importする場合はWorkspace JSONを貼り付けてください。"></textarea>
     <div class="batch-status" id="batch-json-status"></div>
+    <!-- 出力欄に残っている結果CSVの鮮度（S3-B3B2-B1 / RF-27-01）: 操作の結果（上の status）とは別の欄で、条件が続く間は出し続ける -->
+    <div class="result-freshness" id="batch-csv-freshness" role="status" aria-live="polite" aria-atomic="true" hidden></div>
   </div>
 
   <div class="card" id="batch-summary-card" data-result-freshness="none" hidden>
@@ -4234,6 +4237,8 @@ var batchInvalidDiagnostics = [];
      （件数が同じで内容が変わった場合も、診断だけが変わった場合も検出する）。
    - 古い結果は消さず・書き換えず、サマリと一覧の両方で「変更前の結果」と示す。正常に一括計算し直したときだけ戻る。
    - 結果 CSV は、現在の Workspace の結果であるときだけ出力する（出力の直前に判定する）。
+   - 出力欄に残っている結果 CSV が変更前の Workspace のものなら、操作の結果の status（#batch-json-status）とは
+     別の欄（#batch-csv-freshness）で示す（RF-27-01: Import の失敗などの status で消えないように）。
 ============================================================ */
 
 var WORKSPACE_RESULT_FRESHNESS = {
@@ -4291,14 +4296,38 @@ function renderWorkspaceResultFreshness() {
       host.hidden = text === '';
     }
   });
-  // 出力欄に残っている結果 CSV が変更前の Workspace のものなら、そのことを示す（欄の中身は消さない・書き換えない）
-  var out = document.getElementById('batch-json');
-  if (lastWorkspaceCsvOutput && out && out.value === lastWorkspaceCsvOutput.text &&
-      currentWorkspaceSnapshot() !== lastWorkspaceCsvOutput.snapshot) {
-    batchSetStatus('batch-json-status', WORKSPACE_CSV_OUTPUT_STALE_TEXT, true);
-  }
+  renderWorkspaceCsvOutputFreshness();
   return state;
 }
+
+/**
+ * 出力欄に残っている結果 CSV の鮮度を、専用の欄に示す（RF-27-01）。
+ * 出力欄が前回出力した CSV のままで、その CSV の元になった入力が現在の Workspace と違う間だけ表示する。
+ * 出力欄が Workspace JSON などに置き換わったら表示しない。欄の中身は消さない・書き換えない。
+ * 操作の結果の status（#batch-json-status）には書かないので、Import の失敗などの status では消えない。
+ */
+function renderWorkspaceCsvOutputFreshness() {
+  var host = document.getElementById('batch-csv-freshness');
+  var out = document.getElementById('batch-json');
+  var stale = !!(lastWorkspaceCsvOutput && out && out.value === lastWorkspaceCsvOutput.text &&
+    currentWorkspaceSnapshot() !== lastWorkspaceCsvOutput.snapshot);
+  if (host) {
+    var text = stale ? WORKSPACE_CSV_OUTPUT_STALE_TEXT : '';
+    // 同じ文を書き直さない（読み上げを繰り返させない）
+    if (host.textContent !== text) host.textContent = text;
+    host.hidden = text === '';
+  }
+  return stale;
+}
+
+// 出力欄の内容の変化（貼り付け・入力・ボタンでの書き換え）を、表示へすぐ反映する（判定は上の比較で、ここは表示を早めるだけ）。
+window.addEventListener('DOMContentLoaded', function () {
+  var view = document.getElementById('view-batch');
+  if (!view) return;
+  ['input', 'change', 'click'].forEach(function (type) {
+    view.addEventListener(type, function () { renderWorkspaceCsvOutputFreshness(); });
+  });
+});
 
 function setView(view) {
   var single = document.getElementById('view-single');
@@ -4465,6 +4494,8 @@ function batchImportTsv() {
 function batchExportJson() {
   try {
     document.getElementById('batch-json').value = WorkspaceCore.serializeWorkspace(batchWorkspace);
+    // 出力欄が置き換わったので、以前の結果 CSV の注記を外す（gate ではない。JSON は常に出力する）
+    renderWorkspaceCsvOutputFreshness();
     batchSetStatus('batch-json-status',
       'Workspace JSONを出力しました（入力のみ。計算結果は含みません）。', false);
   } catch (e) {
@@ -4509,6 +4540,7 @@ function batchExportCsv() {
     out.value = WorkspaceCore.toCsv(batchResults);
     // textarea は改行を正規化して返すので、比較には読み戻した値を使う
     lastWorkspaceCsvOutput = { text: out.value, snapshot: lastEvaluatedWorkspaceSnapshot };
+    renderWorkspaceCsvOutputFreshness();
     batchSetStatus('batch-json-status',
       '結果CSVを出力しました。CSVは結果の出力専用で、入力として読み戻すことはできません。', false);
   } catch (e) {
