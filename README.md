@@ -1401,7 +1401,7 @@ ProjectPackBatch.assertBatchOrigin(batchResult, ctx)   … 発行物で、ctx（
 ### 後続（未実装）
 
 画面での表示（phase B）、Markdown / JSON の出力、印刷、Redacted、Workspace との相互変換は、この PR では行っていません。
-画面は `buildPackReview(stagedProjectPackBatch, stagedProjectContext, options)` を呼び、発行物の確認には
+画面は `buildPackReview(stagedProjectPackBatch, stagedProjectPackContext, options)` を呼び、発行物の確認には
 `isPackReview` / `assertPackReview` を使う想定です。鮮度（Pack の再読込・再計算・キャンセルでの無効化）は画面側の責務です。
 
 ### 確認

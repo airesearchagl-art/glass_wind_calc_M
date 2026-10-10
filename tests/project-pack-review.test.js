@@ -992,3 +992,192 @@ test('P2L-S3B3B2A1-R22: privacy（禁止 key・出典の文言・context の参�
   assert.equal(messages.length, 7);
   messages.forEach((m) => assert.equal(/G\d|Synthetic|N1458|\{|"|secretKey|0\.95|1685/.test(m), false, m));
 });
+
+/* ============================================================
+   RF-26-01: options の境界（穴・継承・accessor・非列挙・symbol・proxy・別 realm）
+   値は own の列挙可能な data property からだけ 1 回読み、穴・継承・accessor・余分な key は黙って
+   飛ばさずに固定文で拒否する。拒否は再計算より前で、review を返さない。別 realm の通常の object は通す。
+============================================================ */
+
+const OPT = 'ProjectPackReview: options: ';
+const DET = 'ProjectPackReview: options.detailCaseIds: ';
+const CMP = 'ProjectPackReview: options.comparisonCaseIds: ';
+const LEAK = /G\d|Synthetic|N1458|secret|\{|"/;
+
+/**
+ * options が固定文で拒否され、review を返さず、詳細の再計算も 1 回も起きないことを確かめる。
+ * 文面に caseId・publicLabel・入力値・getter の例外の文面が含まれないことも見る。
+ */
+function assertOptionsRejected(options, message, label) {
+  const { c, b } = genuine('notification1458');
+  const calls = [];
+  const sb = loadReview({ ProjectPackBatch: Batch,
+    ProjectPackExecution: execWith((cc, id) => { calls.push(id); return Exec.executeCase(cc, id); }) });
+  for (const R of [Review, sb.ProjectPackReview]) {
+    let returned = 'none';
+    assert.throws(() => { returned = R.buildPackReview(b, c, options); }, { message }, label);
+    assert.equal(returned, 'none', label + ': review を返さない');
+  }
+  assert.deepEqual(calls, [], label + ': 再計算の前に拒否する');
+  assert.equal(LEAK.test(message), false, label);
+}
+
+test('P2L-S3B3B2A1-R23: 穴のある選択は、詳細・比較とも固定文で拒否する（添字ごとに確かめ、黙って飛ばさない）', () => {
+  /* eslint-disable no-sparse-arrays */
+  assertOptionsRejected({ detailCaseIds: new Array(2) }, DET + 'must not have holes', 'detail new Array(2)');
+  assertOptionsRejected({ detailCaseIds: ['G001', , 'G003'] }, DET + 'must not have holes', 'detail inner hole');
+  assertOptionsRejected({ detailCaseIds: ['G001', ,] }, DET + 'must not have holes', 'detail trailing hole');
+  assertOptionsRejected({ comparisonCaseIds: [, 'G002'] }, CMP + 'must not have holes', 'comparison leading hole');
+  assertOptionsRejected({ comparisonCaseIds: new Array(2) }, CMP + 'must not have holes', 'comparison new Array(2)');
+  assertOptionsRejected({ comparisonCaseIds: ['G001', ,] }, CMP + 'must not have holes', 'comparison trailing hole');
+  /* eslint-enable no-sparse-arrays */
+  // 長さの上限は穴より先に見る（中身を読む前に拒否する）
+  assertOptionsRejected({ detailCaseIds: new Array(51) }, DET + 'selects more than 50 cases (not truncated)', 'detail new Array(51)');
+  assertOptionsRejected({ comparisonCaseIds: new Array(3) }, CMP + 'must select exactly 2 cases', 'comparison new Array(3)');
+  // 穴を Array.prototype の値で埋めない
+  Array.prototype[1] = 'G002';
+  try {
+    assertOptionsRejected({ detailCaseIds: ['G001', ,] }, DET + 'must not have holes', 'detail hole with polluted Array.prototype'); // eslint-disable-line no-sparse-arrays
+    assertOptionsRejected({ comparisonCaseIds: ['G001', ,] }, CMP + 'must not have holes', 'comparison hole with polluted Array.prototype'); // eslint-disable-line no-sparse-arrays
+  } finally {
+    delete Array.prototype[1];
+  }
+  // 呼び出し側の配列を書き換えない
+  const holey = ['G001', , 'G003']; // eslint-disable-line no-sparse-arrays
+  assert.throws(() => Review.buildPackReview(genuine('notification1458').b, ctx('notification1458'), { detailCaseIds: holey }));
+  assert.equal(holey.length, 3);
+  assert.equal(1 in holey, false);
+});
+
+test('P2L-S3B3B2A1-R24: prototype 経由の field は選択として使わずに拒否する（Object.prototype の汚染も含む）', () => {
+  assertOptionsRejected(Object.create({ detailCaseIds: ['G001'] }), OPT + 'has an inherited field', 'inherited detail');
+  assertOptionsRejected(Object.create({ comparisonCaseIds: ['G001', 'G002'] }), OPT + 'has an inherited field', 'inherited comparison');
+  assertOptionsRejected(Object.create(Object.create({ detailCaseIds: ['G001'] })), OPT + 'has an inherited field', 'inherited two levels up');
+  let getterCalls = 0;
+  class WithGetter { get detailCaseIds() { getterCalls++; return ['G001']; } }
+  assertOptionsRejected(new WithGetter(), OPT + 'has an inherited field', 'class prototype getter');
+  assert.equal(getterCalls, 0, 'prototype の getter を呼ばない');
+  Object.prototype.detailCaseIds = ['G001'];
+  try {
+    assertOptionsRejected({}, OPT + 'has an inherited field', 'polluted Object.prototype');
+    assertOptionsRejected({ comparisonCaseIds: ['G001', 'G002'] }, OPT + 'has an inherited field', 'polluted Object.prototype with own comparison');
+    // options を渡さなければ、汚染された field は読まない
+    const { c, b } = genuine('notification1458');
+    assert.deepEqual(Review.buildPackReview(b, c).selectedDetails, []);
+  } finally {
+    delete Object.prototype.detailCaseIds;
+  }
+  // own の field だけを持つ null prototype の object は通る
+  const { c, b } = genuine('notification1458');
+  const nullProto = Object.assign(Object.create(null), { detailCaseIds: ['G003'] });
+  assert.deepEqual(Review.buildPackReview(b, c, nullProto).selectedDetails.map((d) => d.caseId), ['G003']);
+});
+
+test('P2L-S3B3B2A1-R25: getter / setter・proxy の trap は通常の入力値として使わず、例外の文面も出さない', () => {
+  let calls = 0;
+  assertOptionsRejected({ get detailCaseIds() { calls++; return ['G001']; } }, OPT + 'fields must be plain data properties', 'getter detail');
+  assertOptionsRejected({ get comparisonCaseIds() { calls++; return ['G001', 'G002']; } }, OPT + 'fields must be plain data properties', 'getter comparison');
+  assertOptionsRejected({ get detailCaseIds() { calls++; throw new Error('secret G002 Synthetic Pack N1458 {"x":1}'); } },
+    OPT + 'fields must be plain data properties', 'throwing getter');
+  assertOptionsRejected({ set detailCaseIds(v) { calls++; } }, OPT + 'fields must be plain data properties', 'setter only'); // eslint-disable-line accessor-pairs
+  const elementGetter = ['G001'];
+  Object.defineProperty(elementGetter, 1, { get() { calls++; return 'G002'; }, enumerable: true });
+  assertOptionsRejected({ detailCaseIds: elementGetter }, DET + 'elements must be plain data properties', 'accessor element (detail)');
+  assertOptionsRejected({ comparisonCaseIds: elementGetter }, CMP + 'elements must be plain data properties', 'accessor element (comparison)');
+  const throwingElement = [];
+  Object.defineProperty(throwingElement, 0, { get() { calls++; throw new Error('secret G001'); }, enumerable: true });
+  assertOptionsRejected({ detailCaseIds: throwingElement }, DET + 'elements must be plain data properties', 'throwing element getter');
+  assert.equal(calls, 0, 'getter / setter を 1 回も呼ばない');
+  // proxy の trap が投げる例外は固定文にする（文面を出さない）
+  const secret = () => { throw new Error('secret G001 Synthetic {"x":1}'); };
+  assertOptionsRejected(new Proxy({}, { ownKeys: secret }), OPT + 'could not be read as plain data', 'ownKeys trap');
+  assertOptionsRejected(new Proxy({ detailCaseIds: ['G001'] }, { getOwnPropertyDescriptor: secret }), OPT + 'could not be read as plain data', 'descriptor trap');
+  assertOptionsRejected(new Proxy({}, { has: secret }), OPT + 'could not be read as plain data', 'has trap');
+  assertOptionsRejected({ detailCaseIds: new Proxy(['G001'], { getOwnPropertyDescriptor: secret }) }, DET + 'could not be read as plain data', 'array descriptor trap');
+  assertOptionsRejected({ detailCaseIds: new Proxy(['G001'], { ownKeys: secret }) }, DET + 'could not be read as plain data', 'array ownKeys trap');
+  const revokedOptions = Proxy.revocable({}, {});
+  revokedOptions.revoke();
+  assertOptionsRejected(revokedOptions.proxy, OPT + 'could not be read as plain data', 'revoked options');
+  const revokedList = Proxy.revocable(['G001'], {});
+  revokedList.revoke();
+  assertOptionsRejected({ detailCaseIds: revokedList.proxy }, DET + 'could not be read as plain data', 'revoked list');
+  // 普通に振る舞う proxy の配列は、各添字を記述子で 1 回だけ読み、[[Get]] は使わない
+  const reads = {};
+  let gets = 0;
+  const counted = new Proxy(['G003', 'G001'], {
+    getOwnPropertyDescriptor(t, k) { reads[String(k)] = (reads[String(k)] || 0) + 1; return Reflect.getOwnPropertyDescriptor(t, k); },
+    get(t, k, r) { gets++; return Reflect.get(t, k, r); }
+  });
+  const { c, b } = genuine('notification1458');
+  assert.deepEqual(Review.buildPackReview(b, c, { detailCaseIds: counted }).selectedDetails.map((d) => d.caseId), ['G003', 'G001']);
+  assert.equal(reads['0'], 1);
+  assert.equal(reads['1'], 1);
+  assert.equal(gets, 0);
+});
+
+test('P2L-S3B3B2A1-R26: 未知の非列挙 property・symbol の key・非列挙の field / 要素・配列の余分な key は拒否する', () => {
+  assertOptionsRejected({ [Symbol('detailCaseIds')]: ['G001'] }, OPT + 'has an unsupported field', 'symbol key on options');
+  assertOptionsRejected(Object.assign({ detailCaseIds: ['G001'] }, { [Symbol.iterator]: null }), OPT + 'has an unsupported field', 'well-known symbol key on options');
+  const hiddenUnknown = { detailCaseIds: ['G001'] };
+  Object.defineProperty(hiddenUnknown, 'sourceClaim', { value: { claimedLevel: 'primary' }, enumerable: false });
+  assertOptionsRejected(hiddenUnknown, OPT + 'has an unsupported field', 'non-enumerable unknown field');
+  const hiddenKnown = {};
+  Object.defineProperty(hiddenKnown, 'detailCaseIds', { value: ['G001'], enumerable: false });
+  assertOptionsRejected(hiddenKnown, OPT + 'fields must be plain data properties', 'non-enumerable detailCaseIds');
+  const listWithSymbol = ['G001'];
+  listWithSymbol[Symbol('x')] = 'G002';
+  assertOptionsRejected({ detailCaseIds: listWithSymbol }, DET + 'must contain only list elements', 'symbol key on list');
+  const listWithExtra = ['G001', 'G002'];
+  listWithExtra.extra = 'G003';
+  assertOptionsRejected({ comparisonCaseIds: listWithExtra }, CMP + 'must contain only list elements', 'extra key on list');
+  const listWithHidden = ['G001'];
+  Object.defineProperty(listWithHidden, 'note', { value: 'G002', enumerable: false });
+  assertOptionsRejected({ detailCaseIds: listWithHidden }, DET + 'must contain only list elements', 'non-enumerable extra key on list');
+  const hiddenElement = ['G001'];
+  Object.defineProperty(hiddenElement, 1, { value: 'G002', enumerable: false, writable: true, configurable: true });
+  assertOptionsRejected({ detailCaseIds: hiddenElement }, DET + 'elements must be plain data properties', 'non-enumerable element');
+  // 静的: options の値を [[Get]] で読まない（記述子からだけ）
+  const body = REVIEW_CODE.slice(REVIEW_CODE.indexOf('function readPlain('), REVIEW_CODE.indexOf('function mismatch('))
+    .replace(/'[^']*'/g, "''");   // 文字列（エラーの場所の名前）は除く
+  assert.equal(/options\.(detailCaseIds|comparisonCaseIds)|options\[|list\[|\.forEach\(function \(id\)/.test(body), false);
+  assert.equal(/Reflect\.ownKeys\(options\)/.test(body) && /Reflect\.ownKeys\(list\)/.test(body), true);
+});
+
+test('P2L-S3B3B2A1-R27: 通常の options と別 realm の options はこれまでどおり通る（未指定・0 件・50 件・2 件の比較）', () => {
+  const { c, b } = genuine('notification1458');
+  const base = (o) => plain(Review.buildPackReview(b, c, o));
+  const expected = base({ detailCaseIds: ['G002', 'G001'], comparisonCaseIds: ['G001', 'G003'] });
+  assert.deepEqual(expected.selectedDetails, [expectedDetail(c, 'G002'), expectedDetail(c, 'G001')]);
+  assert.deepEqual(expected.comparison.caseIds, ['G001', 'G003']);
+  // 別 realm で作った object と配列（prototype が違う）
+  const foreign = vm.runInNewContext('({ detailCaseIds: ["G002", "G001"], comparisonCaseIds: ["G001", "G003"] })');
+  assert.notEqual(Object.getPrototypeOf(foreign), Object.prototype, '前提: 別 realm の object');
+  assert.notEqual(Object.getPrototypeOf(foreign.detailCaseIds), Array.prototype, '前提: 別 realm の配列');
+  assert.deepEqual(base(foreign), expected);
+  assert.deepEqual(base(vm.runInNewContext('Object.freeze({ detailCaseIds: Object.freeze(["G002", "G001"]), comparisonCaseIds: ["G001", "G003"] })')), expected);
+  // 別 realm に読み込んだ review module に、この realm の options を渡す
+  const sb = loadReview({ ProjectPackBatch: Batch, ProjectPackExecution: Exec });
+  assert.deepEqual(plain(sb.ProjectPackReview.buildPackReview(b, c, { detailCaseIds: ['G002', 'G001'], comparisonCaseIds: ['G001', 'G003'] })), expected);
+  // 凍結した options・普通に振る舞う proxy
+  assert.deepEqual(base(Object.freeze({ detailCaseIds: Object.freeze(['G002', 'G001']), comparisonCaseIds: Object.freeze(['G001', 'G003']) })), expected);
+  assert.deepEqual(base(new Proxy({ detailCaseIds: ['G002', 'G001'], comparisonCaseIds: ['G001', 'G003'] }, {})), expected);
+  // 未指定・空・0 件・undefined の field
+  for (const o of [undefined, {}, { detailCaseIds: [] }, { detailCaseIds: undefined, comparisonCaseIds: undefined }]) {
+    const r = Review.buildPackReview(b, c, o);
+    assert.deepEqual(r.selectedDetails, []);
+    assert.equal(r.comparison, null);
+  }
+  // 50 件の詳細（選んだ順）と 2 件の比較
+  const big = fromPack(syntheticPack(60, 'case_direct'));
+  const fifty = ids(big.b).slice(3, 53).reverse();
+  const r50 = Review.buildPackReview(big.b, big.c, { detailCaseIds: fifty, comparisonCaseIds: ['G0060', 'G0001'] });
+  assert.deepEqual(r50.selectedDetails.map((d) => d.caseId), fifty);
+  assert.deepEqual([...r50.comparison.caseIds], ['G0060', 'G0001']);
+  // review は呼び出し側の配列を持たない（写しを使う）
+  const caller = ['G001', 'G003'];
+  const rc = Review.buildPackReview(b, c, { comparisonCaseIds: caller, detailCaseIds: caller });
+  assert.notEqual(rc.comparison.caseIds, caller);
+  caller[0] = 'G002';
+  assert.deepEqual([...rc.comparison.caseIds], ['G001', 'G003']);
+  assert.deepEqual(rc.selectedDetails.map((d) => d.caseId), ['G001', 'G003']);
+});

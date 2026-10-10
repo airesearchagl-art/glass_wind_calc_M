@@ -430,39 +430,111 @@
   // ============================================================
   // options（detailCaseIds / comparisonCaseIds）
   // ============================================================
+  //
+  // options とその配列は呼び出し側の object で、getter・proxy の trap・継承された property・穴のある配列が
+  // ありうる。値は own の data property（列挙可能）からだけ、1 回だけ読み、この module の配列へ写してから
+  // 検査する。getter は呼ばない。継承された field・穴・accessor・余分な key は黙って飛ばさずに拒否する。
+  // prototype の同一性は比べない（別の realm で作った通常の object・配列も受け付ける）。
+
+  /**
+   * 呼び出し側の object を読む操作（proxy の trap を通りうる）を実行する。例外の文面（入力値・caseId を
+   * 含みうる）は外へ出さず、固定文にする。fn の中では fail を呼ばない。
+   */
+  function readPlain(where, fn) {
+    try {
+      return fn();
+    } catch (e) {
+      fail(where, 'could not be read as plain data');
+    }
+  }
+
+  /** own の property の記述子（無ければ undefined）。getter は呼ばない。 */
+  function ownDescriptor(obj, key, where) {
+    return readPlain(where, function () { return Object.getOwnPropertyDescriptor(obj, key); });
+  }
+
+  /** 列挙可能な data property か（accessor・非列挙は通常の入力値として扱わない）。 */
+  function isPlainDataDescriptor(d) {
+    return hasOwn(d, 'value') && !hasOwn(d, 'get') && !hasOwn(d, 'set') && d.enumerable === true;
+  }
+
+  /** 配列であることと、own の data property の length を確かめる。 */
+  function listLength(list, where, notListMessage) {
+    if (!readPlain(where, function () { return Array.isArray(list); })) fail(where, notListMessage);
+    var d = ownDescriptor(list, 'length', where);
+    if (d === undefined || !hasOwn(d, 'value')) fail(where, notListMessage);
+    var n = d.value;
+    if (typeof n !== 'number' || !(n >= 0) || Math.floor(n) !== n) fail(where, notListMessage);
+    return n;
+  }
+
+  /**
+   * 添字 0..n-1 を 1 つずつ own の data property として読み、この module の配列へ写す。穴・accessor・
+   * 非列挙の要素・継承された要素は拒否する（黙って飛ばさない）。添字と length 以外の key（symbol・
+   * 非列挙を含む）がある配列も拒否する。
+   */
+  function snapshotList(list, n, where) {
+    var out = [];
+    for (var i = 0; i < n; i++) {
+      var d = ownDescriptor(list, String(i), where);
+      if (d === undefined) fail(where, 'must not have holes');
+      if (!isPlainDataDescriptor(d)) fail(where, 'elements must be plain data properties');
+      out.push(d.value);
+    }
+    var keys = readPlain(where, function () { return Reflect.ownKeys(list); });
+    if (keys.length !== n + 1) fail(where, 'must contain only list elements');
+    return out;
+  }
 
   /** caseId の選択を確かめる。重複・batch に無い caseId は拒否する（黙って捨てない・切り詰めない）。 */
   function requireSelection(ids, where, indexById) {
-    if (!Array.isArray(ids)) fail(where, 'must be a list of caseIds');
     var seen = Object.create(null);
-    ids.forEach(function (id) {
+    for (var i = 0; i < ids.length; i++) {
+      var id = ids[i];
       if (typeof id !== 'string' || id === '') fail(where, 'must contain non-empty caseIds');
       if (seen[id] === true) fail(where, 'contains a duplicated caseId');
       seen[id] = true;
       if (indexById[id] === undefined) fail(where, 'contains a caseId that is not in the batch result');
-    });
-    return ids.slice();
+    }
+    return ids;
   }
 
   function readOptions(options, indexById) {
     var out = { detailCaseIds: [], comparisonCaseIds: null };
     if (options === undefined) return out;
-    if (!isPlainObject(options)) fail('options', 'must be an object');
-    Object.keys(options).forEach(function (k) {
-      if (OPTION_KEYS.indexOf(k) === -1) fail('options', 'has an unsupported field');
+    var isObject = readPlain('options', function () {
+      return options !== null && typeof options === 'object' && !Array.isArray(options);
     });
-    if (options.detailCaseIds !== undefined) {
-      if (!Array.isArray(options.detailCaseIds)) fail('options.detailCaseIds', 'must be a list of caseIds');
-      if (options.detailCaseIds.length > MAX_DETAIL_CASES) {
+    if (!isObject) fail('options', 'must be an object');
+    // own の key はすべて（symbol・非列挙を含む）既知の名前でなければならない
+    var keys = readPlain('options', function () { return Reflect.ownKeys(options); });
+    for (var i = 0; i < keys.length; i++) {
+      if (typeof keys[i] !== 'string' || OPTION_KEYS.indexOf(keys[i]) === -1) fail('options', 'has an unsupported field');
+    }
+    var values = Object.create(null);
+    OPTION_KEYS.forEach(function (k) {
+      var d = ownDescriptor(options, k, 'options');
+      if (d === undefined) {
+        // 継承された field（prototype 経由の指定）は選択として使わずに拒否する
+        if (readPlain('options', function () { return k in options; })) fail('options', 'has an inherited field');
+        return;
+      }
+      if (!isPlainDataDescriptor(d)) fail('options', 'fields must be plain data properties');
+      values[k] = d.value;
+    });
+    if (values.detailCaseIds !== undefined) {
+      var n = listLength(values.detailCaseIds, 'options.detailCaseIds', 'must be a list of caseIds');
+      if (n > MAX_DETAIL_CASES) {
         fail('options.detailCaseIds', 'selects more than ' + MAX_DETAIL_CASES + ' cases (not truncated)');
       }
-      out.detailCaseIds = requireSelection(options.detailCaseIds, 'options.detailCaseIds', indexById);
+      out.detailCaseIds = requireSelection(snapshotList(values.detailCaseIds, n, 'options.detailCaseIds'),
+        'options.detailCaseIds', indexById);
     }
-    if (options.comparisonCaseIds !== undefined) {
-      if (!Array.isArray(options.comparisonCaseIds) || options.comparisonCaseIds.length !== 2) {
-        fail('options.comparisonCaseIds', 'must select exactly 2 cases');
-      }
-      out.comparisonCaseIds = requireSelection(options.comparisonCaseIds, 'options.comparisonCaseIds', indexById);
+    if (values.comparisonCaseIds !== undefined) {
+      var m = listLength(values.comparisonCaseIds, 'options.comparisonCaseIds', 'must select exactly 2 cases');
+      if (m !== 2) fail('options.comparisonCaseIds', 'must select exactly 2 cases');
+      out.comparisonCaseIds = requireSelection(snapshotList(values.comparisonCaseIds, m, 'options.comparisonCaseIds'),
+        'options.comparisonCaseIds', indexById);
     }
     return out;
   }
