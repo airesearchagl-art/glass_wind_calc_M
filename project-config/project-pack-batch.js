@@ -32,6 +32,15 @@
  * 出典の申告は読まない。入力 package・Workspace・Scenario・export・Review・Closure・Evidence・
  * Promotion のどれにもつながらない。active context を読まない。
  *
+ * ── 発行元の context（S3-B3B2-A0） ─────────────────────────
+ *
+ * 発行した結果ごとに、その結果を作った context（createBatchRun に渡され、executor の gate を通った
+ * instance）を module private の WeakMap に記録する。assertBatchOrigin(batchResult, ctx) は、
+ * 発行物であること・記録された context と ctx が同じ instance であることを確かめる。比較は object の
+ * 同一性だけで、publicLabel・mode・caseId・値の一致・JSON・hash では代用しない（内容が同じでも別の
+ * instance なら拒否する）。記録は結果の object に載せない（key・schema・JSON / CSV は変わらない）。
+ * 記録を作るのは、全ケースが成功して結果の形の検査を通った finish() の中だけ。
+ *
  * ── 依存 ─────────────────────────────────────────────────
  *
  * 依存は ProjectPackExecution だけで、この module の初期化時に 1 度だけ掴む（後から global を
@@ -204,6 +213,8 @@
   // ============================================================
 
   var issued = new WeakSet();
+  // 発行した結果 → その結果を作った context（module private。外へ出さない・保存しない）
+  var originByBatch = new WeakMap();
 
   /**
    * ctx の全ケースを計算する run を作る。ctx の検査は executor の gate（listCaseIds）が行う。
@@ -212,6 +223,7 @@
   function createBatchRun(ctx) {
     var E = requireExecution();
     var caseIds = E.listCaseIds(ctx);   // genuine な Pack context でなければここで失敗する
+    var originContext = ctx;            // gate を通った instance。発行時にこの結果の発行元として記録する
     var seen = Object.create(null);
     caseIds.forEach(function (id) {
       if (typeof id !== 'string' || id === '') fail('caseIds', 'must be non-empty strings');
@@ -277,6 +289,8 @@
         rows: rows.slice()
       });
       assertBatchResultShape(result, caseIds);
+      // 全ケースが成功し、形の検査も通った後でだけ、発行元を記録して発行する
+      originByBatch.set(result, originContext);
       issued.add(result);
       state = 'finished';
       return result;
@@ -371,6 +385,19 @@
     return assertBatchResultShape(r, null);
   }
 
+  /**
+   * r が発行物で、ctx（同じ instance）から発行されたものであることを確かめる。違えば throw する。
+   * 比較は object の同一性だけ（内容・ラベル・mode・caseId・JSON の一致では通さない）。
+   */
+  function assertBatchOrigin(r, ctx) {
+    assertBatchResult(r);
+    if (!originByBatch.has(r)) fail('batch', 'has no recorded origin');
+    if (ctx === null || typeof ctx !== 'object' || originByBatch.get(r) !== ctx) {
+      fail('batch', 'was not issued from the given context');
+    }
+    return r;
+  }
+
   return deepFreeze({
     BATCH_TYPE: BATCH_TYPE,
     SCHEMA_VERSION: SCHEMA_VERSION,
@@ -380,6 +407,7 @@
     createBatchRun: createBatchRun,
     executeAll: executeAll,
     isBatchResult: isBatchResult,
-    assertBatchResult: assertBatchResult
+    assertBatchResult: assertBatchResult,
+    assertBatchOrigin: assertBatchOrigin
   });
 });

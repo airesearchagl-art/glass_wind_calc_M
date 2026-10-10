@@ -443,3 +443,263 @@ test('P2L-S3B3A-B16: 計算を持たない（風圧・ガラス・map・申告�
   assert.equal(Pack.SCHEMA_VERSION, 1);
   assert.equal(ProjectContext.TRUST_BY_SOURCE_KIND.project_pack_unreviewed, 'pack_unreviewed');
 });
+
+/* ============================================================
+   S3-B3B2-A0: 発行元の context の記録（origin binding）
+   assertBatchOrigin(batchResult, ctx) は、発行物であることと、記録された context と ctx が
+   同じ instance であることを確かめる。比較は object の同一性だけで、内容の一致では通さない。
+============================================================ */
+
+const crypto = require('node:crypto');
+const Report = require('../project-config/project-pack-report.js');
+const sha256 = (text) => crypto.createHash('sha256').update(text).digest('hex');
+const NOT_ISSUED = /was not issued by ProjectPackBatch/;
+const WRONG_ORIGIN = /was not issued from the given context/;
+
+/**
+ * 発行元の記録（WeakMap.prototype.set）を数えられる batch module を vm で初期化する。
+ * executeCase に hook を入れると、そのケースを失敗させられる。
+ */
+function countingBatch(hooks) {
+  const h = hooks || {};
+  const bindings = [];
+  class CountingWeakMap extends WeakMap {
+    set(key, value) { bindings.push([key, value]); return super.set(key, value); }
+  }
+  const wrapped = Object.freeze(Object.assign({}, Exec, {
+    executeCase: (c, id) => (h.executeCase ? h.executeCase(c, id) : Exec.executeCase(c, id))
+  }));
+  const sandbox = { ProjectPackExecution: wrapped, WeakMap: CountingWeakMap };
+  vm.createContext(sandbox);
+  vm.runInContext(BATCH_SRC, sandbox, { filename: BATCH_SRC_REL });
+  return { B: sandbox.ProjectPackBatch, bindings };
+}
+
+test('P2L-S3B3B2-O01: 同じ context から発行した結果は、その context で通る', () => {
+  const c = ctx('notification1458');
+  const r = Batch.executeAll(c);
+  assert.equal(Batch.assertBatchOrigin(r, c), r);
+  const run = Batch.createBatchRun(c);
+  while (!run.isDone()) run.nextChunk(1);
+  const r2 = run.finish();
+  assert.equal(Batch.assertBatchOrigin(r2, c), r2);
+  assert.notEqual(r2, r);
+});
+
+test('P2L-S3B3B2-O02: 内容がすべて同じでも、別の context instance なら拒否する', () => {
+  const pack = syntheticPack(40, 'project_pressure_map', { label: 'Synthetic Origin Twin' });
+  const a1 = ctxOf(JSON.parse(JSON.stringify(pack)));
+  const a2 = ctxOf(JSON.parse(JSON.stringify(pack)));
+  assert.notEqual(a1, a2);
+  assert.equal(ProjectContext.isProjectContext(a1) && ProjectContext.isProjectContext(a2), true);
+  assert.equal(JSON.stringify(a1), JSON.stringify(a2), '前提: 2 つの context は内容が同じ');
+  assert.deepEqual([a1.publicLabel, a1.pressureModel.mode, a1.sourceKind, a1.trust],
+    [a2.publicLabel, a2.pressureModel.mode, a2.sourceKind, a2.trust]);
+  assert.deepEqual([...Exec.listCaseIds(a1)], [...Exec.listCaseIds(a2)]);
+  const b1 = Batch.executeAll(a1);
+  const b2 = Batch.executeAll(a2);
+  assert.equal(JSON.stringify(b1), JSON.stringify(b2), '前提: 2 つの結果は値まで同じ');
+  assert.equal(Batch.assertBatchOrigin(b1, a1), b1);
+  assert.equal(Batch.assertBatchOrigin(b2, a2), b2);
+  assert.throws(() => Batch.assertBatchOrigin(b1, a2), WRONG_ORIGIN);
+  assert.throws(() => Batch.assertBatchOrigin(b2, a1), WRONG_ORIGIN);
+});
+
+test('P2L-S3B3B2-O03: 別の Pack の context は拒否する（結果が発行物でも）', () => {
+  const cMap = ctx('project_pressure_map');
+  const cDirect = ctx('case_direct');
+  const r = Batch.executeAll(cMap);
+  assert.equal(Batch.isBatchResult(r), true);
+  assert.throws(() => Batch.assertBatchOrigin(r, cDirect), WRONG_ORIGIN);
+  assert.throws(() => Batch.assertBatchOrigin(r, ctx('notification1458')), WRONG_ORIGIN);
+});
+
+test('P2L-S3B3B2-O04: 偽の結果・偽の context を拒否する（形・文字列・JSON の一致では通らない）', () => {
+  const c = ctx('notification1458');
+  const r = Batch.executeAll(c);
+  const shapeOnly = { batchType: r.batchType, schemaVersion: 1, sourceKind: 'project_pack_unreviewed',
+    trust: 'pack_unreviewed', publicLabel: r.publicLabel, pressureMode: r.pressureMode, units: plain(r.units),
+    totalCases: r.totalCases, executedCases: r.executedCases, rows: plain(r.rows) };
+  [plain(r), Object.assign({}, r), shapeOnly, Object.create(r), rawPack('notification1458'),
+    Pack.validateProjectPack(rawPack('notification1458')), Exec.executeCase(c, 'G002'), c, null, undefined, 'batch', 0]
+    .forEach((fake, i) => assert.throws(() => Batch.assertBatchOrigin(fake, c), NOT_ISSUED, 'result ' + i));
+  // 本物の結果に偽の context: 複製・継承・sourceKind / trust を書いただけの object・別種の context
+  const builtIn = ProjectContext.fromLegacyPreset(Registry.getRuntimeDefaultBuiltInPresetId());
+  [plain(c), Object.assign({}, c), Object.create(c), { sourceKind: c.sourceKind, trust: c.trust, publicLabel: c.publicLabel },
+    builtIn, rawPack('notification1458'), r, null, undefined, 'ctx', 1]
+    .forEach((fake, i) => assert.throws(() => Batch.assertBatchOrigin(r, fake), WRONG_ORIGIN, 'context ' + i));
+  // 例外の文面は固定（ラベル・caseId・入力値を含まない）
+  assert.throws(() => Batch.assertBatchOrigin(r, ctx('notification1458')),
+    { message: 'ProjectPackBatch: batch: was not issued from the given context' });
+});
+
+test('P2L-S3B3B2-O05: 2 つの正しい結果は、それぞれ自分の context でだけ通る', () => {
+  const a = ctx('project_pressure_map');
+  const b = ctx('case_direct');
+  const ra = Batch.executeAll(a);
+  const rb = Batch.executeAll(b);
+  assert.equal(Batch.assertBatchOrigin(ra, a), ra);
+  assert.equal(Batch.assertBatchOrigin(rb, b), rb);
+  assert.throws(() => Batch.assertBatchOrigin(ra, b), WRONG_ORIGIN);
+  assert.throws(() => Batch.assertBatchOrigin(rb, a), WRONG_ORIGIN);
+  // run を交互に進めても、発行元はそれぞれの run を作ったときの context（後から作った run の context ではない）
+  const runA = Batch.createBatchRun(a);
+  const runB = Batch.createBatchRun(b);
+  runA.nextChunk(1);
+  runB.nextChunk(1);
+  while (!runB.isDone()) runB.nextChunk(1);
+  while (!runA.isDone()) runA.nextChunk(1);
+  const lateB = runB.finish();
+  const lateA = runA.finish();
+  assert.equal(Batch.assertBatchOrigin(lateA, a), lateA);
+  assert.equal(Batch.assertBatchOrigin(lateB, b), lateB);
+  assert.throws(() => Batch.assertBatchOrigin(lateA, b), WRONG_ORIGIN);
+  assert.throws(() => Batch.assertBatchOrigin(lateB, a), WRONG_ORIGIN);
+});
+
+test('P2L-S3B3B2-O06: 全件を終える前の finish では、発行も記録もしない', () => {
+  const { B, bindings } = countingBatch();
+  const c = ctxOf(syntheticPack(60, 'case_direct'));
+  const run = B.createBatchRun(c);
+  run.nextChunk(25);
+  assert.throws(() => run.finish(), /not every case has been executed/);
+  assert.equal(bindings.length, 0, '未完了の run で発行元を記録した');
+  run.nextChunk(25);
+  assert.throws(() => run.finish(), /not every case has been executed/);
+  assert.equal(bindings.length, 0);
+  // 残りを終えれば 1 件だけ記録して発行する
+  run.nextChunk(25);
+  const r = run.finish();
+  assert.equal(bindings.length, 1);
+  assert.equal(bindings[0][0], r);
+  assert.equal(bindings[0][1], c);
+  assert.equal(B.assertBatchOrigin(r, c), r);
+});
+
+test('P2L-S3B3B2-O07: cancel した run は以後 finish できず、記録もしない', () => {
+  const { B, bindings } = countingBatch();
+  const c = ctxOf(syntheticPack(60, 'notification1458'));
+  const run = B.createBatchRun(c);
+  run.nextChunk(25);
+  assert.equal(run.cancel(), true);
+  assert.throws(() => run.finish(), /the run was cancelled/);
+  assert.throws(() => run.nextChunk(25), /was cancelled/);
+  assert.equal(bindings.length, 0, 'cancel した run で発行元を記録した');
+  // 全件を終えてから cancel しても同じ
+  const run2 = B.createBatchRun(c);
+  while (!run2.isDone()) run2.nextChunk(25);
+  run2.cancel();
+  assert.throws(() => run2.finish(), /the run was cancelled/);
+  assert.equal(bindings.length, 0);
+});
+
+test('P2L-S3B3B2-O08: 途中の 1 ケースが失敗した run は部分的な結果を発行せず、記録もしない', () => {
+  const { B, bindings } = countingBatch({ executeCase: (c, id) => {
+    if (id === 'G0031') throw new Error('forced failure');
+    return Exec.executeCase(c, id);
+  } });
+  const c = ctxOf(syntheticPack(50, 'project_pressure_map'));
+  const run = B.createBatchRun(c);
+  run.nextChunk(25);
+  assert.throws(() => run.nextChunk(25), /forced failure/);
+  assert.equal(run.hasFailed(), true);
+  assert.throws(() => run.finish(), /the run was failed/);
+  assert.throws(() => B.executeAll(c), /forced failure/);
+  assert.equal(bindings.length, 0, '失敗した run で発行元を記録した');
+});
+
+test('P2L-S3B3B2-O09: executeAll() の結果も同じ契約を満たす（記録は発行ごとに 1 件）', () => {
+  const { B, bindings } = countingBatch();
+  const c = ctx('case_direct');
+  const r = B.executeAll(c);
+  assert.equal(bindings.length, 1);
+  assert.equal(bindings[0][0], r);
+  assert.equal(bindings[0][1], c);
+  assert.equal(B.assertBatchOrigin(r, c), r);
+  assert.throws(() => B.assertBatchOrigin(r, ctx('case_direct')), WRONG_ORIGIN);
+  // 本物の module でも同じ
+  const genuine = Batch.executeAll(c);
+  assert.equal(Batch.assertBatchOrigin(genuine, c), genuine);
+});
+
+/** main（ae156d2）の module で求めた出力の SHA-256（この PR の前の値。記録を足しても変わらない）。 */
+const MAIN_OUTPUT_SHA256 = {
+  notification1458: { batch: '34b6313135a56e4e2016267d2e3d1ad7e80bcfd7271d6967b90c4119d51ba195',
+    json: '0c4870592915aef173d845f32cfba57afb744ef24b7c7032d8083c4faab4766d',
+    csv: 'cff022f9b3c10fc1d4dd1fb3e4a7df5f66975164f3c687a87a1e07c6543d83b5' },
+  project_pressure_map: { batch: 'fd34c0942dd2336b25b438d70a14b48737cc3af9442fed9a9b52a4c5a4bb8b62',
+    json: '5dd5e3ab00e7834d36e89174e9993966b72e324e7e8b17a6a61d967d2e1dcace',
+    csv: 'a75aef748a0f7e3b719fd40389d5a408e02a0cc120e0e4d47459330a7c86dedd' },
+  case_direct: { batch: 'fe952baedc800327cd7f22055e756df7f3a396f525eea0aad8b64833edb50af1',
+    json: 'a653f322e09c618be174de2aa5847da7f7250bde0edbf88738a8985893ff5d26',
+    csv: '757b9672cb5af8a88b3569e60d44299e530000c5fc6179a3b5ceda820a29b390' },
+  synthetic2000: { batch: '18159692844b8bec2181a461907dc61366e05190bb0463de7e8a11ecc7f1068a',
+    csv: 'b59156567b0d48ca499580f585dc7944ebaa28878048be5abc8dabf609722d50' }
+};
+
+test('P2L-S3B3B2-O10: 記録を足しても結果は deep-frozen のまま・key も JSON / CSV も変わらず、context は結果に現れない', () => {
+  Object.keys(FIXTURES).forEach((mode) => {
+    const c = ctx(mode);
+    const r = Batch.executeAll(c);
+    walk(r, (node, at) => { if (node && typeof node === 'object') assert.equal(Object.isFrozen(node), true, at); });
+    assert.deepEqual(Object.keys(r), ['batchType', 'schemaVersion', 'sourceKind', 'trust', 'publicLabel', 'pressureMode',
+      'units', 'totalCases', 'executedCases', 'rows']);
+    // 非 enumerable の property・symbol も足していない
+    assert.deepEqual(Object.getOwnPropertyNames(r), Object.keys(r));
+    assert.deepEqual(Object.getOwnPropertySymbols(r), []);
+    assert.equal(r.schemaVersion, 1);
+    const json = JSON.stringify(r);
+    assert.equal(/capabilities|declaredPanes|declaredGlazingCases|evidenceClaims|sourceScopes|origin|context/i.test(json), false);
+    walk(r, (node, at) => assert.notEqual(node, c, at + ' が context を参照している'));
+    assert.equal(sha256(json), MAIN_OUTPUT_SHA256[mode].batch, mode + ' の batch JSON が main と違う');
+    const report = Report.buildReport(r);
+    assert.equal(sha256(Report.serializeJson(report)), MAIN_OUTPUT_SHA256[mode].json, mode + ' の report JSON が main と違う');
+    assert.equal(sha256(Report.toCsv(report)), MAIN_OUTPUT_SHA256[mode].csv, mode + ' の report CSV が main と違う');
+  });
+  // 公開 API は追加だけ（既存の export はそのまま）
+  assert.deepEqual(Object.keys(Batch), ['BATCH_TYPE', 'SCHEMA_VERSION', 'SOURCE_KIND', 'TRUST', 'MAX_CHUNK', 'createBatchRun',
+    'executeAll', 'isBatchResult', 'assertBatchResult', 'assertBatchOrigin']);
+});
+
+test('P2L-S3B3B2-O11: 合成 2000 ケースでも記録が成立し、件数・順序・値・trust は変わらない', () => {
+  const pack = syntheticPack(2000, 'notification1458');
+  const c = ctxOf(JSON.parse(JSON.stringify(pack)));
+  const twin = ctxOf(JSON.parse(JSON.stringify(pack)));
+  const run = Batch.createBatchRun(c);
+  while (!run.isDone()) run.nextChunk(25);
+  const r = run.finish();
+  assert.equal(Batch.assertBatchOrigin(r, c), r);
+  assert.throws(() => Batch.assertBatchOrigin(r, twin), WRONG_ORIGIN);
+  assert.equal(r.totalCases, 2000);
+  assert.equal(r.rows.length, 2000);
+  r.rows.forEach((row, i) => assert.equal(row.caseId, 'G' + String(i + 1).padStart(4, '0')));
+  assert.equal(r.trust, 'pack_unreviewed');
+  assert.equal(sha256(JSON.stringify(r)), MAIN_OUTPUT_SHA256.synthetic2000.batch);
+  assert.equal(sha256(Report.toCsv(Report.buildReport(r))), MAIN_OUTPUT_SHA256.synthetic2000.csv);
+});
+
+test('P2L-S3B3B2-O12: 既存の利用側（ProjectPackReport.buildReport）は従来どおり動く', () => {
+  const c = ctx('project_pressure_map');
+  const r = Batch.executeAll(c);
+  const report = Report.buildReport(r);
+  assert.equal(Report.isReport(report), true);
+  assert.equal(report.totalCases, 4);
+  // report は発行物の gate だけを使い、origin の照合を要求しない（既存の契約のまま）
+  assert.throws(() => Report.buildReport(plain(r)), NOT_ISSUED);
+  // 静的: 照合は object の同一性だけ。内容・ラベル・JSON・hash で代用しない
+  const start = BATCH_CODE.indexOf('function assertBatchOrigin(');
+  const body = BATCH_CODE.slice(start, BATCH_CODE.indexOf('\n  }\n', start));
+  assert.match(body, /originByBatch\.get\(r\) !== ctx/);
+  assert.equal(/JSON|stringify|publicLabel|pressureMode|caseId|sourceKind|trust|hash|sha/i.test(body), false);
+  // 記録は finish() の中で、形の検査の後・発行の直前だけ
+  assert.equal((BATCH_CODE.match(/originByBatch\.set\(/g) || []).length, 1);
+  const finishBody = BATCH_CODE.slice(BATCH_CODE.indexOf('function finish()'), BATCH_CODE.indexOf('return Object.freeze({'));
+  const iShape = finishBody.indexOf('assertBatchResultShape(result, caseIds);');
+  const iSet = finishBody.indexOf('originByBatch.set(result, originContext);');
+  const iIssue = finishBody.indexOf('issued.add(result);');
+  assert.equal(iShape !== -1 && iShape < iSet && iSet < iIssue, true, '記録の位置が契約と違う');
+  assert.match(BATCH_CODE, /var originContext = ctx;/);
+  assert.equal(/originContext\s*=(?!=)/.test(BATCH_CODE.replace('var originContext = ctx;', '')), false, '発行元を付け替えている');
+  // context を外へ出す名前を持たない
+  assert.equal(/originContext\s*:|projectContext\s*:|rawPack\s*:|sourceSnapshot|originHash/.test(BATCH_CODE), false);
+});
