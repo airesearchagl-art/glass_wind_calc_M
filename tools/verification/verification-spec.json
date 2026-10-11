@@ -217,7 +217,7 @@
       "command": "node tools/browser-checks/probe-w4.mjs",
       "evidenceClass": "observational",
       "admissibility": "UNVERIFIED",
-      "target": "DOM injection probes against the closure UI; no page errors",
+      "target": "DOM injection probes against the closure UI; no page errors; an evaluation with injected strings as status values fails closed (RF-29-01)",
       "oracle": "real Chromium",
       "sharedDependencies": [
         "Playwright absolute path (P2K-F06)"

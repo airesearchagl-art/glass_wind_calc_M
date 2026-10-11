@@ -12,7 +12,7 @@ F7-06). They are committed here for that reason.
 | harness | checks | what it covers |
 |---|---|---|
 | `browser-w4.mjs` | 36 | Evidence Closure Matrix renders; protected facts read back from the page's active ProjectContext and compared with expectations taken outside the page (Node-side runtime-default built-in and `evidenceStateExpected`); since S3-B3B2-B4 the case-verification summary is visible in preset mode, the Evidence details start closed and open in one click to the visible matrix (the header numbers and rows are read from the opened, visible text), the summary numbers equal the matrix header, other modes show neither summary nor details, and a forced closure / status failure is stated in the summary |
-| `probe-w4.mjs` | 8 | injection probes against the closure UI; asserts no page errors |
+| `probe-w4.mjs` | 9 | injection probes against the closure UI; asserts no page errors; since RF-29-01 the injected strings sit in the free-text fields of an evaluation that passes the renderer's shape check (and are shown as literal text), and an evaluation carrying injected strings as status values is not rendered at all (no element, no injected text, failure shown) |
 | `failopen-w4.mjs` | 10 | forced closure failure shows a warning that does **not** read as "verified" |
 | `stageA-regression.mjs` | 10 | Stage A exact-head regression over the protected values (facts and Closure observed through the active ProjectContext, never the project module global) |
 | `parser-boundary.mjs` | 42 forms | the `html-like-tag` guard vs. real Chromium element creation |
