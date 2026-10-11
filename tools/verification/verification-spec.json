@@ -279,6 +279,28 @@
       "reason": "no browser measurement exists for the current target head; a verifier must run it at theirs"
     },
     {
+      "id": "result-freshness",
+      "command": "node tools/browser-checks/result-freshness.mjs",
+      "evidenceClass": "observational",
+      "admissibility": "UNVERIFIED",
+      "target": "result freshness and the notification source label in index.html (S3-B3B2-B1): the single-case result is shown as current only while the inputs that produced the last successful calculation (the normalised ProjectInput through ProjectInput.serialize, plus the preset floor / zone selection and the notification preset-comparison toggle) equal the current inputs rebuilt by buildCurrentProjectInput(); a changed input marks it as earlier (変更前) without recalculating, an input that cannot be normalised or a calculation that did not complete marks it as from earlier input (以前の入力), inputs of an unselected mode are ignored, mode switches and Import keep their automatic calculation, and a successful explicit calculation restores it; the Workspace summary and result list are shown as current only while WorkspaceCore.serializeWorkspace() and the import diagnostics equal those of the last successful evaluation, both are marked as earlier otherwise (also when the case count is unchanged), the result CSV is written only for current results and an old CSV left in the output field is noted without being rewritten, in a dedicated warning separate from the operation status line (RF-27-01: an Import error, an export status or a re-evaluation does not remove it while the output field still holds that CSV and the Workspace differs; a new current CSV or replacing the field clears it); the notification result names its pressures as calculated from the entered wind conditions (not user input) and keeps verificationStatus unverified; the Review Package freshness and print gate are unchanged; the status texts are fixed and never echo input values",
+      "oracle": "real Chromium",
+      "sharedDependencies": [
+        "the harness drives the page through its UI (input fields, calculate, mode select, Export / Import, Workspace buttons, Review generate) and, for changes without events, fault injection and diagnostics, through page globals inside the page only (a wrapped renderResults / batchRender restored afterwards); expected pressures come from the runtime-default built-in under Node (project-config/registry.js) and from wind-pressure.js called directly under Node, not from the freshness logic; the fresh CSV is compared with WorkspaceCore.toCsv() of a fresh in-page evaluation; synthetic values and the synthetic case_direct fixture only"
+      ],
+      "positiveControl": "every single-case input of every mode marks the result as earlier and recalculating restores it; the Workspace goes from none to fresh to earlier (summary and list) and back; a current CSV is written with the WorkspaceCore column header",
+      "negativeControl": "mutants B1-01 to B1-20 (snapshot comparison removed, the width not compared, notification wind conditions not compared, invalid input treated as current, a failed calculation leaving the previous result current, only the Workspace case count compared, diagnostics not compared, an added case leaving the old summary current, a stale CSV written, notification labelled as manual input, a mode switch leaving the old result current, the result-list banner removed, the preset-comparison toggle not compared, the old-CSV warning written to the operation status line, a new current CSV not clearing the warning, the output-field content not checked, the warning tied to the summary freshness instead of the CSV inputs, setView not re-judging the Workspace, a Workspace JSON export not clearing the warning, output-field edits not re-judged) each fail at least one check here or in tests/result-freshness-ui.test.js",
+      "proves": "how index.html shows whether a single-case or Workspace result belongs to the current inputs, gates the result CSV and labels notification-mode pressures in a real browser for the head measured",
+      "doesNotProve": "anything about an unmeasured head; that any result is correct or verified (calculated is not verified); Project Pack freshness (measured by the Pack harnesses); the three-view layout, responsive layout and Pack Review UI, which do not exist yet",
+      "instrumentFiles": [
+        "tools/browser-checks/result-freshness.mjs",
+        "tools/browser-checks/resolve-playwright.mjs",
+        "tools/browser-checks/browser-outcome.mjs"
+      ],
+      "finding": null,
+      "reason": "no browser measurement exists for the current target head; a verifier must run it at theirs"
+    },
+    {
       "id": "project-pack-execution",
       "command": "node tools/browser-checks/project-pack-execution.mjs",
       "evidenceClass": "observational",
@@ -458,6 +480,11 @@
       "id": "project-pack-staged-not-active",
       "statement": "a Project Pack loaded by paste, file or drop is validated and adapted into a staged pack_unreviewed ProjectContext only; activeProjectContext, the preset-mode UI and the calculation result stay those of the runtime-default built-in before load, after a successful load, after a failed load and after unload; a failed load leaves no staged Pack (the previous one is not kept); errors show a validator path and reason only; the 8 MiB browser import cap rejects before parsing or reading; no storage, network, URL or console output",
       "instrument": "project-pack-intake"
+    },
+    {
+      "id": "result-freshness-not-shown-as-current",
+      "statement": "a single-case result whose inputs changed, cannot be normalised or whose recalculation did not complete is marked (text, dimmed result, labelled judge badge) and never shown as the current result until an explicit calculation succeeds; inputs of an unselected mode do not mark it; a Workspace summary and result list that no longer match the Workspace inputs or import diagnostics are marked in both places and the result CSV is not written until the Workspace is evaluated again; an old result CSV left in the shared output field keeps its own warning, separate from the operation status line, until a current CSV is written or the field no longer holds it; the notification result names its pressures as calculated from the entered wind conditions with verificationStatus unverified; the Review Package freshness and print gate are unchanged; the status texts are fixed; no storage, network, URL or console output",
+      "instrument": "result-freshness"
     },
     {
       "id": "matrix-renders",
