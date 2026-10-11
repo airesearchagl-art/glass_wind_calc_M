@@ -43,6 +43,10 @@ function check(id, cond, detail) {
   else { fail++; results.push(`  FAIL ${id}  ${detail ?? ''}`); }
 }
 
+// 途中で例外が起きた（操作が timeout した）ときも、それまでの check の結果を出してから終える。
+// 終わり方（ERROR）は harness.mjs の crash guard のまま（先に登録したこの listener が先に呼ばれる）
+process.on('uncaughtException', () => console.log(results.join('\n')));
+process.on('unhandledRejection', () => console.log(results.join('\n')));
 const { chromium, playwrightSource } =
   await openBrowser('three-view-navigation', () => ({ checksRun: pass + fail, failures: fail }));
 const browser = await chromium.launch();
@@ -343,6 +347,9 @@ const ACTIVE0 = await activeState();
   await go('batch');
   await go('pack');
   const backExecuted = await packState();
+  const same = (a, b) => a.staged === b.staged && a.exec === b.exec && a.batch === b.batch && a.preview === b.preview &&
+    a.status === b.status && a.execText === b.execText && a.batchStatus === b.batchStatus && !a.previewHidden && !b.previewHidden;
+  check('N06-pack-staged-kept', !!executed.exec && same(executed, backExecuted), `exec=${!!executed.exec} staged after=${backExecuted.staged !== 'nullnull'}`);
   // 全ケースの計算結果がある状態で往復する（全ケース計算の開始で選択ケースの結果が消えるのは従来どおり）
   await page.click('#btn-pack-batch');
   await page.waitForFunction(() => !!window.stagedProjectPackBatch, null, { timeout: 30000 });
@@ -352,10 +359,7 @@ const ACTIVE0 = await activeState();
   const wsAfter = await workspaceState();
   await go('pack');
   const back = await packState();
-  const same = (a, b) => a.staged === b.staged && a.exec === b.exec && a.batch === b.batch && a.preview === b.preview &&
-    a.status === b.status && a.execText === b.execText && a.batchStatus === b.batchStatus && !a.previewHidden && !b.previewHidden;
-  check('N06-pack-staged-kept', !!executed.exec && same(executed, backExecuted) && !!packed.batch && same(packed, back),
-    `exec=${!!executed.exec} batch=${!!packed.batch}`);
+  check('N06-pack-batch-result-kept', !!packed.batch && same(packed, back), `batch=${!!packed.batch}`);
   const active = await activeState();
   check('S06-active-context-unchanged', JSON.stringify(active) === JSON.stringify(ACTIVE0) && active.same === true,
     `${active.sourceKind}/${active.trust}`);

@@ -177,7 +177,12 @@ function navSandbox() {
       querySelectorAll: (sel) => (sel === '.view-switch [role="tab"]' ? VIEWS.map((v) => els['view-tab-' + v]) : []) },
     renderSingleResultFreshness() { calls.push('single'); },
     renderWorkspaceResultFreshness() { calls.push('batch'); },
-    renderWorkspaceCsvOutputFreshness() { calls.push('csv'); }
+    renderWorkspaceCsvOutputFreshness() { calls.push('csv'); },
+    // 切り替えで呼んではいけないもの（呼ばれたら記録する。staged の Pack がある状態で切り替える）
+    runCalc() { calls.push('runCalc'); },
+    batchEvaluate() { calls.push('batchEvaluate'); },
+    unloadProjectPack() { calls.push('unloadProjectPack'); },
+    window: { stagedProjectPackContext: { trust: 'pack_unreviewed' } }
   };
   vm.createContext(sandbox);
   vm.runInContext(fnBody('setView') + '\n' + fnBody('onViewTabKeydown'), sandbox);
@@ -201,10 +206,13 @@ test('P2L-S3B3B2B2-T06: setView は 1 画面だけを出し、タブの aria-sel
   assert.equal(sb.setView('single'), true);
   assert.deepEqual(shown(), ['single']);
   assert.equal(tabs(), 'single:true:0:true batch:false:-1:false pack:false:-1:false');
+  // 開いた側の鮮度の判定だけ。計算・一括計算・Pack の解除はしない
   assert.deepEqual(calls, ['batch', 'single']);
   // 同じ画面をもう一度選んでも 1 画面のまま
   sb.setView('single');
   assert.deepEqual(shown(), ['single']);
+  sb.setView('pack');
+  assert.deepEqual(calls, ['batch', 'single', 'single'], 'Project Pack の画面で計算・解除・判定をした');
 });
 
 test('P2L-S3B3B2B2-T07: 未知の値（大文字・空白・prototype の名前・null など）では何も変えない', () => {
@@ -226,14 +234,14 @@ test('P2L-S3B3B2B2-T08: 隠れる画面の中に focus があれば、選んだ�
   input.panel = els['view-single'];
   sb.document.activeElement = input;
   sb.setView('batch');
-  assert.equal(sb.document.activeElement, els['view-tab-batch']);
+  assert.equal(sb.document.activeElement.id, 'view-tab-batch', '隠れた画面の中に focus が残った');
   assert.equal(els['view-tab-batch'].focused, 1);
   // 隠れない画面の中の focus はそのまま
   const tsv = fakeElement('batch-tsv');
   tsv.panel = els['view-batch'];
   sb.document.activeElement = tsv;
   sb.setView('batch');
-  assert.equal(sb.document.activeElement, tsv);
+  assert.equal(sb.document.activeElement.id, 'batch-tsv');
   // focus が無い（body など）ときも何もしない
   sb.document.activeElement = null;
   sb.setView('pack');
@@ -250,7 +258,7 @@ test('P2L-S3B3B2B2-T09: ←→ は隣（端で回る）、Home / End は端の�
   const tab = (v) => els['view-tab-' + v];
   assert.equal(press('ArrowRight', tab('single')), true);
   assert.deepEqual(shown(), ['batch']);
-  assert.equal(sb.document.activeElement, tab('batch'));
+  assert.equal(sb.document.activeElement.id, 'view-tab-batch');
   press('ArrowRight', tab('batch'));
   assert.deepEqual(shown(), ['pack']);
   press('ArrowRight', tab('pack'));
@@ -261,7 +269,7 @@ test('P2L-S3B3B2B2-T09: ←→ は隣（端で回る）、Home / End は端の�
   assert.deepEqual(shown(), ['single']);
   press('End', tab('single'));
   assert.deepEqual(shown(), ['pack']);
-  assert.equal(sb.document.activeElement, tab('pack'));
+  assert.equal(sb.document.activeElement.id, 'view-tab-pack');
   // Enter / Space は button の既定の動作（onclick）に任せる。ほかのキー・タブ以外の要素では何もしない
   for (const key of ['Enter', ' ', 'Tab', 'ArrowUp', 'ArrowDown', 'a']) assert.equal(press(key, tab('pack')), false, key);
   assert.equal(press('ArrowRight', fakeElement('inp-W')), false);
