@@ -142,7 +142,17 @@ await page.waitForTimeout(400);
 
 /* ---------- helpers（どの page でも使う） ---------- */
 
+/**
+ * S3-B3B2-B2: 画面は 3 つ（単一ケース / 複数ケース / Project Pack）。表示していなければタブを押して開く。
+ * Pack の操作・表示の読み取りは Pack の画面で、単一ケースの計算・表示の読み取りは単一ケースの画面で行う
+ * （隠れた画面の innerText は描画を伴わないので、表示中と同じ条件で読む）。表示中なら何もしない（計算中も押さない）。
+ */
+async function showView(p, view) {
+  if (await p.evaluate((v) => document.getElementById('view-' + v).hidden, view)) await p.click('#view-tab-' + view);
+}
+
 async function paste(p, text) {
+  await showView(p, 'pack');
   await p.evaluate((t) => { document.getElementById('pack-paste').value = t; }, text);
   await p.click('#btn-pack-load');
   await p.waitForTimeout(50);
@@ -150,6 +160,7 @@ async function paste(p, text) {
 
 /** 全ケース計算の欄と page 変数から状態を読む。 */
 async function batchState(p) {
+  await showView(p, 'pack');
   return p.evaluate(() => {
     const r = window.stagedProjectPackBatch;
     const section = document.getElementById('pack-batch');
@@ -191,6 +202,7 @@ async function batchState(p) {
 const settled = () => !!window.stagedProjectPackBatch ||
   /キャンセル|完了できません|中止/.test(document.getElementById('pack-batch-status').textContent);
 async function runBatch(p) {
+  await showView(p, 'pack');
   await p.click('#btn-pack-batch');
   await p.waitForFunction(settled, null, { timeout: 120000, polling: 20 });
   await p.waitForTimeout(20);
@@ -205,9 +217,10 @@ async function waitMidRun(p) {
   return batchState(p);
 }
 
-/** active ProjectContext と、それに依存する案件プリセット UI・計算結果の snapshot。 */
+/** active ProjectContext と、それに依存する案件プリセット UI・計算結果の snapshot（単一ケースの画面で読み、Pack の画面へ戻る）。 */
 async function activeSnapshot() {
-  return page.evaluate(() => {
+  await showView(page, 'single');
+  const snap = await page.evaluate(() => {
     const ctx = activeProjectContext;
     const opts = (id) => [...document.querySelectorAll('#' + id + ' option')].map((o) => o.value + '=' + o.textContent);
     const text = (id) => { const el = document.getElementById(id); return el ? el.innerText : null; };
@@ -220,6 +233,8 @@ async function activeSnapshot() {
       result: text('result-area')
     };
   });
+  await showView(page, 'pack');
+  return snap;
 }
 
 /** 全ケース計算の状態行の変化を記録する（どの run が確定したかを数える）。 */
@@ -257,6 +272,7 @@ function checkModeResult(id, s, mode) {
 /* ---------- 1. clean startup ---------- */
 
 await page.evaluate(() => { window.__activeAtStart = activeProjectContext; });
+await showView(page, 'single');
 await page.click('button.btn-calc');
 await page.waitForTimeout(100);
 const ACTIVE0 = await activeSnapshot();
@@ -439,6 +455,7 @@ check('B13-claims-no-effect', s13.result && s13.result.trust === 'pack_unreviewe
 
 /* ---------- 14–16. active parity・保存・通信・文言 ---------- */
 
+await showView(page, 'single');
 await page.click('button.btn-calc');
 await page.waitForTimeout(100);
 const ACTIVE1 = await activeSnapshot();
@@ -469,6 +486,7 @@ async function freshPage(initScript, arg) {
   if (initScript) await p.addInitScript(initScript, arg);
   await p.goto(FILE);
   await p.waitForTimeout(300);
+  await showView(p, 'pack');
   return { p, errors, logs };
 }
 

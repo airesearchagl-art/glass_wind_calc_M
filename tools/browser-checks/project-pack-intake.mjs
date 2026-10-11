@@ -131,8 +131,18 @@ await page.waitForTimeout(400);
 
 const probe = () => page.evaluate(() => Object.assign({}, window.__packProbe));
 
+/**
+ * S3-B3B2-B2: 画面は 3 つ（単一ケース / 複数ケース / Project Pack）。表示していなければタブを押して開く。
+ * Pack の操作・表示の読み取りは Pack の画面で、単一ケースの計算・表示の読み取りは単一ケースの画面で行う
+ * （隠れた画面の innerText は描画を伴わないので、表示中と同じ条件で読む）。
+ */
+async function showView(view) {
+  if (await page.evaluate((v) => document.getElementById('view-' + v).hidden, view)) await page.click('#view-tab-' + view);
+}
+
 /** 画面と page 変数から、staged / active / panel の状態を読む。 */
 async function state() {
+  await showView('pack');
   return page.evaluate(() => {
     const ctx = window.stagedProjectPackContext;
     const status = document.getElementById('pack-status');
@@ -172,9 +182,10 @@ async function state() {
   });
 }
 
-/** active ProjectContext と、それに依存する案件プリセット UI・計算結果の snapshot。 */
+/** active ProjectContext と、それに依存する案件プリセット UI・計算結果の snapshot（単一ケースの画面で読み、Pack の画面へ戻る）。 */
 async function activeSnapshot() {
-  return page.evaluate(() => {
+  await showView('single');
+  const snap = await page.evaluate(() => {
     const ctx = activeProjectContext;
     const opts = (id) => [...document.querySelectorAll('#' + id + ' option')].map((o) => o.value + '=' + o.textContent);
     const text = (id) => { const el = document.getElementById(id); return el ? el.innerText : null; };
@@ -190,15 +201,19 @@ async function activeSnapshot() {
       result: text('result-area')
     };
   });
+  await showView('pack');
+  return snap;
 }
 
 async function paste(text) {
+  await showView('pack');
   await page.evaluate((t) => { document.getElementById('pack-paste').value = t; }, text);
   await page.click('#btn-pack-load');
   await page.waitForTimeout(50);
 }
 
 async function chooseFile(name, mimeType, buffer) {
+  await showView('pack');
   await page.setInputFiles('#pack-file', { name, mimeType, buffer });
 }
 
@@ -211,6 +226,7 @@ async function waitStatus(re, timeout) {
 }
 
 async function drop(files) {
+  await showView('pack');
   await page.evaluate((list) => {
     const dt = new DataTransfer();
     // kind: 'string' はファイルではない項目（ドラッグした文字列など）として足す
@@ -273,6 +289,7 @@ function checkFailed(id, s, stageLabel, secrets) {
 
 await page.evaluate(() => { window.__activeAtStart = activeProjectContext; });
 // 計算結果を 1 度確定させてから比べる
+await showView('single');
 await page.click('button.btn-calc');
 await page.waitForTimeout(100);
 const ACTIVE0 = await activeSnapshot();
@@ -288,12 +305,42 @@ const ui0 = await page.evaluate(() => {
     paste: !!document.getElementById('pack-paste'), drop: !!document.getElementById('pack-drop'),
     load: document.getElementById('btn-pack-load').textContent.trim(),
     unload: document.getElementById('btn-pack-unload').textContent.trim(),
-    title: document.getElementById('pack-title').textContent.trim(),
-    visibleInBatch: (() => { setView('batch'); const v = getComputedStyle(document.getElementById('project-pack-section')).display !== 'none'; setView('single'); return v; })() };
+    title: document.getElementById('pack-title').textContent.trim() };
 });
+// S3-B3B2-B2: Pack 欄は Project Pack の画面だけに出す（以前の「一括検討の表示でも見える」契約は意図して廃止）。
+// 子要素の getComputedStyle().display は祖先の hidden を反映しないので、Playwright の可視判定・
+// checkVisibility()・祖先の hidden 属性で調べる。各画面はタブを押して開く。
+async function viewVisibility() {
+  const dom = await page.evaluate(() => {
+    const pack = document.getElementById('project-pack-section');
+    return { pack: pack.checkVisibility(), packInHidden: !!pack.closest('[hidden]'),
+      single: document.getElementById('result-area').checkVisibility(),
+      batch: document.getElementById('batch-tsv').checkVisibility() };
+  });
+  return { pack: await page.isVisible('#project-pack-section') && dom.pack && !dom.packInHidden,
+    single: await page.isVisible('#view-single') && dom.single, batch: await page.isVisible('#view-batch') && dom.batch };
+}
+const shown = {};
+for (const v of ['single', 'batch', 'pack']) {
+  await page.click('#view-tab-' + v);
+  shown[v] = await viewVisibility();
+  if (v === 'batch') {
+    // Workspace の最初のカード（案件プロファイル）は Pack 欄に押し下げられず、タブの直下にある
+    shown.firstCard = await page.evaluate(() => {
+      const tabs = document.querySelector('.view-switch').getBoundingClientRect();
+      const card = document.querySelector('#view-batch > .card');
+      return { gap: Math.round(card.getBoundingClientRect().top - tabs.bottom), title: card.querySelector('.card-title').textContent,
+        packHeight: document.getElementById('project-pack-section').getBoundingClientRect().height };
+    });
+  }
+}
+const only = (o, key) => ['single', 'batch', 'pack'].every((k) => o[k] === (k === key));
 check('I1-panel', ui0.title === 'Project Pack（Unreviewed）' && ui0.accept === '.json,application/json' && ui0.multiple === false &&
-  ui0.paste && ui0.drop && ui0.load === '検証して読み込む' && ui0.unload === 'Packを解除' && ui0.visibleInBatch === true,
-  JSON.stringify(ui0));
+  ui0.paste && ui0.drop && ui0.load === '検証して読み込む' && ui0.unload === 'Packを解除' &&
+  only(shown.single, 'single') && only(shown.batch, 'batch') && only(shown.pack, 'pack') &&
+  shown.firstCard.gap >= 0 && shown.firstCard.gap < 60 && shown.firstCard.title === '案件プロファイル（風条件の共通値）' &&
+  shown.firstCard.packHeight === 0,
+  JSON.stringify({ title: ui0.title, shown }));
 check('I1-cap-note', s0.panelText.includes('8 MiB') && s0.panelText.includes('資源保護') &&
   s0.panelText.includes('schema の制限ではありません') && s0.panelText.includes('Closure判定はこの段階では行いません'),
   'byte cap is stated as a browser resource limit');
@@ -301,6 +348,7 @@ check('I1-cap-note', s0.panelText.includes('8 MiB') && s0.panelText.includes('�
 /* ---------- 2. valid notification pack via paste ---------- */
 
 const parseBefore = (await probe()).jsonParse;
+await showView('pack');
 await page.fill('#pack-paste', fixtureText('notification1458'));
 await page.waitForTimeout(100);
 const typed = await state();
@@ -312,6 +360,14 @@ const s1 = await state();
 checkLoaded('P1', s1, 'notification1458', '貼り付け');
 check('P1-paste-cleared', s1.pasteValue === '', '検証後に貼り付け欄へ raw text を残さない');
 check('P1-active', JSON.stringify(await activeSnapshot()) === JSON.stringify(ACTIVE0), 'active context・preset UI・結果は不変');
+// S3-B3B2-B2: 画面を切り替えても staged の Pack・preview・状態行は変わらない（解除も再検証もしない）
+const parseBeforeSwitch = (await probe()).jsonParse;
+for (const v of ['single', 'batch', 'pack']) await page.click('#view-tab-' + v);
+const parseAfterSwitch = (await probe()).jsonParse;
+const s1back = await state();
+check('I1-panel-switch-keeps-staged', s1back.staged && s1back.stagedJson === s1.stagedJson && s1back.status === s1.status &&
+  s1back.previewText === s1.previewText && s1back.previewHidden === false && parseAfterSwitch === parseBeforeSwitch,
+  `single → batch → pack, JSON.parse ${parseBeforeSwitch} → ${parseAfterSwitch}`);
 
 /* ---------- 3. valid pressure-map pack via file ---------- */
 
@@ -519,6 +575,7 @@ check('R2-latest-wins', sRace.staged && sRace.context.mode === 'project_pressure
 
 /* ---------- runtime parity・保存・通信 ---------- */
 
+await showView('single');
 await page.click('button.btn-calc');
 await page.waitForTimeout(100);
 const ACTIVE1 = await activeSnapshot();

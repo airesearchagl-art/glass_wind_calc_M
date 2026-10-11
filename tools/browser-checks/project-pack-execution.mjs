@@ -122,24 +122,37 @@ await page.waitForTimeout(400);
 
 /* ---------- helpers ---------- */
 
+/**
+ * S3-B3B2-B2: 画面は 3 つ（単一ケース / 複数ケース / Project Pack）。表示していなければタブを押して開く。
+ * Pack の操作・表示の読み取りは Pack の画面で、単一ケースの計算・表示の読み取りは単一ケースの画面で行う
+ * （隠れた画面の innerText は描画を伴わないので、表示中と同じ条件で読む）。
+ */
+async function showView(view, p = page) {
+  if (await p.evaluate((v) => document.getElementById('view-' + v).hidden, view)) await p.click('#view-tab-' + view);
+}
+
 async function paste(text) {
+  await showView('pack');
   await page.evaluate((t) => { document.getElementById('pack-paste').value = t; }, text);
   await page.click('#btn-pack-load');
   await page.waitForTimeout(50);
 }
 
 async function choose(caseId) {
+  await showView('pack');
   await page.selectOption('#pack-exec-case', caseId);
   await page.waitForTimeout(30);
 }
 
 async function execute() {
+  await showView('pack');
   await page.click('#btn-pack-exec');
   await page.waitForTimeout(50);
 }
 
 /** ケース計算の欄と page 変数から状態を読む。 */
 async function execState() {
+  await showView('pack');
   return page.evaluate(() => {
     const r = window.stagedProjectPackExecution;
     const section = document.getElementById('pack-exec');
@@ -174,9 +187,10 @@ async function execState() {
   });
 }
 
-/** active ProjectContext と、それに依存する案件プリセット UI・計算結果の snapshot。 */
+/** active ProjectContext と、それに依存する案件プリセット UI・計算結果の snapshot（単一ケースの画面で読み、Pack の画面へ戻る）。 */
 async function activeSnapshot() {
-  return page.evaluate(() => {
+  await showView('single');
+  const snap = await page.evaluate(() => {
     const ctx = activeProjectContext;
     const opts = (id) => [...document.querySelectorAll('#' + id + ' option')].map((o) => o.value + '=' + o.textContent);
     const text = (id) => { const el = document.getElementById(id); return el ? el.innerText : null; };
@@ -189,6 +203,8 @@ async function activeSnapshot() {
       result: text('result-area')
     };
   });
+  await showView('pack');
+  return snap;
 }
 
 function checkResult(id, s, mode) {
@@ -211,6 +227,7 @@ function checkResult(id, s, mode) {
 /* ---------- 1. clean startup ---------- */
 
 await page.evaluate(() => { window.__activeAtStart = activeProjectContext; });
+await showView('single');
 await page.click('button.btn-calc');
 await page.waitForTimeout(100);
 const ACTIVE0 = await activeSnapshot();
@@ -229,6 +246,7 @@ check('E2-controls', s2.sectionVisible && !s2.buttonDisabled && !s2.selectDisabl
   JSON.stringify(s2.options) === JSON.stringify([['G001', 'G001 — P001'], ['G002', 'G002 — P002'], ['G003', 'G003 — P001']]) &&
   s2.status.includes('押したときだけ'), JSON.stringify(s2.options));
 // ファイルから読み込んでも計算しない
+await showView('pack');
 await page.setInputFiles('#pack-file', { name: 'pack.json', mimeType: 'application/json', buffer: Buffer.from(fixtureText('case_direct'), 'utf8') });
 await page.waitForFunction(() => /読み込み経路: ファイル選択/.test(document.getElementById('pack-status').textContent));
 const s2f = await execState();
@@ -298,6 +316,7 @@ check('E8-invalid-pack-clears', !s8.hasResult && !s8.packStaged && s8.sectionHid
 await paste(fixtureText('case_direct'));
 await choose('G002');
 await execute();
+await showView('pack');
 await page.click('#btn-pack-unload');
 await page.waitForTimeout(50);
 const s9 = await execState();
@@ -338,6 +357,7 @@ check('E14-claims-no-effect', s14.result && s14.result.trust === 'pack_unreviewe
 
 /* ---------- 11–13. active parity・保存・通信・文言 ---------- */
 
+await showView('single');
 await page.click('button.btn-calc');
 await page.waitForTimeout(100);
 const ACTIVE1 = await activeSnapshot();
@@ -352,6 +372,7 @@ const url = await page.evaluate(() => ({ hash: location.hash, search: location.s
 check('E12-no-url', url.hash === '' && url.search === '' && url.href === FILE && calls.history === 0, JSON.stringify(url));
 check('E12-no-console', consoleMessages.length === 0 && pageErrors.length === 0,
   `console=${consoleMessages.length} pageErrors=${pageErrors.length}`);
+await showView('pack');
 const panel = await page.evaluate(() => document.getElementById('project-pack-section').innerText);
 // S3-B3B1 の派生レポートの注意文（「…公開安全の証明にはなりません」という否定の文）だけは除いて調べる
 const strongPanel = panel.replace(/計算済み ≠ 検証済み/g, '').replace(/publication advisoryが0件でも公開安全の証明にはなりません。/g, '');
@@ -367,6 +388,7 @@ async function freshPage(url) {
   p.on('pageerror', (e) => errors.push(e.message));
   await p.goto(url || FILE);
   await p.waitForTimeout(300);
+  await showView('pack', p);
   return { p, errors };
 }
 async function freshPaste(p, text) {
