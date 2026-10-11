@@ -522,12 +522,14 @@ const failClosed = (x) => x.summary === CLOSURE_FAILED_TEXT && x.error && x.visi
   const manualCalc = await page.evaluate(() => ({ badge: !!document.querySelector('#result-area .judge-badge'), fresh: getSingleResultFreshness(),
     glass: document.querySelector('.conclusion-card .conclusion-glass').textContent }));
   await setMode(page, 'preset');
-  // 次は Closure を戻し、status だけを（表を書いた後の欄で）失敗させる
+  // 次は Closure を戻し、status だけを（表を書いた後の欄で）失敗させる。status の renderer だけを呼ぶ
+  // （renderProjectEvidencePanels() は続けて Closure を描き直すので、status の失敗が Closure の要約を巻き添えにしても隠れてしまう）
   await page.evaluate((secret) => {
     window.EvidenceClosure = window.__realClosure;
+    renderEvidenceClosureMatrix();
     window.__realRecon = window.renderReconciliation;
     window.renderReconciliation = () => { throw new Error('recon ' + secret); };
-    renderProjectEvidencePanels();
+    renderPhase2FEvidencePanels();
   }, SECRET);
   const statusOnly = await closureState();
   const statusTable = await page.evaluate(() => document.getElementById('evidence-status-table').textContent);
