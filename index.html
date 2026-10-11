@@ -3789,7 +3789,7 @@ function renderResults(result) {
           </div>
         </div>
       </div>
-      ${conclusionNotesHtml(mode, windStatusWarningHtml, coeffFlagged, extraFactor, outOfScopeCandidates.length)}
+      ${conclusionNotesHtml(mode, windStatusWarningHtml, coeffFlagged, extraFactor, outOfScopeCandidates.length, scopeTop.length)}
     </div>`;
 
   // 計算根拠・候補一覧は 1 回の操作で開く詳細へ（S3-B3B2-B4）。値・並び・選び方は変えない。
@@ -3809,10 +3809,10 @@ function renderResults(result) {
  * 結論カードに常に表示する注記（S3-B3B2-B4）。
  *   - 案件プリセットの設計風圧の検証状況（以前は詳細の中にあった警告をそのまま移す）
  *   - 告示外の追加低減係数が 1.00 以外であること（色だけでなく文で示す）
- *   - 板硝子協会計算法の適用範囲外の候補を自動推奨から除外したこと（件数）
+ *   - 板硝子協会計算法の適用範囲外の候補を自動推奨から除外したこと（全件数と、詳細の表に出す件数）
  * 値は renderResults() と同じ計算結果から渡す。
  */
-function conclusionNotesHtml(mode, windStatusWarningHtml, coeffFlagged, extraFactor, outOfScopeCount) {
+function conclusionNotesHtml(mode, windStatusWarningHtml, coeffFlagged, extraFactor, outOfScopeCount, outOfScopeShown) {
   const notes = [];
   if (windStatusWarningHtml) notes.push(windStatusWarningHtml);
   if (coeffFlagged) {
@@ -3821,7 +3821,8 @@ function conclusionNotesHtml(mode, windStatusWarningHtml, coeffFlagged, extraFac
   }
   if (outOfScopeCount > 0) {
     notes.push('<div class="conclusion-note is-warn">⚠ 板硝子協会計算法の適用範囲外の候補 ' + outOfScopeCount +
-      ' 件は自動推奨から除外しています（計算根拠・候補一覧の「適用範囲外」を参照。採用する場合はメーカー個別検討が必要です）。</div>');
+      ' 件は自動推奨から除外しています（計算根拠・候補一覧の「適用範囲外」に上位 ' + outOfScopeShown +
+      ' 件を表示。採用する場合はメーカー個別検討が必要です）。</div>');
   }
   return notes.length ? '<div class="conclusion-notes">' + notes.join('') + '</div>' : '';
 }

@@ -467,7 +467,8 @@ const inFirstView = (r) => r.every((x) => !x.missing && x.visible && x.top >= 0 
 /* ---------- U18 適用範囲外の候補の除外は件数つきで常に見える（件数は Node 側の計算と同じ） ---------- */
 {
   const visible = await resultVisibleText(page);
-  const note = `⚠ 板硝子協会計算法の適用範囲外の候補 ${NODE_MANUAL.out} 件は自動推奨から除外しています`;
+  const shown = Math.min(5, NODE_MANUAL.out);   // 詳細の表は上位 5 件（従来どおり）
+  const note = `⚠ 板硝子協会計算法の適用範囲外の候補 ${NODE_MANUAL.out} 件は自動推奨から除外しています（計算根拠・候補一覧の「適用範囲外」に上位 ${shown} 件を表示。`;
   await page.click('#result-details > summary');
   const table = await page.evaluate(() => {
     const t = [...document.querySelectorAll('#result-details .sec-title')].find((e) => e.innerText.includes('適用範囲外'));
@@ -476,7 +477,7 @@ const inFirstView = (r) => r.every((x) => !x.missing && x.visible && x.top >= 0 
   });
   await page.click('#result-details > summary');
   check('U18-out-of-scope-count-always-visible', NODE_MANUAL.out > 0 && visible.includes(note) && table.title !== null &&
-    table.rows === Math.min(5, NODE_MANUAL.out), `node out=${NODE_MANUAL.out} rows=${table.rows} visible=${visible.includes(note)}`);
+    table.rows === shown, `node out=${NODE_MANUAL.out} rows=${table.rows} visible=${visible.includes(note)}`);
 }
 
 /* ---------- U19 未検証の状態は詳細を開かなくても見える（4 mode） ---------- */

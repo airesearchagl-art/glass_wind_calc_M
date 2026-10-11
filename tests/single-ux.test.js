@@ -169,10 +169,13 @@ test('UX-07: 結果は結論を常に表示し、計算根拠・候補一覧（6
   const conclusion = body.slice(body.indexOf('const conclusionHtml = `'), body.indexOf('</div>`;', body.indexOf('const conclusionHtml = `')));
   for (const part of ['${unverifiedHtml}', '${judgeHtml}', '${bestLabel}', '許容風圧 <span>${bestP} N/m²</span>',
     '設計風圧 <span>${fmt(designP, 0)} N/m²</span>', "<div class=\"meta-chip${coeffFlagged ? ' is-flagged' : ''}\">告示外の追加低減係数 <span>${fmt(extraFactor, 2)}</span>",
-    '${conclusionNotesHtml(mode, windStatusWarningHtml, coeffFlagged, extraFactor, outOfScopeCandidates.length)}']) {
+    '${conclusionNotesHtml(mode, windStatusWarningHtml, coeffFlagged, extraFactor, outOfScopeCandidates.length, scopeTop.length)}']) {
     assert.ok(conclusion.includes(part), '結論に ' + part + ' が無い');
   }
   assert.match(body, /const coeffFlagged = extraFactor !== 1;/);
+  // 適用範囲外の表に出す件数（上位 5 件）は表と同じ scopeTop から渡す（別に数え直さない）
+  assert.match(body, /const scopeTop = outOfScopeCandidates\.slice\(0, 5\);/);
+  assert.ok(body.indexOf('const scopeTop =') < body.indexOf('const conclusionHtml ='));
   assert.match(body, /<div class="result-details-body">\$\{traceHtml \+ windHtml \+ calcDetailHtml \+ okTableHtml \+ ngTableHtml \+ scopeTableHtml\}<\/div>/);
   assert.match(body, /document\.getElementById\('result-area'\)\.innerHTML = conclusionHtml \+ detailsHtml;/);
   // 詳細は最初は閉じ、開いた状態は描き直す直前の details から引き継ぐ（保存しない）
@@ -303,14 +306,14 @@ test('UX-13: renderEvidenceStatusSummary は渡された状況を数え、setEvi
 test('UX-14: conclusionNotesHtml は係数 1.00 以外・適用範囲外の件数・プリセットの未検証警告を常に見える注記にする', () => {
   const sb = sandboxWith({});
   vm.runInContext([fnOnly('fmt'), fnOnly('conclusionNotesHtml')].join('\n'), sb);
-  assert.equal(sb.conclusionNotesHtml('manual', '', false, 1, 0), '');
-  const coeff = sb.conclusionNotesHtml('manual', '', true, 0.9, 0);
+  assert.equal(sb.conclusionNotesHtml('manual', '', false, 1, 0, 0), '');
+  const coeff = sb.conclusionNotesHtml('manual', '', true, 0.9, 0, 0);
   assert.match(coeff, /<div class="conclusion-note is-warn">⚠ 告示外の追加低減係数 0\.90 を適用しています（1\.00 = 告示準拠。この低減は告示には規定がありません）。<\/div>/);
-  const scope = sb.conclusionNotesHtml('manual', '', false, 1, 6);
-  assert.match(scope, /⚠ 板硝子協会計算法の適用範囲外の候補 6 件は自動推奨から除外しています/);
+  const scope = sb.conclusionNotesHtml('manual', '', false, 1, 6, 5);
+  assert.match(scope, /⚠ 板硝子協会計算法の適用範囲外の候補 6 件は自動推奨から除外しています（計算根拠・候補一覧の「適用範囲外」に上位 5 件を表示。/);
   assert.match(scope, /採用する場合はメーカー個別検討が必要です/);
   const warn = '<div class="calc-line">⚠ 設計風圧プリセット — 未検証</div>';
-  const all = sb.conclusionNotesHtml('preset', warn, true, 0.95, 2);
+  const all = sb.conclusionNotesHtml('preset', warn, true, 0.95, 2, 2);
   assert.ok(all.startsWith('<div class="conclusion-notes">' + warn));
   assert.ok(all.includes('0.95') && all.includes('候補 2 件'));
 });
