@@ -55,11 +55,17 @@ function batchCodeOnly() {
 
 test('AC-01: Single viewが既定で、Batch viewは初期状態でhidden', () => {
   const src = html();
-  assert.match(src, /<div class="main-wrap" id="view-single">/);
-  assert.match(src, /<div class="batch-wrap" id="view-batch" hidden>/);
-  assert.match(src, /id="view-tab-single" class="view-tab is-active"/);
-  // Single側にhidden属性が最初から付いていないこと
+  // S3-B3B2-B2: 3 画面（単一ケース / 複数ケース / Project Pack）。各画面は tabpanel で、既定は Single だけ
+  assert.match(src, /<div class="main-wrap" id="view-single" role="tabpanel" aria-labelledby="view-tab-single">/);
+  assert.match(src, /<div class="batch-wrap" id="view-batch" role="tabpanel" aria-labelledby="view-tab-batch" hidden>/);
+  assert.match(src, /<div class="pack-view" id="view-pack" role="tabpanel" aria-labelledby="view-tab-pack" hidden>/);
+  assert.match(src, /id="view-tab-single" class="view-tab is-active" role="tab"\s+aria-selected="true" aria-controls="view-single" tabindex="0"/);
+  assert.match(src, /id="view-tab-batch" class="view-tab" role="tab"\s+aria-selected="false" aria-controls="view-batch" tabindex="-1"/);
+  assert.match(src, /id="view-tab-pack" class="view-tab" role="tab"\s+aria-selected="false" aria-controls="view-pack" tabindex="-1"/);
+  // Single側にhidden属性が最初から付いていないこと（初期表示で見えるのは Single の 1 画面だけ）
   assert.doesNotMatch(src, /id="view-single"[^>]*\shidden/);
+  assert.equal((src.match(/<div [^>]*role="tabpanel"/g) || []).length, 3);
+  assert.equal((src.match(/<div [^>]*role="tabpanel"[^>]*\shidden>/g) || []).length, 2);
 });
 
 test('AC-01 regression: display指定が [hidden] を上書きしないこと', () => {
@@ -69,6 +75,8 @@ test('AC-01 regression: display指定が [hidden] を上書きしないこと', 
   const src = html();
   assert.match(src, /\.main-wrap\[hidden\][^}]*display:\s*none/);
   assert.match(src, /\.batch-wrap\[hidden\][^}]*display:\s*none/);
+  // S3-B3B2-B2: Project Pack の画面も同じ規則で隠す
+  assert.match(src, /\.pack-view\[hidden\][^}]*display:\s*none/);
   // 前提（display:grid を持っている）が変わったらこのテストの意味も変わる
   assert.match(src, /\.main-wrap\s*\{[^}]*display:\s*grid/);
   assert.match(src, /\.batch-wrap\s*\{[^}]*display:\s*grid/);

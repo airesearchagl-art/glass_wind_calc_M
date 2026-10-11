@@ -181,7 +181,17 @@ await page.waitForTimeout(400);
 
 /* ---------- helpers ---------- */
 
+/**
+ * S3-B3B2-B2: 画面は 3 つ（単一ケース / 複数ケース / Project Pack）。表示していなければタブを押して開く。
+ * Pack の操作・表示の読み取りは Pack の画面で、単一ケースの計算・表示の読み取りは単一ケースの画面で行う
+ * （隠れた画面の innerText・offsetParent は描画を伴わないので、表示中と同じ条件で読む）。表示中なら何もしない。
+ */
+async function showView(p, view) {
+  if (await p.evaluate((v) => document.getElementById('view-' + v).hidden, view)) await p.click('#view-tab-' + view);
+}
+
 async function paste(p, text) {
+  await showView(p, 'pack');
   await p.evaluate((t) => { document.getElementById('pack-paste').value = t; }, text);
   await p.click('#btn-pack-load');
   await p.waitForTimeout(50);
@@ -189,6 +199,7 @@ async function paste(p, text) {
 const batchSettled = () => !!window.stagedProjectPackBatch ||
   /キャンセル|完了できません|中止/.test(document.getElementById('pack-batch-status').textContent);
 async function runBatch(p) {
+  await showView(p, 'pack');
   await p.click('#btn-pack-batch');
   await p.waitForFunction(batchSettled, null, { timeout: 120000, polling: 20 });
   await p.waitForTimeout(20);
@@ -201,6 +212,7 @@ async function waitMidRun(p) {
 }
 /** 派生レポート欄の状態。 */
 async function reportState(p) {
+  await showView(p, 'pack');
   return p.evaluate(() => {
     const out = document.getElementById('pack-report-out');
     const section = document.getElementById('pack-report');
@@ -218,14 +230,17 @@ async function reportState(p) {
   });
 }
 async function show(p, kind) {
+  await showView(p, 'pack');
   await p.click(kind === 'json' ? '#btn-pack-report-json' : '#btn-pack-report-csv');
   await p.waitForTimeout(30);
   return reportState(p);
 }
 const empty = (s) => s.value === '' && s.outHidden && !s.outVisible;
 
+/** active ProjectContext と、それに依存する UI・計算結果の snapshot（単一ケースの画面で読み、Pack の画面へ戻る）。 */
 async function activeSnapshot() {
-  return page.evaluate(() => {
+  await showView(page, 'single');
+  const snap = await page.evaluate(() => {
     const ctx = activeProjectContext;
     const opts = (id) => [...document.querySelectorAll('#' + id + ' option')].map((o) => o.value + '=' + o.textContent);
     const text = (id) => { const el = document.getElementById(id); return el ? el.innerText : null; };
@@ -241,6 +256,8 @@ async function activeSnapshot() {
         .map((el) => el.id + '=' + (el.type === 'checkbox' || el.type === 'radio' ? el.checked : el.value)).join('|')
     };
   });
+  await showView(page, 'pack');
+  return snap;
 }
 
 function checkJson(id, s, mode) {
@@ -284,6 +301,7 @@ function checkCsv(id, s, mode) {
 /* ---------- 1–3. 起動・読込・確定まで押せない ---------- */
 
 await page.evaluate(() => { window.__activeAtStart = activeProjectContext; });
+await showView(page, 'single');
 await page.click('button.btn-calc');
 await page.waitForTimeout(100);
 const ACTIVE0 = await activeSnapshot();
@@ -460,6 +478,7 @@ check('S-claims-no-effect', sClaims.value === NOTIF_CSV, '申告を primary に�
 
 /* ---------- 16–17. 保存・通信・URL・console・ダウンロード・クリップボード・active ---------- */
 
+await showView(page, 'single');
 await page.click('button.btn-calc');
 await page.waitForTimeout(100);
 const ACTIVE1 = await activeSnapshot();
@@ -488,6 +507,7 @@ async function freshPage(initScript, arg) {
   if (initScript) await p.addInitScript(initScript, arg);
   await p.goto(FILE);
   await p.waitForTimeout(300);
+  await showView(p, 'pack');
   return { p, errors, logs };
 }
 

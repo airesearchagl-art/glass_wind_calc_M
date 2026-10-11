@@ -33,6 +33,8 @@ const EXPECTED_INSTRUMENT_IDS = [
   'project-pack-report',
   // Phase 2L-B2 S3-B3B2-B1: single-case / Workspace result freshness and the notification source label
   'result-freshness',
+  // Phase 2L-B2 S3-B3B2-B2: purpose-based three views (single case / Workspace / Project Pack)
+  'three-view-navigation',
   // Human Gate, Phase 2K final: the single 'mutation' entry was split, because
   // one label could not honestly carry both claims at once.
   'mutation-kill', 'mutation-equivalence-analysis',
@@ -260,7 +262,8 @@ test('P2K-M09: 全 instrument の class と admissibility を literal で固定�
     ['project-state-probe', 'ADMISSIBLE', 'observational'],
     ['publication-lint', 'ADMISSIBLE', 'regression'],
     ['result-freshness', 'UNVERIFIED', 'observational'],
-    ['stageA-regression', 'UNVERIFIED', 'observational']
+    ['stageA-regression', 'UNVERIFIED', 'observational'],
+    ['three-view-navigation', 'UNVERIFIED', 'observational']
   ];
   const actual = manifest.spec.instruments
     .map((i) => [i.id, i.admissibility, i.evidenceClass])

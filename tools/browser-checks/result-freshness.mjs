@@ -388,21 +388,36 @@ await staleThenRecover('inp-wind-compare', 'S15-preset-comparison-stale');
   await calc();
 }
 
-// S17: Project Pack 欄と干渉しない（Pack の読込で単一ケースの結果も鮮度も変わらず、鮮度の変化で Pack 欄も変わらない）
+// S17: Project Pack の画面と干渉しない（S3-B3B2-B2: 単一ケース → Pack → 単一ケースと移る。Pack の読込・画面の往復で
+// 単一ケースの結果も鮮度も変わらず、単一ケースの入力の変化で Pack の staged の状態も Pack 欄の表示も変わらない。
+// 画面を切り替えるだけでは計算しないので、変更前の結果は単一ケースへ戻っても変更前のまま）
 {
   const before = await single();
+  const packView = () => page.evaluate(() => ({ text: document.getElementById('project-pack-section').innerText,
+    staged: JSON.stringify(window.stagedProjectPack) + JSON.stringify(window.stagedProjectPackContext) }));
+  await page.click('#view-tab-pack');
   await page.evaluate((t) => { document.getElementById('pack-paste').value = t; }, PACK_FIXTURE);
   await page.click('#btn-pack-load');
   await page.waitForSelector('#pack-preview:not([hidden])');
+  const packBefore = await packView();
+  await page.click('#view-tab-single');
   const afterLoad = await single();
-  const packBefore = await page.evaluate(() => document.getElementById('project-pack-section').innerText);
   await page.fill('#inp-W', '1300');
-  const packAfter = await page.evaluate(() => document.getElementById('project-pack-section').innerText);
-  check('S17-pack-noninterference', isState(afterLoad, 'fresh') && afterLoad.result === before.result && packBefore === packAfter &&
-    !(await page.evaluate(() => document.getElementById('project-pack-section').contains(document.getElementById('single-result-freshness')))), '');
+  const changed = await single();
+  await page.click('#view-tab-pack');
+  const packAfter = await packView();
+  await page.click('#view-tab-single');
+  const back = await single();
+  check('S17-pack-noninterference', isState(afterLoad, 'fresh') && afterLoad.result === before.result &&
+    isState(changed, 'stale') && isState(back, 'stale') && back.result === before.result &&
+    packBefore.staged !== 'nullnull' && packAfter.staged === packBefore.staged && packAfter.text === packBefore.text &&
+    !(await page.evaluate(() => document.getElementById('project-pack-section').contains(document.getElementById('single-result-freshness')))),
+    `${afterLoad.attr} ${changed.attr} ${back.attr}`);
   await page.fill('#inp-W', '900');
   await calc();
+  await page.click('#view-tab-pack');
   await page.click('#btn-pack-unload');
+  await page.click('#view-tab-single');
 }
 
 /* ============================================================

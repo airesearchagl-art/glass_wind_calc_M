@@ -291,9 +291,31 @@
       "positiveControl": "every single-case input of every mode marks the result as earlier and recalculating restores it; the Workspace goes from none to fresh to earlier (summary and list) and back; a current CSV is written with the WorkspaceCore column header",
       "negativeControl": "mutants B1-01 to B1-20 (snapshot comparison removed, the width not compared, notification wind conditions not compared, invalid input treated as current, a failed calculation leaving the previous result current, only the Workspace case count compared, diagnostics not compared, an added case leaving the old summary current, a stale CSV written, notification labelled as manual input, a mode switch leaving the old result current, the result-list banner removed, the preset-comparison toggle not compared, the old-CSV warning written to the operation status line, a new current CSV not clearing the warning, the output-field content not checked, the warning tied to the summary freshness instead of the CSV inputs, setView not re-judging the Workspace, a Workspace JSON export not clearing the warning, output-field edits not re-judged) each fail at least one check here or in tests/result-freshness-ui.test.js",
       "proves": "how index.html shows whether a single-case or Workspace result belongs to the current inputs, gates the result CSV and labels notification-mode pressures in a real browser for the head measured",
-      "doesNotProve": "anything about an unmeasured head; that any result is correct or verified (calculated is not verified); Project Pack freshness (measured by the Pack harnesses); the three-view layout, responsive layout and Pack Review UI, which do not exist yet",
+      "doesNotProve": "anything about an unmeasured head; that any result is correct or verified (calculated is not verified); Project Pack freshness (measured by the Pack harnesses); the three-view navigation (measured by three-view-navigation); the responsive layout and Pack Review UI, which do not exist yet",
       "instrumentFiles": [
         "tools/browser-checks/result-freshness.mjs",
+        "tools/browser-checks/resolve-playwright.mjs",
+        "tools/browser-checks/browser-outcome.mjs"
+      ],
+      "finding": null,
+      "reason": "no browser measurement exists for the current target head; a verifier must run it at theirs"
+    },
+    {
+      "id": "three-view-navigation",
+      "command": "node tools/browser-checks/three-view-navigation.mjs",
+      "evidenceClass": "observational",
+      "admissibility": "UNVERIFIED",
+      "target": "the purpose-based three views in index.html (S3-B3B2-B2): setView() accepts only 'single', 'batch' and 'pack' and shows exactly one of #view-single, #view-batch and #view-pack (an unknown value changes nothing); the tabs follow the WAI-ARIA tab pattern (tablist / tab / tabpanel, aria-selected, aria-controls, aria-labelledby, roving tabindex, ArrowLeft / ArrowRight / Home / End, focus moved off a panel that is hidden); the Project Pack section moved unchanged into #view-pack and is shown only there; switching views neither recalculates, imports, exports nor stores anything, keeps the single-case inputs and result, the Workspace and the staged Pack, re-judges the single-case or Workspace freshness of the view opened and touches neither when the Pack view is opened; the Pack view never prints and the Review print gate is unchanged",
+      "oracle": "real Chromium",
+      "sharedDependencies": [
+        "the harness drives the page through its UI (tab clicks, keyboard, input fields, calculate, Workspace buttons, Project Pack paste / execute / all-case run / cancel, Review generate) and reads page state; programmatic setView() calls are used only for unknown values and for the hidden-panel focus case; expected values are literals in the harness and states read before a switch; synthetic values, the synthetic case_direct fixture and a synthetic 2000-case Pack from tests/support/synthetic-pack.js only"
+      ],
+      "positiveControl": "each tab shows its own view only, the inputs, results, Workspace and staged Pack survive single → batch → pack round trips, and the arrow / Home / End keys move the selection and focus together",
+      "negativeControl": "mutants B2-01 to B2-14 (the Pack view also shown in the Workspace view, the Pack view also shown in the single-case view, the Pack tab not changing the panel, [hidden] overridden by CSS, aria-selected out of step with the shown panel, arrow keys inert, the Workspace freshness not re-judged on switching, the old-CSV warning cleared on switching, the Pack view changing the single-case result, switching unloading the Pack, the Pack view printed, an unknown view value showing several panels, the tabindex not moved with the selection, focus left in a hidden panel) each fail at least one check here or in tests/three-view-navigation.test.js",
+      "proves": "that index.html shows one purpose-based view at a time with an accessible tab pattern, keeps every view's state across switches and keeps the Project Pack view out of the other views and out of print, in a real browser for the head measured",
+      "doesNotProve": "anything about an unmeasured head; the Pack Review UI (B3), Evidence collapsing or the input order (B4), the Workspace layout (B5) or a fully responsive page (the existing 390 px overflow of the single-case view is unchanged); the pre-existing print issues (the header, printing from the single-case view)",
+      "instrumentFiles": [
+        "tools/browser-checks/three-view-navigation.mjs",
         "tools/browser-checks/resolve-playwright.mjs",
         "tools/browser-checks/browser-outcome.mjs"
       ],
@@ -485,6 +507,11 @@
       "id": "result-freshness-not-shown-as-current",
       "statement": "a single-case result whose inputs changed, cannot be normalised or whose recalculation did not complete is marked (text, dimmed result, labelled judge badge) and never shown as the current result until an explicit calculation succeeds; inputs of an unselected mode do not mark it; a Workspace summary and result list that no longer match the Workspace inputs or import diagnostics are marked in both places and the result CSV is not written until the Workspace is evaluated again; an old result CSV left in the shared output field keeps its own warning, separate from the operation status line, until a current CSV is written or the field no longer holds it; the notification result names its pressures as calculated from the entered wind conditions with verificationStatus unverified; the Review Package freshness and print gate are unchanged; the status texts are fixed; no storage, network, URL or console output",
       "instrument": "result-freshness"
+    },
+    {
+      "id": "three-view-one-panel-at-a-time",
+      "statement": "exactly one of the single-case, Workspace and Project Pack views is shown at any time (an unknown view value changes nothing); the selected tab, aria-selected, tabindex and the shown panel agree, also under ArrowLeft / ArrowRight / Home / End; switching keeps the single-case inputs, result and freshness, the Workspace, its freshness, the stale-CSV refusal and the old-CSV warning, and the staged unreviewed Pack with its results, without recalculating, importing, exporting or storing anything; the Pack is shown only in its own view and never printed; the Review print gate is unchanged; no storage, network, URL or console output",
+      "instrument": "three-view-navigation"
     },
     {
       "id": "matrix-renders",

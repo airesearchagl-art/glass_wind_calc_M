@@ -135,7 +135,8 @@ test('P2L-S3B3B2B1-F04: Workspace の snapshot は serializeWorkspace と診断�
   assert.equal(evaluate.indexOf('lastEvaluatedWorkspaceSnapshot = evaluatedSnapshot;') < evaluate.indexOf('batchRender();'), true);
   assert.match(fnBody('batchUpdateCount'), /renderWorkspaceResultFreshness\(\);/);
   assert.match(fnBody('batchRender'), /renderWorkspaceResultFreshness\(\);/);
-  assert.match(fnBody('setView'), /if \(isBatch\) renderWorkspaceResultFreshness\(\);\s*else renderSingleResultFreshness\(\);/);
+  // S3-B3B2-B2: 3 画面。Workspace / 単一ケースを開いたときはその側を判定し直す（Project Pack の画面では触れない）
+  assert.match(fnBody('setView'), /if \(view === 'batch'\) renderWorkspaceResultFreshness\(\);\s*else if \(view === 'single'\) renderSingleResultFreshness\(\);/);
   // 結果 CSV の gate は出力の直前。古い結果のときは出力欄を書き換えない
   const csv = fnBody('batchExportCsv');
   assert.equal(csv.indexOf('renderWorkspaceResultFreshness()') < csv.indexOf('WorkspaceCore.toCsv('), true);
@@ -401,7 +402,8 @@ test('P2L-S3B3B2B1-S16: 表示は固定文・属性だけで、状態ごとに�
 function workspaceSandbox() {
   const els = {};
   ['batch-summary-card', 'batch-results-card', 'batch-summary-freshness', 'batch-results-freshness', 'batch-json', 'batch-json-status',
-    'batch-status', 'batch-csv-freshness', 'view-single', 'view-batch', 'view-tab-single', 'view-tab-batch'].forEach((id) => { els[id] = fakeElement(''); });
+    'batch-status', 'batch-csv-freshness', 'view-single', 'view-batch', 'view-tab-single', 'view-tab-batch', 'view-pack', 'view-tab-pack']
+    .forEach((id) => { els[id] = fakeElement(''); });
   const statuses = [];
   const sandbox = {
     WorkspaceCore, document: { getElementById: (id) => els[id] || null },
