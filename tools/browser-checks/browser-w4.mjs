@@ -79,6 +79,11 @@ check('B1', order.closure > order.registry && order.registry !== -1 && order.has
   `closure@${order.closure} > registry@${order.registry}, module=${order.hasModule}`);
 
 // B2 visible in preset mode
+// S3-B3B2-B4: 案件の検証状況は「要約（常に表示）」と「詳細（<details id="evidence-details">、最初は閉じている）」に分かれた。
+//   旧: evidence-closure-area に文があり、.mode-field-preset の block の inline style が display:none でない
+//   新: 要約が実際に見え（checkVisibility）、2 行とも失敗表示でなく、詳細は最初は閉じていて閉じた中の表は見えない。
+//       summary を 1 回 click すると evidence-closure-area と行列が実際に見える。
+//       以下の B6〜B33 の数値・行は、開いた状態の**見える文**（innerText）から読む（閉じたままなら空になって FAIL する）。
 const mode = await page.evaluate(() => document.getElementById('inp-mode').value);
 const visible = async () => page.evaluate(() => {
   const el = document.getElementById('evidence-closure-area');
@@ -87,13 +92,30 @@ const visible = async () => page.evaluate(() => {
   // 包含されていなければ false を返す（例外で落ちると harness の異常終了が
   // 「検出できた」と誤読される。実際に U4-13 でそれが起きた）。
   if (!block) return false;
-  return !!el.textContent.trim() && block.style.display !== 'none';
+  const matrix = document.getElementById('evidence-closure-matrix');
+  return !!el.innerText.trim() && block.style.display !== 'none' && el.checkVisibility() &&
+    !!matrix && matrix.checkVisibility();
 });
-check('B2', mode === 'preset' && await visible(), `mode=${mode}`);
+const evidenceSummary = () => page.evaluate(() => {
+  const box = document.getElementById('evidence-summary');
+  const line = (id) => { const e = document.getElementById(id); return e ? { text: e.innerText.trim(), error: e.classList.contains('is-error'), visible: e.checkVisibility() } : null; };
+  const details = document.getElementById('evidence-details');
+  return { visible: !!box && box.checkVisibility() && !!box.closest('.mode-field-preset'),
+    status: line('evidence-summary-status'), closure: line('evidence-summary-closure'),
+    detailsOpen: details ? details.open : null, areaVisible: document.getElementById('evidence-closure-area').checkVisibility() };
+});
+const sum0 = await evidenceSummary();
+await page.click('#evidence-details > summary');
+await page.waitForTimeout(50);
+const sumOk = sum0.visible && sum0.status && sum0.status.visible && !sum0.status.error && sum0.status.text.startsWith('案件入力値の検証状況: 全 ') &&
+  sum0.closure && sum0.closure.visible && !sum0.closure.error && sum0.closure.text.startsWith('Evidence Closure: ');
+check('B2', mode === 'preset' && sumOk && sum0.detailsOpen === false && sum0.areaVisible === false &&
+  await page.evaluate(() => document.getElementById('evidence-details').open) === true && await visible(),
+  `mode=${mode} summary=${JSON.stringify(sum0)}`);
 
 // header numbers
 const head = await page.evaluate(() => {
-  const t = document.getElementById('evidence-closure-area').textContent;
+  const t = document.getElementById('evidence-closure-area').innerText;
   const g = (re) => { const m = t.match(re); return m ? m[1] : null; };
   return {
     status: g(/現在のclosure状態:\s*([^\s必]+)/),
@@ -117,7 +139,7 @@ check('B33', head.unresolved === '4', `unresolved categories=${head.unresolved}`
 const rows = await page.evaluate(() => {
   const tb = document.getElementById('evidence-closure-matrix');
   const trs = [...tb.querySelectorAll('tr')].slice(1);
-  return trs.map(tr => [...tr.querySelectorAll('td')].map(td => td.textContent.trim()));
+  return trs.map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()));
 });
 check('B11', rows.length === 12, `rows=${rows.length}`);
 const byLabel = (s) => rows.filter(r => r[0].startsWith(s)).length;
@@ -158,6 +180,10 @@ for (const [id, m] of [['B3','manual'],['B4','notification'],['B5','imported']])
     const el = document.getElementById('evidence-closure-area');
     const block = el ? el.closest('.mode-field-preset') : null;
     if (!block) return 'not-contained';   // 例外にせず、検出可能な失敗として返す
+    // S3-B4: 要約・詳細（開いたままでも）・表のどれも実際に見えない（inline style だけでなく checkVisibility でも確かめる）
+    const shown = ['evidence-summary', 'evidence-details', 'evidence-closure-area', 'evidence-status-table']
+      .filter((id) => { const e = document.getElementById(id); return e && e.checkVisibility(); });
+    if (shown.length) return 'visible:' + shown.join(',');
     return block.style.display === 'none';
   }, m);
   check(id, ok === true || ok === 'absent', `${m}: ${ok}`);
@@ -216,6 +242,34 @@ const facts = await page.evaluate(() => {
 const sameFacts = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 check('B-facts', sameFacts(facts, NODE_FACTS) && sameFacts(NODE_FACTS, SPEC_FACTS),
   `page=${JSON.stringify(facts)} page==node:${sameFacts(facts, NODE_FACTS)} node==spec:${sameFacts(NODE_FACTS, SPEC_FACTS)}`);
+
+// B2s: 常に表示する要約の数値は、開いた詳細（Closure の集計）と同じ評価結果の値（確認項目・カテゴリ・case scope を取り違えない）
+const sumNow = await evidenceSummary();
+const sumNums = (re) => { const m = sumNow.closure && sumNow.closure.text.match(re); return m ? m[1].replace(/\s/g, '') : null; };
+check('B2s', sumNums(/必要な確認項目\s*(\d+\s*\/\s*\d+)/) === head.slots?.replace(/\s/g, '') &&
+  sumNums(/closureカテゴリ\s*(\d+\s*\/\s*\d+)/) === head.cats?.replace(/\s/g, '') &&
+  sumNums(/想定case scope\s*(\d+\s*\/\s*\d+)/) === head.cases?.replace(/\s/g, '') &&
+  sumNow.closure.text.startsWith('Evidence Closure: ' + head.status + ' — '), sumNow.closure && sumNow.closure.text);
+
+// B2f: 評価が失敗したら、要約は「失敗」をはっきり示す（0 件・問題なし・検証済みにしない）。最後に行う（以降は失敗状態）
+const failed = await page.evaluate(() => {
+  const realClosure = window.EvidenceClosure;
+  window.EvidenceClosure = Object.assign({}, realClosure, { evaluateClosure: () => { throw new Error('forced closure failure'); } });
+  renderEvidenceClosureMatrix();
+  const c = document.getElementById('evidence-summary-closure');
+  const closure = { text: c.innerText.trim(), error: c.classList.contains('is-error'), visible: c.checkVisibility() };
+  window.EvidenceClosure = realClosure;
+  const realRender = window.renderEvidenceStatus;
+  window.renderEvidenceStatus = () => { throw new Error('forced status failure'); };
+  renderPhase2FEvidencePanels();
+  const st = document.getElementById('evidence-summary-status');
+  const status = { text: st.innerText.trim(), error: st.classList.contains('is-error'), visible: st.checkVisibility() };
+  window.renderEvidenceStatus = realRender;
+  return { closure, status };
+});
+const isExplicitFailure = (l) => l.error && l.visible && /表示できません/.test(l.text) && /「検証済み」と解釈しないでください/.test(l.text) &&
+  !/\d+\s*\/\s*\d+|0\s*件|問題なし|Verified|検証済みです/.test(l.text);
+check('B2f', isExplicitFailure(failed.closure) && isExplicitFailure(failed.status), JSON.stringify(failed));
 
 console.log(results.join('\n'));
 await browser.close();

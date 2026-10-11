@@ -1486,7 +1486,7 @@ ProjectPackBatch.assertBatchOrigin(batchResult, ctx)   … 発行物で、ctx（
 - タブは WAI-ARIA の tab pattern です（`role="tablist"` / `tab` / `tabpanel`、`aria-selected`・`aria-controls`・`aria-labelledby`、
   選んだタブだけが `tabindex="0"`）。キーボードでは ←→ で隣、Home / End で端のタブへ移り、その画面を開きます（Enter / Space も使えます）。
   隠れる画面の中に focus があれば、選んだ画面のタブへ移します。選択中のタブは色だけでなく下側の線でも示します。
-- 狭い画面ではタブの列だけが横にスクロールし、ページ全体の幅は広げません（単一ケースの画面の既存の横はみ出しは B4 で扱います）。
+- 狭い画面ではタブの列だけが横にスクロールし、ページ全体の幅は広げません（単一ケースの画面の横はみ出しは B4 で解消しました）。
 - 印刷では Project Pack の画面・タブを出しません。設計レビュー資料の印刷の gate（`beforeprint` / `afterprint`）は変えていません。
   既存の印刷の課題（ヘッダーが印刷される・単一ケースのタブから印刷すると資料が出ない）は後続の Focused Repair の候補として残しています。
 
@@ -1496,6 +1496,38 @@ ProjectPackBatch.assertBatchOrigin(batchResult, ctx)   … 発行物で、ctx（
   印刷・切替が表示だけであること、および `setView()` / `onViewTabKeydown()` を vm で動かす挙動）。
 - 実ブラウザ: `node tools/browser-checks/three-view-navigation.mjs`（タブのクリック・キーボード・1280px / 390px）。Pack を扱う既存の
   harness は、Pack の操作の前に Project Pack のタブを開くようにしました。
+
+## 単一ケースの入力と結果の見せ方（Phase 2L-B4 / S3-B3B2-B4）
+
+単一ケースの画面は、**表示の優先順位だけ**を整理しました。機能・計算式・値・候補の並び・選び方・ProjectInput・Evidence / Closure の
+判定は変えていません（閉じた詳細の中の文は、画面の `innerText` に出なくなります）。
+
+- **入力の順**: ① 設計風圧の決め方（4 つの mode）→ ② ガラス条件（W・H・候補ガラス構成）→ ③ 設計風圧条件（選んだ mode の入力だけ）
+  → ④ 告示外の追加低減係数 → ⑤ 計算する。必須入力は閉じた `<details>` に入れません。
+- **mode の意味**: 選んだ mode の意味と trust の要点（案件プリセットは告示からの自動算定ではない・手入力は画面の値をユーザー入力値として扱う・
+  告示風圧計算は式が確認済みでも入力した風条件は未検証・取り込みデータは未検証として扱う）は常に表示し、詳しい説明は「入力モードの詳しい説明」を
+  開いて読みます。取り込みデータが無いときは、③ に Import 欄への入口を出します。
+- **W・H** はガラス 1 枚の見付寸法（サッシ枠を含む建具全体寸法ではない）であり、初期値は未検証な既定値（サンプル値）であることを常に表示します。
+- **係数**: 1.00 以外のときは、色だけでなく入力欄の下と結論に文で示します（告示には規定のない低減）。
+- **案件の検証状況**（案件プリセットのとき）: 計算ボタンの下に要約を常に表示します（Evidence status の状況ごとの件数と Verified Cases の件数、
+  Evidence Closure の状態と「必要な確認項目・closureカテゴリ・想定case scope」の充足数、Promotion Candidate の有無）。要約の値は既存の
+  renderer が**同じ評価結果**から書きます（UI で数え直さない・固定文を持たない）。表示できないときは「表示できません」と示し、0 件・問題なし・
+  検証済みとは書きません。Evidence status・Verified Case・照合・Closure の表は「案件の検証状況の詳細」（最初は閉じている）を開いて読みます。
+  他の mode では要約も詳細も出しません。
+- **結果**: 結論（検証状況の注記・B1 の鮮度・OK / NG・推奨構成・許容風圧・設計風圧・係数・適用範囲外の候補の件数と自動推奨からの除外）は常に表示し、
+  計算根拠・候補一覧（設計風圧の選定・風圧算定トレース・許容風圧の計算根拠・推奨 / NG / 適用範囲外の候補・プリセットとの参考比較）は
+  1 回の操作で開く詳細へ移しました。開いた状態は再計算しても保ちます（保存はしません）。
+- **画面の幅**: 1280×800 では、案件プリセット・手入力の W・H・計算ボタン・結果の見出しと結論が最初の画面に入ります。390px では 4 つの mode とも
+  詳細を閉じても開いてもページが横にはみ出しません（grid の列は `minmax(0, …)`、表は表の中で横スクロール、`overflow: hidden` で文を切らない）。
+- 最終的な設計判断にはメーカー検討書または専門技術者による確認が必要であること（ご注意）は、従来どおり常に表示します。
+
+### 確認
+
+- Node: `tests/single-ux.test.js`（入力の順・必須入力が details の外・要約の固定の初期値と評価結果からの書き込み・結論と詳細の分け方・
+  表の wrapper・CSS・鮮度の表示の位置・常に見える trust の文、および要約・係数・注記・取り込みの入口を vm で動かす挙動）。
+- 実ブラウザ: `node tools/browser-checks/single-ux.mjs`（1280×800 / 390×844、4 mode、details の開閉・キーボード、Node 側の計算・Closure 評価との
+  一致、評価の差し替え・失敗）。`browser-w4.mjs` の B2 は、要約が見え・詳細が 1 回で開き・開いた見える表の値が従来どおりであることを確かめる形に
+  移行しました。`result-freshness.mjs` と `context-runtime.mjs` は、詳細の中の文・表を読むように移行しました（確かめる値は変えていません）。
 
 ## 設計定数
 
@@ -1636,6 +1668,7 @@ glass_wind_calc_M/
 │   ├── project-pack-review.test.js       # Project Pack Review の pure contract（Phase 2L-B2 / S3-B3B2-A1）
 │   ├── result-freshness-ui.test.js       # 単一ケース / Workspace の結果の鮮度・告示の出どころの表示（Phase 2L-B2 / S3-B3B2-B1）
 │   ├── three-view-navigation.test.js     # 目的別の 3 画面のタブ・切替・Pack 欄の移動（Phase 2L-B2 / S3-B3B2-B2）
+│   ├── single-ux.test.js                 # 単一ケースの入力の順・検証状況の要約・詳細の折りたたみ（Phase 2L-B4 / S3-B3B2-B4）
 │   ├── support/synthetic-pack.js # 多ケースの合成 Project Pack をその場で作る（S3-B3A。保存しない）
 │   └── fixtures/project-pack/    # 3 mode の合成 Project Pack（S3-B1）
 ├── package.json
@@ -1877,6 +1910,7 @@ node --test
 | `tests/project-pack-report.test.js` / `tests/project-pack-report-ui.test.js` | Project Pack Derived Report（Phase 2L-B2 / S3-B3B1）: batch の発行物だけ・field の明示的な写し・trust / interpretation 固定（CSV の各行にも）・JSON の key 順と full precision・CSV の固定列と空欄・数式の中和・8 MiB の上限で切り詰めない・2000 ケース・一方向（入力へ戻らない）・依存は初期化時に固定・明示操作だけ・鮮度の確認・消える経路・失敗の固定文 |
 | `tests/result-freshness-ui.test.js` | 結果の鮮度（Phase 2L-B2 / S3-B3B2-B1）: 単一ケースは最後に成功した計算の正規化済み入力と表示に効く設定の snapshot と、現在の入力の比較（旗ではない）・入力を変えても自動で計算しない・正規化できない入力と計算の失敗は現在扱いしない・選んでいない mode の入力は無関係・Workspace は serializeWorkspace と診断の snapshot（件数だけを見ない）・サマリと一覧の両方に表示・古い結果の CSV を出さない・出力欄に残った古い CSV の警告は status と別の欄（RF-27-01）・告示風圧計算を「手入力値」と表示しない・固定文 |
 | `tests/three-view-navigation.test.js` | 目的別の 3 画面（Phase 2L-B2 / S3-B3B2-B2）: 単一ケース / 複数ケース / Project Pack の tabpanel は常に 1 つだけ表示・未知の値では何も変えない・タブの ARIA と tabindex・←→ / Home / End・隠れる画面の focus・`[hidden]` を CSS が上書きしない・タブは定義済みの変数だけ・Pack 欄は中身を変えずに Pack の画面へ・切替は表示だけ（計算・Import / Export・保存なし）・Pack の画面は印刷しない |
+| `tests/single-ux.test.js` | 単一ケースの見せ方（Phase 2L-B4 / S3-B3B2-B4）: ①〜⑤ の入力の順・必須入力は details の外・mode の意味と trust の文は常に表示・案件の検証状況の要約は評価結果から書き失敗は失敗と書く（初期値は fail closed）・詳細は最初は閉じる・結論（検証状況・判定・推奨・許容 / 設計風圧・係数・適用範囲外の除外）は常に表示し計算根拠は詳細へ・表は横スクロールの wrapper・grid は minmax(0, …)・鮮度の表示は結果欄の外 |
 | `tests/project-pack-review.test.js` | Project Pack Review（Phase 2L-B2 / S3-B3B2-A1）: batch の発行元の gate（同じ context instance だけ）・全行を batch の並びで・余裕比 / 余裕差の定義・summary は最大設計風圧と最小余裕比を分ける・grouping・2 ケースの比較・詳細は同じ context での再計算と完全照合（1 field でも違えば全体を拒否）・50 件の上限・trust 固定・deep-frozen と発行物の gate・依存は初期化時に固定・Workspace / Review Package に触れない・privacy |
 
 ### 必須ケース
