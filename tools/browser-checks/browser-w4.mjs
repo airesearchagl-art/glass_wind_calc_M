@@ -138,6 +138,8 @@ check('B33', head.unresolved === '4', `unresolved categories=${head.unresolved}`
 // rows
 const rows = await page.evaluate(() => {
   const tb = document.getElementById('evidence-closure-matrix');
+  // 表が無ければ 0 行として返す（例外で落ちると ERROR になり、B11 以下の明示的な FAIL にならない）
+  if (!tb) return [];
   const trs = [...tb.querySelectorAll('tr')].slice(1);
   return trs.map(tr => [...tr.querySelectorAll('td')].map(td => td.innerText.trim()));
 });

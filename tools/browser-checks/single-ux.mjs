@@ -427,13 +427,17 @@ const inFirstView = (r) => r.every((x) => !x.missing && x.visible && x.top >= 0 
   await setManual(page);
   await calc(page);
   const f0 = await freshness(page);
+  // toggle event は非同期なので、開閉の後は 1 tick 待ってから読む（toggle で鮮度が変わるなら、ここで現れる）
   await page.click('#result-details > summary');
+  await page.waitForTimeout(50);
   const f1 = await freshness(page);
   await setValue(page, 'inp-W', '1234');
   const f2 = await freshness(page);
   await page.click('#result-details > summary');   // 閉じても変更前のまま・表示は details の外で見える
+  await page.waitForTimeout(50);
   const f3 = await freshness(page);
   await page.click('#result-details > summary');
+  await page.waitForTimeout(50);
   await setValue(page, 'inp-W', String(MANUAL.W));
   await calc(page);
   const f4 = await freshness(page);
