@@ -11,7 +11,7 @@
 //   U01–U05 1280×800: preset / manual で W・H・計算ボタン・結果の見出しと結論が最初の画面にある / ①〜⑤ と要約・詳細の順 /
 //     選んだ mode の意味が常に見え、詳しい説明は 1 回で開く / 各 mode の必須入力は閉じた details に入っていない
 //   U06–U10 案件の検証状況: 要約は常に見え、詳細は最初は閉じている / 1 回で開いて実際の表（行）が見え、要約の数値は
-//     Node 側の評価と同じ（評価を差し替えると要約も変わる＝固定文ではない）/ 状況の件数は表の行と同じ /
+//     Node 側の評価と同じ（評価の ready の件数を差し替えると要約も変わる＝固定文ではない）/ 状況の件数は表の行と同じ /
 //     他の mode では見えない / 評価が失敗したら要約は失敗と示す（0 件・検証済みにしない）
 //   U11–U15 390×844: 4 mode で横にはみ出さない（details を閉じても開いても）/ 表は表の中で横スクロール・overflow:hidden で
 //     文を切らない / 長い表示名・長い検証情報 / 長い publicLabel の取り込み / 変更前の結果の表示
@@ -19,6 +19,9 @@
 //     適用範囲外の候補の除外は件数つきで常に見える / 未検証の状態は詳細を開かなくても見える / 計算根拠は詳細を開くと全部ある
 //   U21–U24 a11y・privacy: details はキーボードで開閉できる / 入力欄に名前がある / 保存・通信・URL・console なし /
 //     非公開の参照・取り込んだ文字列を表示しない
+//   U25–U27 RF-29-01 Closure の要約の fail closed: 不完全な評価結果（配列・件数・状態・Promotion Candidate）と詳細の組み立て途中の
+//     例外では、正常だった要約・途中の表を残さず「表示できない」と示す（例外の文を出さない）/ 戻すと元どおり /
+//     Closure が失敗しても計算は続き、Evidence status と Closure は互いに巻き添えにならない
 import { openBrowser, finishRun } from './harness.mjs';
 import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
@@ -338,19 +341,23 @@ const inFirstView = (r) => r.every((x) => !x.missing && x.visible && x.top >= 0 
   const nodeOk = JSON.stringify(fromSummary) === JSON.stringify(want) && JSON.stringify(fromHead) === JSON.stringify(want) &&
     s.closure.text.startsWith('Evidence Closure: ' + CLOSURE_LABEL[NODE_CLOSURE.status] + ' — ') &&
     s.closure.text.includes('Promotion Candidate ' + (NODE_CLOSURE.promotionCandidate ? '生成済み' : 'なし'));
-  // 評価を合成の値に差し替えて描き直すと、要約も詳細もその値になる（UI の固定文ではない）。最後に元へ戻す
-  const swapped = await page.evaluate(() => {
+  // 評価の ready の件数を合成の値（各全体 − 1。全体・配列の長さとは食い違わない）に差し替えて描き直すと、
+  // 要約も詳細もその値になる（UI の固定文ではない）。最後に元へ戻す
+  // （RF-29-01 以降、全体の件数と配列の長さが食い違う評価は形の確認で「表示できない」になるので、全体は変えない）
+  const swapReady = [NODE_CLOSURE.requiredSlotCount - 1, NODE_CLOSURE.categoryCount - 1, NODE_CLOSURE.caseScopeCount - 1];
+  const swapped = await page.evaluate((r) => {
     const real = window.EvidenceClosure;
     window.EvidenceClosure = Object.assign({}, real, { evaluateClosure: (id, obs) => Object.assign({}, real.evaluateClosure(id, obs),
-      { readySlotCount: 5, requiredSlotCount: 17, readyCategoryCount: 1, categoryCount: 9, readyCaseScopeCount: 2, caseScopeCount: 11 }) });
+      { readySlotCount: r[0], readyCategoryCount: r[1], readyCaseScopeCount: r[2] }) });
     renderEvidenceClosureMatrix();
     const out = { summary: document.getElementById('evidence-summary-closure').innerText, head: document.getElementById('evidence-closure-area').innerText };
     window.EvidenceClosure = real;
     renderEvidenceClosureMatrix();
     out.restored = document.getElementById('evidence-summary-closure').innerText;
     return out;
-  });
-  const swapWant = [[5, 17], [1, 9], [2, 11]];
+  }, swapReady);
+  const swapWant = [[swapReady[0], NODE_CLOSURE.requiredSlotCount], [swapReady[1], NODE_CLOSURE.categoryCount],
+    [swapReady[2], NODE_CLOSURE.caseScopeCount]];
   const swapOk = JSON.stringify(labels.map((l) => nums(swapped.summary, l))) === JSON.stringify(swapWant) &&
     JSON.stringify(labels.map((l) => nums(swapped.head, l))) === JSON.stringify(swapWant) && swapped.restored === s.closure.text;
   check('U07-details-one-action-real-table-authoritative-numbers', opened.open && opened.areas.every(Boolean) && opened.statusRows === 6 &&
@@ -418,6 +425,123 @@ const inFirstView = (r) => r.every((x) => !x.missing && x.visible && x.top >= 0 
     !/\d+\s*\/\s*\d+|0\s*件|問題なし|Verified|検証済みです/.test(l.text);
   check('U10-failure-explicit-in-summary', explicit(failed.closure) && explicit(failed.status) && /表示できませんでした/.test(failed.detail) &&
     !failed.recovered.closure.error && !failed.recovered.status.error, JSON.stringify(failed));
+  await setOpen(page, ['evidence-details'], false);
+}
+
+/* ---------- U25–U27 RF-29-01: Closure の要約の fail closed ---------- */
+
+const CLOSURE_FAILED_TEXT = 'Evidence Closure: 表示できませんでした。表示できないことを「検証済み」と解釈しないでください。';
+const CLOSURE_WARN_TEXT = 'Evidence Closure Statusを表示できませんでした。表示できないことを「検証済み」と解釈しないでください。';
+const SECRET = 'SYNTHETIC-RF29-SECRET-MARKER';
+/** Closure の欄を描き直した結果（要約・詳細の表・文・matrix の行）。 */
+const closureState = () => page.evaluate(() => {
+  const area = document.getElementById('evidence-closure-area');
+  const c = document.getElementById('evidence-summary-closure');
+  const st = document.getElementById('evidence-summary-status');
+  const matrix = document.getElementById('evidence-closure-matrix');
+  return { summary: c.textContent, error: c.classList.contains('is-error'), visible: c.checkVisibility(),
+    status: st.textContent, statusError: st.classList.contains('is-error'),
+    tables: area.querySelectorAll('table').length, areaText: area.textContent.trim(), areaChildren: area.children.length,
+    rows: matrix ? [...matrix.querySelectorAll('tr')].filter((tr) => tr.querySelector('td')).length : -1 };
+});
+const failClosed = (x) => x.summary === CLOSURE_FAILED_TEXT && x.error && x.visible && x.tables === 0 && x.areaChildren === 1 &&
+  x.areaText === CLOSURE_WARN_TEXT && !x.summary.includes(SECRET) && !x.areaText.includes(SECRET);
+
+/* U25 不完全な評価結果（配列・件数・状態・Promotion Candidate の欠落・不正）は要約も詳細も「表示できない」。戻すと元どおり */
+{
+  await setMode(page, 'preset');
+  await setOpen(page, ['evidence-details'], true);
+  const before = await closureState();
+  const variants = ['factResults:missing', 'categoryResults:null', 'categoryResults:short', 'readySlotCount:NaN', 'requiredSlotCount:missing',
+    'caseScopeCount:-1', 'status:VERIFIED', 'promotionCandidate:missing', 'factRow:closureStatus'];
+  const per = {};
+  for (const v of variants) {
+    await page.evaluate((variant) => {
+      const real = window.__realClosure || (window.__realClosure = window.EvidenceClosure);
+      window.EvidenceClosure = Object.assign({}, real, { evaluateClosure: (id, obs) => {
+        const c = Object.assign({}, real.evaluateClosure(id, obs));
+        const [key, how] = variant.split(':');
+        if (key === 'factRow') c.factResults = [Object.assign({}, c.factResults[0], { closureStatus: 'VERIFIED' })].concat(c.factResults.slice(1));
+        else if (how === 'missing') delete c[key];
+        else if (how === 'null') c[key] = null;
+        else if (how === 'short') c[key] = c[key].slice(1);
+        else if (how === 'NaN') c[key] = NaN;
+        else if (how === '-1') c[key] = -1;
+        else c[key] = how;
+        return c;
+      } });
+      renderEvidenceClosureMatrix();
+    }, v);
+    per[v] = await closureState();
+  }
+  await page.evaluate(() => { window.EvidenceClosure = window.__realClosure; renderEvidenceClosureMatrix(); });
+  const after = await closureState();
+  check('U25-closure-malformed-evaluation-fail-closed', !before.error && before.rows === NODE_CLOSURE.factResults.length &&
+    variants.every((v) => failClosed(per[v])) && after.summary === before.summary && !after.error && after.rows === before.rows &&
+    after.areaText === before.areaText,
+    JSON.stringify(Object.fromEntries(variants.filter((v) => !failClosed(per[v])).map((v) => [v, per[v]]))) + ` restored=${after.summary === before.summary}`);
+}
+
+/* U26 詳細を組み立てる途中の例外: 正常だった要約・途中の表を残さない（例外の文も出さない）。戻すと元どおり */
+{
+  const before = await closureState();
+  const per = {};
+  for (const failAt of [3, 40]) {
+    per[failAt] = await page.evaluate(([n, secret]) => {
+      const real = window.closureCell;
+      let calls = 0;
+      window.closureCell = function () { calls += 1; if (calls === n) throw new Error('cell failure ' + secret); return real.apply(this, arguments); };
+      try { renderEvidenceClosureMatrix(); } finally { window.closureCell = real; }
+      return calls;
+    }, [failAt, SECRET]);
+    per[failAt] = { calls: per[failAt], state: await closureState() };
+  }
+  await page.evaluate(() => renderEvidenceClosureMatrix());
+  const after = await closureState();
+  check('U26-closure-render-exception-no-stale-summary', !before.error && Object.entries(per).every(([n, r]) => r.calls >= Number(n) && failClosed(r.state)) &&
+    after.summary === before.summary && !after.error && after.rows === before.rows,
+    JSON.stringify(per) + ` restored=${after.summary === before.summary}`);
+}
+
+/* U27 Closure の失敗で計算は止まらない。Evidence status と Closure は独立して失敗を示す */
+{
+  const statusBefore = await closureState();
+  await page.evaluate((secret) => {
+    window.__realClosure = window.EvidenceClosure;
+    window.EvidenceClosure = Object.assign({}, window.__realClosure, { evaluateClosure: () => { throw new Error(secret); } });
+    renderProjectEvidencePanels();
+  }, SECRET);
+  const closureOnly = await closureState();
+  await setValue(page, 'inp-W', '1000');
+  await calc(page);
+  const presetCalc = await page.evaluate(() => ({ badge: !!document.querySelector('#result-area .judge-badge'), fresh: getSingleResultFreshness(),
+    glass: (document.querySelector('.conclusion-card .conclusion-glass') || {}).textContent || '' }));
+  await setMode(page, 'manual');
+  await setManual(page);
+  await calc(page);
+  const manualCalc = await page.evaluate(() => ({ badge: !!document.querySelector('#result-area .judge-badge'), fresh: getSingleResultFreshness(),
+    glass: document.querySelector('.conclusion-card .conclusion-glass').textContent }));
+  await setMode(page, 'preset');
+  // 次は Closure を戻し、status だけを（表を書いた後の欄で）失敗させる
+  await page.evaluate((secret) => {
+    window.EvidenceClosure = window.__realClosure;
+    window.__realRecon = window.renderReconciliation;
+    window.renderReconciliation = () => { throw new Error('recon ' + secret); };
+    renderProjectEvidencePanels();
+  }, SECRET);
+  const statusOnly = await closureState();
+  const statusTable = await page.evaluate(() => document.getElementById('evidence-status-table').textContent);
+  await page.evaluate(() => { window.renderReconciliation = window.__realRecon; renderProjectEvidencePanels(); });
+  const restored = await closureState();
+  await calc(page);
+  check('U27-closure-failure-calc-continues-independent', failClosed(closureOnly) && !closureOnly.statusError &&
+    closureOnly.status === statusBefore.status && presetCalc.badge && presetCalc.fresh === 'fresh' && presetCalc.glass.length > 0 &&
+    manualCalc.badge && manualCalc.fresh === 'fresh' && manualCalc.glass === NODE_MANUAL.best.label &&
+    statusOnly.statusError && /表示できませんでした/.test(statusOnly.status) && !statusOnly.status.includes(SECRET) && !statusTable.includes(SECRET) &&
+    !statusOnly.error && statusOnly.summary === statusBefore.summary &&
+    !restored.error && !restored.statusError && restored.summary === statusBefore.summary && restored.status === statusBefore.status,
+    JSON.stringify({ closureOnly: { error: closureOnly.error, statusError: closureOnly.statusError }, presetCalc, manualCalc,
+      statusOnly: { error: statusOnly.error, statusError: statusOnly.statusError }, restored: { error: restored.error, statusError: restored.statusError } }));
   await setOpen(page, ['evidence-details'], false);
 }
 

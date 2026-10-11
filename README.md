@@ -1512,7 +1512,10 @@ ProjectPackBatch.assertBatchOrigin(batchResult, ctx)   … 発行物で、ctx（
 - **案件の検証状況**（案件プリセットのとき）: 計算ボタンの下に要約を常に表示します（Evidence status の状況ごとの件数と Verified Cases の件数、
   Evidence Closure の状態と「必要な確認項目・closureカテゴリ・想定case scope」の充足数、Promotion Candidate の有無）。要約の値は既存の
   renderer が**同じ評価結果**から書きます（UI で数え直さない・固定文を持たない）。表示できないときは「表示できません」と示し、0 件・問題なし・
-  検証済みとは書きません。Evidence status・Verified Case・照合・Closure の表は「案件の検証状況の詳細」（最初は閉じている）を開いて読みます。
+  検証済みとは書きません。要約を正常な表示にするのは、評価結果が要約と詳細に必要な形（件数・配列・状態・Promotion Candidate）を
+  そろえていて、詳細を最後まで組み立てて表示できたときだけです。欠けた値・不正な値・詳細の組み立て途中の例外は「表示できません」にし、
+  途中まで作った表や例外の文は表示しません（RF-29-01）。Evidence status と Closure は別々に失敗を示し、どちらの失敗でも計算は止まりません。
+  Evidence status・Verified Case・照合・Closure の表は「案件の検証状況の詳細」（最初は閉じている）を開いて読みます。
   他の mode では要約も詳細も出しません。
 - **結果**: 結論（検証状況の注記・B1 の鮮度・OK / NG・推奨構成・許容風圧・設計風圧・係数・適用範囲外の候補の件数と自動推奨からの除外）は常に表示し、
   計算根拠・候補一覧（設計風圧の選定・風圧算定トレース・許容風圧の計算根拠・推奨 / NG / 適用範囲外の候補・プリセットとの参考比較）は
@@ -1524,7 +1527,9 @@ ProjectPackBatch.assertBatchOrigin(batchResult, ctx)   … 発行物で、ctx（
 ### 確認
 
 - Node: `tests/single-ux.test.js`（入力の順・必須入力が details の外・要約の固定の初期値と評価結果からの書き込み・結論と詳細の分け方・
-  表の wrapper・CSS・鮮度の表示の位置・常に見える trust の文、および要約・係数・注記・取り込みの入口を vm で動かす挙動）。
+  表の wrapper・CSS・鮮度の表示の位置・常に見える trust の文、および要約・係数・注記・取り込みの入口を vm で動かす挙動。RF-29-01:
+  本物の EvidenceClosure を使い、throw・配列 / 件数 / 状態 / Promotion Candidate の欠落・不正・詳細の組み立て途中の例外・回復・
+  独立した失敗の表示を偽 DOM で確かめる）。
 - 実ブラウザ: `node tools/browser-checks/single-ux.mjs`（1280×800 / 390×844、4 mode、details の開閉・キーボード、Node 側の計算・Closure 評価との
   一致、評価の差し替え・失敗）。`browser-w4.mjs` の B2 は、要約が見え・詳細が 1 回で開き・開いた見える表の値が従来どおりであることを確かめる形に
   移行しました。`result-freshness.mjs` と `context-runtime.mjs` は、詳細の中の文・表を読むように移行しました（確かめる値は変えていません）。
