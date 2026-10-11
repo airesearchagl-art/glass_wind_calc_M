@@ -385,19 +385,29 @@
 
   /* `display: grid` は [hidden] の既定 `display: none` に勝ってしまう。
      view切替を hidden 属性で行う以上、ここを明示しないと
-     両方のviewが同時に描画される（初期表示でSingleの下にBatchが出る）。 */
-  .main-wrap[hidden], .batch-wrap[hidden] { display: none; }
+     両方のviewが同時に描画される（初期表示でSingleの下にBatchが出る）。
+     S3-B3B2-B2: Project Pack の画面（.pack-view）も同じ規則で隠す。 */
+  .main-wrap[hidden], .batch-wrap[hidden], .pack-view[hidden] { display: none; }
 
   .view-switch {
     display: flex; gap: 8px; max-width: 1400px;
-    margin: 18px auto 0; padding: 0 20px;
+    margin: 14px auto 0; padding: 4px 20px;
+    /* 狭い画面ではタブの列だけを横にスクロールさせる（ページ全体の幅を広げない） */
+    overflow-x: auto;
   }
   .view-tab {
-    background: var(--card); color: var(--text2);
+    flex: none; white-space: nowrap;
+    background: var(--surface2); color: var(--text2);
     border: 1px solid var(--border); border-radius: 8px;
     padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
   }
-  .view-tab.is-active { color: var(--text1); border-color: var(--accent); }
+  /* 選んでいるタブは色だけでなく、下側の太い線でも示す */
+  .view-tab.is-active {
+    color: var(--text); background: var(--surface); border-color: var(--accent);
+    box-shadow: inset 0 -3px 0 var(--accent);
+  }
+  .view-tab:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+  .pack-view { padding-top: 20px; }
   .batch-wrap { max-width: 1400px; margin: 0 auto; padding: 20px; display: grid; gap: 16px; }
   .batch-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .batch-count { font-size: 12px; color: var(--text3); }
@@ -497,7 +507,7 @@
   @media print {
     /* Reportだけを残す。操作要素は1つも印刷しない。 */
     body { background: #fff; color: #000; }
-    .app-header, .view-switch, .main-wrap, #project-pack-section, #review-config-card,
+    .app-header, .view-switch, .main-wrap, #view-pack, #project-pack-section, #review-config-card,
     #batch-summary-card, #batch-results-card, button, select, textarea, input {
       display: none !important;
     }
@@ -614,17 +624,21 @@
   </div>
 </header>
 
-<!-- ===== View切替（Phase 2G）=====
+<!-- ===== View切替（Phase 2G / S3-B3B2-B2: 目的別の 3 画面）=====
      Single が既定。Batchは同じ計算コアを複数ケースへ適用するorchestrationであり、
-     Single calculatorの挙動・結果を変えない。 -->
-<div class="view-switch" role="tablist" aria-label="表示モード">
+     Single calculatorの挙動・結果を変えない。Project Pack（未レビュー）は独立した画面で、
+     単一ケース・Workspace の画面には出さない。表示するのは常に 1 画面だけ（setView()）。
+     タブは WAI-ARIA の tab pattern（←→ / Home / End で移動、選んだタブだけが tabindex=0）。 -->
+<div class="view-switch" role="tablist" aria-label="表示する画面" onkeydown="onViewTabKeydown(event)">
   <button type="button" id="view-tab-single" class="view-tab is-active" role="tab"
-          aria-selected="true" onclick="setView('single')">単一ケース</button>
+          aria-selected="true" aria-controls="view-single" tabindex="0" onclick="setView('single')">単一ケース</button>
   <button type="button" id="view-tab-batch" class="view-tab" role="tab"
-          aria-selected="false" onclick="setView('batch')">一括検討（Workspace）</button>
+          aria-selected="false" aria-controls="view-batch" tabindex="-1" onclick="setView('batch')">複数ケース（Workspace）</button>
+  <button type="button" id="view-tab-pack" class="view-tab" role="tab"
+          aria-selected="false" aria-controls="view-pack" tabindex="-1" onclick="setView('pack')">Project Pack（未レビュー）</button>
 </div>
 
-<div class="main-wrap" id="view-single">
+<div class="main-wrap" id="view-single" role="tabpanel" aria-labelledby="view-tab-single">
 
   <!-- ===== 左カラム：入力 ===== -->
   <div>
@@ -937,7 +951,9 @@
 <!-- ===== Project Pack（Unreviewed）（Phase 2L-B2 / S3-B1） =====
      手元の Project Pack JSON を検証して内容を確認するだけの欄。読み込んだ Pack は
      staged（未レビュー）であって active ではない。計算・入力欄・案件プリセット・
-     Evidence 表示には反映しない。単一ケース / 一括検討のどちらの表示でも見える。 -->
+     Evidence 表示には反映しない。S3-B3B2-B2 から Project Pack の画面（#view-pack）だけに表示する
+     （単一ケース・Workspace の画面には出さない。画面を切り替えても staged の状態は変わらない）。 -->
+<div class="pack-view" id="view-pack" role="tabpanel" aria-labelledby="view-tab-pack" hidden>
 <section class="pack-wrap" id="project-pack-section" aria-labelledby="pack-title">
   <div class="card" id="project-pack-card">
     <h2 class="card-title" id="pack-title">Project Pack（Unreviewed）</h2>
@@ -1046,9 +1062,10 @@
     </div>
   </div>
 </section>
+</div>
 
 <!-- ===== Batch / Scenario Workspace（Phase 2G） ===== -->
-<div class="batch-wrap" id="view-batch" hidden>
+<div class="batch-wrap" id="view-batch" role="tabpanel" aria-labelledby="view-tab-batch" hidden>
 
   <!-- ===== Project Profile（Phase 2H）: 上流のinput composer ===== -->
   <div class="card">
@@ -4329,22 +4346,49 @@ window.addEventListener('DOMContentLoaded', function () {
   });
 });
 
+/**
+ * 表示する画面を 1 つだけ選ぶ（S3-B3B2-B2: 'single' / 'batch' / 'pack'）。
+ * 未知の値では何も変えない（複数の画面を同時に出さない・何も出ない状態にしない）。
+ * 切り替えるだけで、計算・Import / Export・保存はしない。入力・結果・Workspace・staged Pack はそのまま残る。
+ */
 function setView(view) {
-  var single = document.getElementById('view-single');
-  var batch = document.getElementById('view-batch');
-  var tabSingle = document.getElementById('view-tab-single');
-  var tabBatch = document.getElementById('view-tab-batch');
-  var isBatch = view === 'batch';
+  var views = ['single', 'batch', 'pack'];
+  if (views.indexOf(view) === -1) return false;
+  var focused = document.activeElement;
+  views.forEach(function (name) {
+    var selected = name === view;
+    var panel = document.getElementById('view-' + name);
+    var tab = document.getElementById('view-tab-' + name);
+    panel.hidden = !selected;
+    tab.classList.toggle('is-active', selected);
+    tab.setAttribute('aria-selected', String(selected));
+    tab.setAttribute('tabindex', selected ? '0' : '-1');
+  });
+  // 隠した画面の中に focus を残さない（選んだ画面のタブへ移す）
+  if (focused && focused.closest && focused.closest('[role="tabpanel"][hidden]')) {
+    document.getElementById('view-tab-' + view).focus();
+  }
+  // 表示を切り替えたら、表示する側の結果の鮮度を判定し直す（S3-B3B2-B1）。
+  // Project Pack の画面では単一ケース・Workspace の snapshot にも表示にも触れない
+  if (view === 'batch') renderWorkspaceResultFreshness();
+  else if (view === 'single') renderSingleResultFreshness();
+  return true;
+}
 
-  single.hidden = isBatch;
-  batch.hidden = !isBatch;
-  tabSingle.classList.toggle('is-active', !isBatch);
-  tabBatch.classList.toggle('is-active', isBatch);
-  tabSingle.setAttribute('aria-selected', String(!isBatch));
-  tabBatch.setAttribute('aria-selected', String(isBatch));
-  // 表示を切り替えたら、表示する側の結果の鮮度を判定し直す（S3-B3B2-B1）
-  if (isBatch) renderWorkspaceResultFreshness();
-  else renderSingleResultFreshness();
+/** タブの列のキー操作（WAI-ARIA tab pattern）: ←→ で隣、Home / End で端のタブへ移り、その画面を開く。 */
+function onViewTabKeydown(event) {
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('.view-switch [role="tab"]'));
+  var index = tabs.indexOf(event.target);
+  if (index === -1) return;
+  var next;
+  if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+  else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length;
+  else if (event.key === 'Home') next = 0;
+  else if (event.key === 'End') next = tabs.length - 1;
+  else return;
+  event.preventDefault();
+  tabs[next].click();
+  tabs[next].focus();
 }
 
 function batchSetStatus(elementId, message, isError) {

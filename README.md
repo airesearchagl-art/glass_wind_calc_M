@@ -1022,7 +1022,7 @@ context を作らせません。review 済み pack の attestation は S5 です
 
 ## Project Pack intake & preview（Phase 2L-B2 / S3-B1）
 
-「Project Pack（Unreviewed）」欄（単一ケース / 一括検討のどちらの表示でも出ます）で、手元の Project Pack JSON を
+「Project Pack（Unreviewed）」欄（S3-B3B2-B2 から「Project Pack（未レビュー）」のタブの画面だけに出ます）で、手元の Project Pack JSON を
 **検証して内容を確認する**ことができます。**読み込んだ Pack は staged であって active ではありません。**
 計算・入力欄・案件プリセット mode・Evidence 表示・Closure は、引き続き runtime default の built-in（合成サンプル）の
 `activeProjectContext` だけを読みます。読込前・読込成功後・読込失敗後・解除後のいずれでも同じです。
@@ -1469,6 +1469,34 @@ ProjectPackBatch.assertBatchOrigin(batchResult, ctx)   … 発行物で、ctx（
 - 実ブラウザ: `node tools/browser-checks/result-freshness.mjs`（UI の操作と page の中だけの故障の注入。期待する風圧は Node の
   registry と wind-pressure.js から求めます）。
 
+## 目的別の 3 画面（Phase 2L-B2 / S3-B3B2-B2）
+
+画面の上のタブで、目的ごとに次の 3 つの画面を切り替えます。表示されるのは常に 1 画面だけで、初期表示は単一ケースです。
+
+| タブ | 画面 | 内容 |
+|---|---|---|
+| 単一ケース | `#view-single` | 1 枚のガラスの入力・計算・結果（従来どおり） |
+| 複数ケース（Workspace） | `#view-batch` | 案件プロファイル・Scenario・Workspace の一括計算・CSV / JSON・設計レビュー資料（先頭は案件プロファイル） |
+| Project Pack（未レビュー） | `#view-pack` | Project Pack の検証・確認・ケース計算・全ケース計算・派生レポート（以前は両方の画面に出ていた欄を、中身を変えずに移しました） |
+
+- 画面の切替は**表示だけ**です。計算・Import / Export・保存はしません。入力・計算結果・Workspace・読み込んだ Pack（staged・
+  `pack_unreviewed`）は切り替えても残ります。Pack は active にならず、Workspace へ変換されず、Evidence / Closure にも反映されません。
+- 単一ケース・Workspace の画面を開いたときは、その画面の結果の鮮度（S3-B3B2-B1）を判定し直します。Project Pack の画面を開いても
+  単一ケース・Workspace の snapshot には触れません。Pack の全ケース計算の途中で切り替えても、計算・キャンセルの意味は変わりません。
+- タブは WAI-ARIA の tab pattern です（`role="tablist"` / `tab` / `tabpanel`、`aria-selected`・`aria-controls`・`aria-labelledby`、
+  選んだタブだけが `tabindex="0"`）。キーボードでは ←→ で隣、Home / End で端のタブへ移り、その画面を開きます（Enter / Space も使えます）。
+  隠れる画面の中に focus があれば、選んだ画面のタブへ移します。選択中のタブは色だけでなく下側の線でも示します。
+- 狭い画面ではタブの列だけが横にスクロールし、ページ全体の幅は広げません（単一ケースの画面の既存の横はみ出しは B4 で扱います）。
+- 印刷では Project Pack の画面・タブを出しません。設計レビュー資料の印刷の gate（`beforeprint` / `afterprint`）は変えていません。
+  既存の印刷の課題（ヘッダーが印刷される・単一ケースのタブから印刷すると資料が出ない）は後続の Focused Repair の候補として残しています。
+
+### 確認
+
+- Node: `tests/three-view-navigation.test.js`（タブと画面の markup・ARIA の参照・CSS の `[hidden]` と定義済みの変数・Pack 欄の移動・
+  印刷・切替が表示だけであること、および `setView()` / `onViewTabKeydown()` を vm で動かす挙動）。
+- 実ブラウザ: `node tools/browser-checks/three-view-navigation.mjs`（タブのクリック・キーボード・1280px / 390px）。Pack を扱う既存の
+  harness は、Pack の操作の前に Project Pack のタブを開くようにしました。
+
 ## 設計定数
 
 ### 設計風圧（正圧・負圧）＝「みよし案件プリセット」値
@@ -1607,6 +1635,7 @@ glass_wind_calc_M/
 │   ├── project-pack-report-ui.test.js    # Project Pack 派生レポートの UI（明示操作・鮮度・消える経路・失敗の固定文）
 │   ├── project-pack-review.test.js       # Project Pack Review の pure contract（Phase 2L-B2 / S3-B3B2-A1）
 │   ├── result-freshness-ui.test.js       # 単一ケース / Workspace の結果の鮮度・告示の出どころの表示（Phase 2L-B2 / S3-B3B2-B1）
+│   ├── three-view-navigation.test.js     # 目的別の 3 画面のタブ・切替・Pack 欄の移動（Phase 2L-B2 / S3-B3B2-B2）
 │   ├── support/synthetic-pack.js # 多ケースの合成 Project Pack をその場で作る（S3-B3A。保存しない）
 │   └── fixtures/project-pack/    # 3 mode の合成 Project Pack（S3-B1）
 ├── package.json
@@ -1847,6 +1876,7 @@ node --test
 | `tests/project-pack-batch.test.js` / `tests/project-pack-batch-ui.test.js` | Project Pack Multi-Case Execution（Phase 2L-B2 / S3-B3A）: 計算は executeCase の繰り返しだけ・Pack の並び / 件数 / 一意性・全件そろったときだけ確定・途中の失敗で部分結果を出さない・trust は pack_unreviewed 固定・依存は初期化時に固定・明示操作だけ・チャンクの間で yield・キャンセル / Pack の切替 / 解除 / もう一度の開始で古い run を捨てる・確定直前の token 確認・50 行のページ |
 | `tests/project-pack-report.test.js` / `tests/project-pack-report-ui.test.js` | Project Pack Derived Report（Phase 2L-B2 / S3-B3B1）: batch の発行物だけ・field の明示的な写し・trust / interpretation 固定（CSV の各行にも）・JSON の key 順と full precision・CSV の固定列と空欄・数式の中和・8 MiB の上限で切り詰めない・2000 ケース・一方向（入力へ戻らない）・依存は初期化時に固定・明示操作だけ・鮮度の確認・消える経路・失敗の固定文 |
 | `tests/result-freshness-ui.test.js` | 結果の鮮度（Phase 2L-B2 / S3-B3B2-B1）: 単一ケースは最後に成功した計算の正規化済み入力と表示に効く設定の snapshot と、現在の入力の比較（旗ではない）・入力を変えても自動で計算しない・正規化できない入力と計算の失敗は現在扱いしない・選んでいない mode の入力は無関係・Workspace は serializeWorkspace と診断の snapshot（件数だけを見ない）・サマリと一覧の両方に表示・古い結果の CSV を出さない・出力欄に残った古い CSV の警告は status と別の欄（RF-27-01）・告示風圧計算を「手入力値」と表示しない・固定文 |
+| `tests/three-view-navigation.test.js` | 目的別の 3 画面（Phase 2L-B2 / S3-B3B2-B2）: 単一ケース / 複数ケース / Project Pack の tabpanel は常に 1 つだけ表示・未知の値では何も変えない・タブの ARIA と tabindex・←→ / Home / End・隠れる画面の focus・`[hidden]` を CSS が上書きしない・タブは定義済みの変数だけ・Pack 欄は中身を変えずに Pack の画面へ・切替は表示だけ（計算・Import / Export・保存なし）・Pack の画面は印刷しない |
 | `tests/project-pack-review.test.js` | Project Pack Review（Phase 2L-B2 / S3-B3B2-A1）: batch の発行元の gate（同じ context instance だけ）・全行を batch の並びで・余裕比 / 余裕差の定義・summary は最大設計風圧と最小余裕比を分ける・grouping・2 ケースの比較・詳細は同じ context での再計算と完全照合（1 field でも違えば全体を拒否）・50 件の上限・trust 固定・deep-frozen と発行物の gate・依存は初期化時に固定・Workspace / Review Package に触れない・privacy |
 
 ### 必須ケース
