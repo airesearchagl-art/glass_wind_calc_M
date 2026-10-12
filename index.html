@@ -74,16 +74,18 @@
      レイアウト
   ============================== */
   .main-wrap {
-    max-width: 1100px;
+    max-width: 1240px;
     margin: 0 auto;
-    padding: 24px 16px;
+    padding: 16px 16px 24px;
     display: grid;
-    grid-template-columns: 340px 1fr;
+    grid-template-columns: minmax(0, 480px) minmax(0, 1fr);
     gap: 20px;
     align-items: start;
   }
+  /* S3-B3B2-B4: grid の子は中身（表など）の最小幅で広がらない。広い表は表の中でスクロールさせる */
+  .main-wrap > * { min-width: 0; }
   @media (max-width: 800px) {
-    .main-wrap { grid-template-columns: 1fr; }
+    .main-wrap { grid-template-columns: minmax(0, 1fr); padding: 16px 12px; }
   }
 
   /* ==============================
@@ -501,6 +503,81 @@
     content: '以前の入力'; display: block; font-size: 12px; letter-spacing: 0; text-align: center;
   }
 
+  /* ===== S3-B3B2-B4: 単一ケースの入力の段・段階的開示・狭い画面 ===== */
+  .single-step { padding-bottom: 4px; margin-bottom: 8px; border-bottom: 1px solid var(--border); }
+  /* 1280×800 で ①〜⑤ と計算ボタンが最初の画面に入るよう、単一ケースの入力カードだけを詰める（他の画面のカードは変えない） */
+  .single-input .card { padding: 14px 16px; }
+  .single-input .card-title { margin-bottom: 10px; padding-bottom: 6px; }
+  .single-input label { margin-bottom: 3px; }
+  .single-input input[type="number"], .single-input select { padding-top: 6px; padding-bottom: 6px; }
+  .single-input .btn-calc { margin-top: 4px; padding: 10px; }
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
+  .single-step-title {
+    display: flex; align-items: center; gap: 8px; margin: 0 0 5px;
+    font-size: 13px; font-weight: 700; color: var(--text);
+  }
+  .step-no {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 11px;
+  }
+  .single-step .form-group { margin-bottom: 6px; }
+  /* 見出しと短い入力を 1 行に並べる（狭い画面では折り返す） */
+  .step-head-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-bottom: 5px; }
+  .step-head-row > .single-step-title { margin: 0; flex: none; }
+  .step-head-row > .coeff-row { flex: 1 1 160px; min-width: 0; }
+  .form-inline { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; }
+  .form-inline > label { margin: 0; }
+  @media (max-width: 340px) { .form-inline { grid-template-columns: minmax(0, 1fr); gap: 3px; } }
+  .field-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+  .field-row > .form-group { min-width: 0; }
+  @media (max-width: 340px) { .field-row { grid-template-columns: minmax(0, 1fr); } }
+  .field-note, .mode-hint-text { font-size: 11px; color: var(--text3); line-height: 1.55; margin: 0 0 6px; overflow-wrap: anywhere; }
+  .single-step .form-group > .field-note { margin: 4px 0 0; }
+  /* mode の意味: chip に続けて短文を流し込む（行を増やさない） */
+  .mode-hint { margin-bottom: 4px; font-size: 11px; line-height: 1.7; color: var(--text3); overflow-wrap: anywhere; }
+  .mode-hint .meta-chip { display: inline-block; margin: 0 6px 2px 0; padding: 1px 8px; max-width: 100%; line-height: 1.6; }
+  .mode-hint > .mode-hint-text { display: inline; margin: 0; }
+  .disclosure { margin: 0 0 6px; font-size: 12px; }
+  .disclosure > summary { cursor: pointer; color: var(--accent); font-weight: 600; padding: 2px 0; }
+  .disclosure > summary:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; border-radius: 4px; }
+  .disclosure-body { margin-top: 6px; font-size: 11px; color: var(--text2); line-height: 1.7; overflow-wrap: anywhere; }
+  .table-scroll { overflow-x: auto; max-width: 100%; }
+  .evidence-block { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .evidence-summary {
+    border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 12px;
+    font-size: 12px; line-height: 1.7; margin-bottom: 6px;
+  }
+  .evidence-summary-title { font-weight: 700; color: var(--text2); margin-bottom: 2px; }
+  .evidence-summary-line { overflow-wrap: anywhere; }
+  .evidence-summary-line.is-error { color: var(--warn); font-weight: 700; }
+  .io-block { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+  #io-package { width: 100%; max-width: 100%; }
+  .imported-summary { font-size: 12px; line-height: 1.7; margin-bottom: 8px; overflow-wrap: anywhere; }
+  .btn-inline { font-size: 12px; }
+  .coeff-flag {
+    margin-top: 6px; font-size: 12px; font-weight: 700; color: var(--warn);
+    border: 1px solid var(--warn); border-radius: var(--radius-sm); padding: 4px 8px;
+  }
+  .coeff-flag[hidden] { display: none; }
+  /* 結果: 結論は常に表示し、計算根拠・候補一覧は展開して読む */
+  .conclusion-notes { margin-top: 12px; display: grid; gap: 6px; font-size: 12px; line-height: 1.7; }
+  .conclusion-note { overflow-wrap: anywhere; }
+  .conclusion-note.is-warn { color: var(--warn); font-weight: 700; }
+  .meta-chip.is-flagged { border-color: var(--warn); }
+  .result-details { margin: 0; }
+  .result-details > summary {
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 12px 16px; font-size: 13px;
+  }
+  .result-details-body { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+  /* 長い文字列は折り返して、ページの幅を広げない */
+  .conclusion-glass, .meta-chip, .calc-line, .notice, .sec-title, .calc-block-title, #preset-identity-note { overflow-wrap: anywhere; }
+  .conclusion-inner { flex-wrap: wrap; }
+  .conclusion-detail { min-width: 0; }
+
   /* 印刷不可の文面は画面には出さない */
   #review-print-blocked { display: none; }
 
@@ -640,275 +717,313 @@
 
 <div class="main-wrap" id="view-single" role="tabpanel" aria-labelledby="view-tab-single">
 
-  <!-- ===== 左カラム：入力 ===== -->
-  <div>
+  <!-- ===== 左カラム：入力 =====
+       S3-B3B2-B4: ① 設計風圧の決め方 → ② ガラス条件 → ③ 設計風圧条件 → ④ 告示外の追加低減係数 → ⑤ 計算する の順。
+       選んでいる mode の意味と trust の要点は常に表示し、詳しい説明・案件の検証状況の詳細は展開して読む。 -->
+  <div class="single-input">
     <div class="card">
       <div class="card-title">入力条件</div>
 
-      <div class="form-group" style="margin-bottom:16px;">
-        <label>入力モード</label>
-        <select id="inp-mode">
-          <option value="preset" selected>案件プリセット</option>
-          <option value="manual">手入力 / Generic（Manual）</option>
-          <option value="notification">告示風圧計算（Notification / Calculated）</option>
-          <option value="imported">取り込みデータ（Imported / Unverified）</option>
-        </select>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          「案件プリセット」は特定案件用の固定値（検証状況付き）、「手入力 / Generic」は
-          その場で入力した任意の値、「告示風圧計算」は風条件から設計風圧を算定した値、
-          「取り込みデータ」は外部から読み込んだ入力条件です。
-          手入力・告示風圧計算・取り込みデータの値は<strong>本ツールが案件原典と照合したものではありません</strong>。
+      <!-- ① 設計風圧の決め方 -->
+      <section class="single-step" aria-labelledby="step-mode-title">
+        <h3 class="single-step-title" id="step-mode-title"><span class="step-no" aria-hidden="true">1</span>設計風圧の決め方</h3>
+        <div class="form-group">
+          <label for="inp-mode" class="sr-only">入力モード（設計風圧の決め方）</label>
+          <select id="inp-mode">
+            <option value="preset" selected>案件プリセット</option>
+            <option value="manual">手入力 / Generic（Manual）</option>
+            <option value="notification">告示風圧計算（Notification / Calculated）</option>
+            <option value="imported">取り込みデータ（Imported / Unverified）</option>
+          </select>
         </div>
-      </div>
 
-      <div class="mode-field mode-field-preset form-group" style="margin-bottom:16px;">
-        <div class="meta-chip" style="display:inline-block;">
-          案件プリセット: <span id="preset-name-label">—</span>
+        <!-- 選んでいる mode の意味（常に表示） -->
+        <div class="mode-field mode-field-preset mode-hint">
+          <div class="meta-chip">案件プリセット: <span id="preset-name-label">—</span></div>
+          <div class="mode-hint-text" id="preset-identity-note"></div>
+          <div class="mode-hint-text">登録済みの階・部位別の設計風圧を使います（<strong>告示からの自動算定ではありません</strong>）。</div>
         </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;" id="preset-identity-note"></div>
-      </div>
+        <div class="mode-field mode-field-manual mode-hint">
+          <div class="meta-chip">入力モード: <span id="manual-mode-label">手入力 (Manual / Generic)</span></div>
+          <div class="mode-hint-text">
+            ⚠ このモードでは、現在画面に表示されているW/H/正圧/負圧をユーザー入力値として扱います。初期表示値（サンプル値）も含め、案件原典（構造計算書・製品資料等）で検証済みの値ではありません。
+          </div>
+        </div>
+        <div class="mode-field mode-field-notification mode-hint">
+          <div class="meta-chip">入力モード: <span id="notification-mode-label">告示風圧計算 (Notification / Calculated)</span></div>
+          <div class="mode-hint-text">
+            告示1458号系算定・板硝子協会推奨に基づき、入力した風条件から設計風圧を算定します。
+            <strong>算定式は一次資料で確認していますが、入力した風条件（V0・粗度区分・高さ・評価高さ等）は本ツールでは検証していません。</strong>
+            式が検証済みであることと、入力値が検証済みであることは別です。
+          </div>
+        </div>
+        <div class="mode-field mode-field-imported mode-hint">
+          <div class="meta-chip">入力モード: <span id="imported-mode-label">取り込みデータ (Imported / Unverified)</span></div>
+          <div class="mode-hint-text">
+            ⚠ 外部から取り込んだ入力条件です。取り込み元が「検証済み」「案件プリセット」と記載していても、<strong>本ツールはそれを検証済みとして扱いません</strong>。常に未検証（unverified）として表示・計算します。
+          </div>
+        </div>
 
-      <div class="mode-field mode-field-preset form-group" style="margin-bottom:16px;">
-        <label>Evidence status（案件factの検証状況）</label>
-        <div id="evidence-status-table"></div>
-        <div style="font-size:11px;color:var(--text3);margin-top:6px;">
-          検証状況は <code>project-config</code> のEvidence metadataから読み出しています（UI側の固定値ではありません）。
-          公開リポジトリのため、社内資料の名称・URL・IDは表示しません。
-        </div>
-        <div id="verified-case-selector-area"></div>
-        <div id="reconciliation-area"></div>
-        <div id="evidence-closure-area"></div>
-      </div>
+        <details class="disclosure" id="mode-help">
+          <summary>入力モードの詳しい説明</summary>
+          <div class="disclosure-body">
+            「案件プリセット」は特定案件用の固定値（検証状況付き）、「手入力 / Generic」は
+            その場で入力した任意の値、「告示風圧計算」は風条件から設計風圧を算定した値、
+            「取り込みデータ」は外部から読み込んだ入力条件です。
+            手入力・告示風圧計算・取り込みデータの値は<strong>本ツールが案件原典と照合したものではありません</strong>。
+            <div class="mode-field mode-field-notification" style="margin-top:6px;">
+              これは板硝子協会が推奨する設計手法であり、「すべての建物・すべての壁に法的に必須」という意味ではありません。
+            </div>
+          </div>
+        </details>
+      </section>
 
-      <div class="mode-field mode-field-manual form-group" style="margin-bottom:16px;">
-        <div class="meta-chip" style="display:inline-block;">
-          入力モード: <span id="manual-mode-label">手入力 (Manual / Generic)</span>
+      <!-- ② ガラス条件 -->
+      <section class="single-step" aria-labelledby="step-glass-title">
+        <h3 class="single-step-title" id="step-glass-title"><span class="step-no" aria-hidden="true">2</span>ガラス条件</h3>
+        <div class="field-row">
+          <div class="form-group">
+            <label for="inp-W">幅 W（ガラス見付寸法）</label>
+            <div class="input-unit">
+              <input type="number" id="inp-W" min="100" max="10000" step="1">
+              <span class="unit-label">mm</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="inp-H">高さ H（ガラス見付寸法）</label>
+            <div class="input-unit">
+              <input type="number" id="inp-H" min="100" max="10000" step="1">
+              <span class="unit-label">mm</span>
+            </div>
+          </div>
         </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          ⚠ このモードでは、現在画面に表示されているW/H/正圧/負圧をユーザー入力値として扱います。初期表示値（サンプル値）も含め、案件原典（構造計算書・製品資料等）で検証済みの値ではありません。
+        <div class="field-note">
+          W・Hは<strong>ガラス1枚の見付寸法</strong>（サッシ枠を含む建具全体寸法ではない）。初期値は<strong>未検証な既定値（サンプル値）</strong>です。案件図・メーカー資料で実寸を確認してください。
         </div>
-      </div>
+        <div class="form-group form-inline">
+          <label for="inp-type">候補ガラス構成</label>
+          <select id="inp-type">
+            <option value="lowe_fl">複層ガラス：Low-E + A + FL</option>
+            <option value="fl_fl">複層ガラス：FL + A + FL</option>
+            <option value="fl_single">単板ガラス：FL</option>
+            <option value="tp_single">単板ガラス：TP（強化）</option>
+          </select>
+        </div>
+      </section>
 
-      <div class="mode-field mode-field-notification form-group" style="margin-bottom:16px;">
-        <div class="meta-chip" style="display:inline-block;">
-          入力モード: <span id="notification-mode-label">告示風圧計算 (Notification / Calculated)</span>
-        </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          告示1458号系算定・板硝子協会推奨に基づき、入力した風条件から設計風圧を算定します。
-          <strong>算定式は一次資料で確認していますが、入力した風条件（V0・粗度区分・高さ・評価高さ等）は本ツールでは検証していません。</strong>
-          式が検証済みであることと、入力値が検証済みであることは別です。
-        </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          これは板硝子協会が推奨する設計手法であり、「すべての建物・すべての壁に法的に必須」という意味ではありません。
-        </div>
-      </div>
+      <!-- ③ 設計風圧条件（選んでいる mode の入力だけを表示する） -->
+      <section class="single-step" aria-labelledby="step-wind-title">
+        <h3 class="single-step-title" id="step-wind-title"><span class="step-no" aria-hidden="true">3</span>設計風圧条件</h3>
 
-      <div class="mode-field mode-field-imported form-group" style="margin-bottom:16px;">
-        <div class="meta-chip" style="display:inline-block;">
-          入力モード: <span id="imported-mode-label">取り込みデータ (Imported / Unverified)</span>
+        <div class="mode-field mode-field-preset field-row">
+          <div class="form-group">
+            <label for="inp-floor">設置階数</label>
+            <!-- 選択肢は active ProjectContext の projectPressureMap から生成する（HTML に階を持たない）。
+                 初期選択は context の順序の先頭（UI 固有の既定階を持たない）。 -->
+            <select id="inp-floor"></select>
+          </div>
+          <div class="form-group">
+            <label for="inp-zone">部位</label>
+            <!-- 選択肢は active ProjectContext の projectPressureMap から生成する（HTML に部位を持たない）。 -->
+            <select id="inp-zone"></select>
+          </div>
         </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          ⚠ 外部から取り込んだ入力条件です。取り込み元が「検証済み」「案件プリセット」と記載していても、<strong>本ツールはそれを検証済みとして扱いません</strong>。常に未検証（unverified）として表示・計算します。
+        <div class="mode-field mode-field-preset field-note">
+          正圧・負圧は<strong>現在の案件プリセット</strong>の登録値です。他案件への流用は妥当性を個別確認。
         </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;" id="imported-summary"></div>
-      </div>
 
-      <div class="form-group">
-        <label>ガラス幅 W（ガラス見付寸法）</label>
-        <div class="input-unit">
-          <input type="number" id="inp-W" min="100" max="10000" step="1">
-          <span class="unit-label">mm</span>
+        <div class="mode-field mode-field-manual field-row">
+          <div class="form-group">
+            <label for="inp-manual-pos">正圧 positivePressure</label>
+            <div class="input-unit">
+              <input type="number" id="inp-manual-pos" value="1400" step="1">
+              <span class="unit-label">N/m²</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="inp-manual-neg">負圧 negativePressure</label>
+            <div class="input-unit">
+              <input type="number" id="inp-manual-neg" value="-1000" step="1">
+              <span class="unit-label">N/m²</span>
+            </div>
+          </div>
         </div>
-      </div>
-
-      <div class="form-group">
-        <label>ガラス高さ H（ガラス見付寸法）</label>
-        <div class="input-unit">
-          <input type="number" id="inp-H" min="100" max="10000" step="1">
-          <span class="unit-label">mm</span>
-        </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          W・Hは<strong>ガラス1枚の見付寸法</strong>です。サッシ枠を含む建具全体寸法ではありません。<br>
-          初期表示の寸法は案件プリセットに登録された<strong>未検証な既定値（サンプル値）</strong>であり、特定案件の確定寸法ではありません。必ず案件図・メーカー資料で実寸を確認して入力してください。
-        </div>
-      </div>
-
-      <div class="mode-field mode-field-preset form-group">
-        <label>設置階数</label>
-        <!-- 選択肢は active ProjectContext の projectPressureMap から生成する（HTML に階を持たない）。
-             初期選択は context の順序の先頭（UI 固有の既定階を持たない）。 -->
-        <select id="inp-floor"></select>
-      </div>
-
-      <div class="mode-field mode-field-preset form-group">
-        <label>部位</label>
-        <!-- 選択肢は active ProjectContext の projectPressureMap から生成する（HTML に部位を持たない）。 -->
-        <select id="inp-zone"></select>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          正圧・負圧は<strong>現在の案件プリセット</strong>の設計風圧値です。告示から自動算定した値ではありません。他案件に流用する場合は妥当性を個別に確認してください。
-        </div>
-      </div>
-
-      <div class="mode-field mode-field-manual form-group">
-        <label>正圧 positivePressure</label>
-        <div class="input-unit">
-          <input type="number" id="inp-manual-pos" value="1400" step="1">
-          <span class="unit-label">N/m²</span>
-        </div>
-      </div>
-
-      <div class="mode-field mode-field-manual form-group">
-        <label>負圧 negativePressure</label>
-        <div class="input-unit">
-          <input type="number" id="inp-manual-neg" value="-1000" step="1">
-          <span class="unit-label">N/m²</span>
-        </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+        <div class="mode-field mode-field-manual field-note">
           設計風圧は正圧・負圧のうち絶対値が大きい方を採用します（符号は自動判定）。
         </div>
-      </div>
 
-      <div class="mode-field mode-field-notification form-group">
-        <label>算定基準 basis</label>
-        <select id="inp-wind-basis">
-          <option value="notification_baseline" selected>告示1458号系算定（再現期間の割増なし / y = 1.00）</option>
-          <option value="itakyo_recommended">板硝子協会推奨（再現期間を明示選択）</option>
-        </select>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          再現期間による割増は<strong>協会推奨</strong>であり告示の最低基準ではありません。既定では適用しません。
+        <div class="mode-field mode-field-notification form-group">
+          <label for="inp-wind-basis">算定基準 basis</label>
+          <select id="inp-wind-basis">
+            <option value="notification_baseline" selected>告示1458号系算定（再現期間の割増なし / y = 1.00）</option>
+            <option value="itakyo_recommended">板硝子協会推奨（再現期間を明示選択）</option>
+          </select>
+          <div class="field-note">
+            再現期間による割増は<strong>協会推奨</strong>であり告示の最低基準ではありません。既定では適用しません。
+          </div>
         </div>
-      </div>
 
-      <div class="mode-field mode-field-notification mode-field-itakyo form-group">
-        <label>再現期間 recurrenceYears</label>
-        <select id="inp-wind-recurrence">
-          <option value="50" selected>50年（y = 1.00）</option>
-          <option value="100">100年（y = 1.07）</option>
-          <option value="200">200年（y = 1.15）</option>
-          <option value="300">300年（y = 1.19）</option>
-          <option value="500">500年（y = 1.25）</option>
-        </select>
-      </div>
-
-      <div class="mode-field mode-field-notification form-group">
-        <label>基準風速 V0</label>
-        <div class="input-unit">
-          <input type="number" id="inp-wind-v0" value="30" step="1" min="1">
-          <span class="unit-label">m/s</span>
+        <div class="mode-field mode-field-notification mode-field-itakyo form-group">
+          <label for="inp-wind-recurrence">再現期間 recurrenceYears</label>
+          <select id="inp-wind-recurrence">
+            <option value="50" selected>50年（y = 1.00）</option>
+            <option value="100">100年（y = 1.07）</option>
+            <option value="200">200年（y = 1.15）</option>
+            <option value="300">300年（y = 1.19）</option>
+            <option value="500">500年（y = 1.25）</option>
+          </select>
         </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+
+        <div class="mode-field mode-field-notification field-row">
+          <div class="form-group">
+            <label for="inp-wind-v0">基準風速 V0</label>
+            <div class="input-unit">
+              <input type="number" id="inp-wind-v0" value="30" step="1" min="1">
+              <span class="unit-label">m/s</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="inp-wind-roughness">地表面粗度区分 roughnessCategory</label>
+            <select id="inp-wind-roughness">
+              <option value="I">I</option>
+              <option value="II" selected>II</option>
+              <option value="III">III</option>
+              <option value="IV">IV（板ガラスではIIIの数値を使用）</option>
+            </select>
+          </div>
+        </div>
+        <div class="mode-field mode-field-notification field-note">
           本ツールは自治体別のV0表を持ちません。告示1454号で定める地域のV0を確認して入力してください。
-        </div>
-      </div>
-
-      <div class="mode-field mode-field-notification form-group">
-        <label>地表面粗度区分 roughnessCategory</label>
-        <select id="inp-wind-roughness">
-          <option value="I">I</option>
-          <option value="II" selected>II</option>
-          <option value="III">III</option>
-          <option value="IV">IV（板ガラスではIIIの数値を使用）</option>
-        </select>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
           粗度区分は所管特定行政庁の指定によります。<strong>住所や都市計画区域から自動判定はしません。</strong>
         </div>
-      </div>
 
-      <div class="mode-field mode-field-notification form-group">
-        <label>建物高さ buildingHeightM</label>
-        <div class="input-unit">
-          <input type="number" id="inp-wind-building-h" value="12.0" step="0.1" min="0">
-          <span class="unit-label">m</span>
+        <div class="mode-field mode-field-notification field-row">
+          <div class="form-group">
+            <label for="inp-wind-building-h">建物高さ buildingHeightM</label>
+            <div class="input-unit">
+              <input type="number" id="inp-wind-building-h" value="12.0" step="0.1" min="0">
+              <span class="unit-label">m</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="inp-wind-eaves-h">軒高 eavesHeightM</label>
+            <div class="input-unit">
+              <input type="number" id="inp-wind-eaves-h" value="12.0" step="0.1" min="0">
+              <span class="unit-label">m</span>
+            </div>
+          </div>
         </div>
-      </div>
-
-      <div class="mode-field mode-field-notification form-group">
-        <label>軒高 eavesHeightM</label>
-        <div class="input-unit">
-          <input type="number" id="inp-wind-eaves-h" value="12.0" step="0.1" min="0">
-          <span class="unit-label">m</span>
-        </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
+        <div class="mode-field mode-field-notification field-note">
           H は建物高さと軒高の平均です。<strong>階数からは推定しません。</strong>
         </div>
-      </div>
 
-      <div class="mode-field mode-field-notification form-group">
-        <label>評価高さ Z（ガラス／壁部分の地上高さ）</label>
-        <div class="input-unit">
-          <input type="number" id="inp-wind-z" value="9.0" step="0.1" min="0">
-          <span class="unit-label">m</span>
+        <div class="mode-field mode-field-notification form-group">
+          <label for="inp-wind-z">評価高さ Z（ガラス／壁部分の地上高さ）</label>
+          <div class="input-unit">
+            <input type="number" id="inp-wind-z" value="9.0" step="0.1" min="0">
+            <span class="unit-label">m</span>
+          </div>
+          <div class="field-note">
+            <strong>階識別子（例: 1 / B1 / R / PH）から Z を自動生成しません。</strong>実際の設置高さを入力してください。
+          </div>
         </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          <strong>階識別子（例: 1 / B1 / R / PH）から Z を自動生成しません。</strong>実際の設置高さを入力してください。
+
+        <div class="mode-field mode-field-notification field-row">
+          <div class="form-group">
+            <label for="inp-wind-building-type">建物種別 buildingType</label>
+            <select id="inp-wind-building-type">
+              <option value="closed" selected>閉鎖型（closed）</option>
+              <option value="open">開放型（open）</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="inp-wind-zone">部位 zone</label>
+            <select id="inp-wind-zone">
+              <option value="general" selected>一般部</option>
+              <option value="corner">隅角部</option>
+            </select>
+          </div>
         </div>
-      </div>
 
-      <div class="mode-field mode-field-notification form-group">
-        <label>建物種別 buildingType</label>
-        <select id="inp-wind-building-type">
-          <option value="closed" selected>閉鎖型（closed）</option>
-          <option value="open">開放型（open）</option>
-        </select>
-      </div>
-
-      <div class="mode-field mode-field-notification form-group">
-        <label>部位 zone</label>
-        <select id="inp-wind-zone">
-          <option value="general" selected>一般部</option>
-          <option value="corner">隅角部</option>
-        </select>
-      </div>
-
-      <div class="mode-field mode-field-notification form-group">
-        <label>案件プリセットとの参考比較</label>
-        <select id="inp-wind-compare">
-          <option value="on" selected>表示する（参考比較 / comparison only）</option>
-          <option value="off">表示しない</option>
-        </select>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          無関係な建物を算定している場合は「表示しない」を選んでください。比較を表示してもプリセット値は置き換わりません。
+        <div class="mode-field mode-field-notification form-group">
+          <label for="inp-wind-short-side">建物短辺 b（任意 / 隅角部帯幅の表示用）</label>
+          <div class="input-unit">
+            <input type="number" id="inp-wind-short-side" value="" step="0.1" min="0" placeholder="未入力可">
+            <span class="unit-label">m</span>
+          </div>
+          <div class="field-note">
+            入力すると隅角部の帯幅（0.1 × min(b, 2H)）を表示します。<strong>図面からの自動判定は行いません。</strong>
+          </div>
         </div>
-      </div>
 
-      <div class="mode-field mode-field-notification form-group">
-        <label>建物短辺 b（任意 / 隅角部帯幅の表示用）</label>
-        <div class="input-unit">
-          <input type="number" id="inp-wind-short-side" value="" step="0.1" min="0" placeholder="未入力可">
-          <span class="unit-label">m</span>
+        <div class="mode-field mode-field-notification form-group">
+          <label for="inp-wind-compare">案件プリセットとの参考比較</label>
+          <select id="inp-wind-compare">
+            <option value="on" selected>表示する（参考比較 / comparison only）</option>
+            <option value="off">表示しない</option>
+          </select>
+          <div class="field-note">
+            無関係な建物を算定している場合は「表示しない」を選んでください。比較を表示してもプリセット値は置き換わりません。
+          </div>
         </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          入力すると隅角部の帯幅（0.1 × min(b, 2H)）を表示します。<strong>図面からの自動判定は行いません。</strong>
-        </div>
-      </div>
 
-      <div class="form-group">
-        <label>候補ガラス構成</label>
-        <select id="inp-type">
-          <option value="lowe_fl">複層ガラス：Low-E + A + FL</option>
-          <option value="fl_fl">複層ガラス：FL + A + FL</option>
-          <option value="fl_single">単板ガラス：FL</option>
-          <option value="tp_single">単板ガラス：TP（強化）</option>
-        </select>
-      </div>
-
-      <div class="form-group">
-        <label>告示外の追加低減係数</label>
-        <div class="coeff-row">
-          <input type="range" id="inp-coeff" min="0.70" max="1.00" step="0.01" value="1.00">
-          <span class="coeff-val" id="coeff-display">1.00</span>
+        <!-- 取り込みデータ: 現在読み込まれているデータの概要と、未読込のときの Import の入口 -->
+        <div class="mode-field mode-field-imported form-group">
+          <div class="imported-summary" id="imported-summary" role="status"></div>
+          <button type="button" class="btn-secondary btn-inline" onclick="focusProjectInputImport()">⬆ 入力条件のImport欄へ移動</button>
         </div>
-        <div style="font-size:11px;color:var(--text3);margin-top:5px;">
-          1.00 = 告示準拠計算のまま（標準）　／　0.90 = 既存検討書の傾向に合わせた追加の低減係数（告示には規定なし）
-        </div>
-      </div>
+      </section>
 
+      <!-- ④ 告示外の追加低減係数 -->
+      <section class="single-step" aria-labelledby="step-coeff-title">
+        <div class="step-head-row">
+          <h3 class="single-step-title" id="step-coeff-title"><span class="step-no" aria-hidden="true">4</span>告示外の追加低減係数</h3>
+          <div class="coeff-row">
+            <input type="range" id="inp-coeff" min="0.70" max="1.00" step="0.01" value="1.00" aria-labelledby="step-coeff-title" aria-describedby="coeff-note">
+            <span class="coeff-val" id="coeff-display">1.00</span>
+          </div>
+        </div>
+        <div class="form-group">
+          <!-- 1.00 以外のときは、色だけでなく文で示す（renderCoeffNotice()） -->
+          <div class="coeff-flag" id="coeff-flag" role="status" hidden></div>
+          <div class="field-note" id="coeff-note">
+            1.00 = 告示準拠（標準）／ 0.90 = 既存検討書の傾向に合わせた低減（告示に規定なし）
+          </div>
+        </div>
+      </section>
+
+      <!-- ⑤ 計算する -->
       <button class="btn-calc" onclick="runCalc()">▶ 計算する</button>
 
+      <!-- 案件の検証状況（案件プリセットのとき）: 要約は常に表示し、詳細（Evidence status・Verified Case・照合・Closure）は展開して読む。
+           要約の値は各 renderer が同じ評価結果から書く（UI で数え直さない）。表示できないときは「表示できません」と示す。 -->
+      <div class="mode-field mode-field-preset form-group evidence-block">
+        <div class="evidence-summary" id="evidence-summary">
+          <div class="evidence-summary-title">案件の検証状況（要約）</div>
+          <!-- 既定は「表示できない」（renderer が成功したときだけ書き換わる。fail closed） -->
+          <div class="evidence-summary-line is-error" id="evidence-summary-status">案件入力値の検証状況: 表示できません。表示されないことを「検証済み」と解釈しないでください。</div>
+          <div class="evidence-summary-line is-error" id="evidence-summary-closure">Evidence Closure: 表示できません。表示されないことを「検証済み」と解釈しないでください。</div>
+        </div>
+        <details class="disclosure evidence-details" id="evidence-details">
+          <summary>案件の検証状況の詳細（Evidence status・Verified Case・照合・Closure）</summary>
+          <div class="disclosure-body">
+            <label>Evidence status（案件factの検証状況）</label>
+            <div id="evidence-status-table" class="table-scroll"></div>
+            <div class="field-note">
+              検証状況は <code>project-config</code> のEvidence metadataから読み出しています（UI側の固定値ではありません）。
+              公開リポジトリのため、社内資料の名称・URL・IDは表示しません。
+            </div>
+            <div id="verified-case-selector-area"></div>
+            <div id="reconciliation-area" class="table-scroll"></div>
+            <div id="evidence-closure-area" class="table-scroll"></div>
+          </div>
+        </details>
+      </div>
+
       <!-- ===== Project Input Package: Export / Import（Phase 2D） ===== -->
-      <div class="form-group" style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);">
-        <label>入力条件のExport / Import</label>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:8px;">
+      <div class="form-group io-block" id="io-block">
+        <label for="io-package">入力条件のExport / Import</label>
+        <div class="field-note" style="margin-bottom:8px;">
           現在の入力条件を再現可能なJSON（Project Input Package）として書き出し／読み込みます。
           読み込んだデータは常に「取り込みデータ（未検証）」として扱われます。
         </div>
@@ -922,7 +1037,7 @@
       </div>
     </div>
 
-    <!-- 注意書き -->
+    <!-- 注意書き（常に表示。展開の中に入れない） -->
     <div class="notice" style="margin-top:16px;">
       <strong>⚠ ご注意</strong><br>
       本ツールは平成12年建設省告示第1458号（4辺支持ガラスの構造計算）に基づく風圧検討を簡易的に行うためのものです。<br>
@@ -2665,7 +2780,43 @@ function renderEvidenceStatus(ctx) {
     '<tbody>' + body + '</tbody></table>' +
     '<div class="meta-chip" style="display:inline-block;margin-top:8px;">' +
     'Verified Cases: <span>' + evidence.verifiedCases.length + '</span></div>';
+
+  // 常に表示する要約（S3-B3B2-B4）の材料: 表と同じ行・同じ検証状況（別に判定しない）。
+  // 要約は 3 つの欄がそろって描けた後に renderPhase2FEvidencePanels() が書く（RF-29-01）
+  return { statuses: rows.map(function (r) { return r[1]; }), verifiedCaseCount: evidence.verifiedCases.length };
 }
+
+/**
+ * 案件の検証状況の要約の 1 行を書く（S3-B3B2-B4）。textContent だけ。
+ * 取得できなかったときは isError で示し、「表示されない＝検証済み」と読ませない。
+ */
+function setEvidenceSummaryLine(id, text, isError) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle('is-error', !!isError);
+}
+
+/** Evidence status 表の行の検証状況から、要約（全 n 項目・状況ごとの件数・Verified Cases）を作る。 */
+function renderEvidenceStatusSummary(statuses, verifiedCaseCount) {
+  var counts = {};
+  var order = [];
+  statuses.forEach(function (status) {
+    var label = evidenceStatusLabel(status);
+    if (!(label in counts)) { counts[label] = 0; order.push(label); }
+    counts[label] += 1;
+  });
+  setEvidenceSummaryLine('evidence-summary-status',
+    '案件入力値の検証状況: 全 ' + statuses.length + ' 項目 — ' +
+    order.map(function (label) { return label + ' ' + counts[label]; }).join(' / ') +
+    '（Verified Cases: ' + verifiedCaseCount + ' 件）', false);
+}
+
+/** 要約の失敗の固定文（RF-29-01）。例外の文・評価の値を入れない。 */
+var EVIDENCE_STATUS_SUMMARY_FAILED =
+  '案件入力値の検証状況: 表示できませんでした。検証状況が不明のため、表示されていないことを「検証済み」と解釈しないでください。';
+var EVIDENCE_CLOSURE_SUMMARY_FAILED =
+  'Evidence Closure: 表示できませんでした。表示できないことを「検証済み」と解釈しないでください。';
 
 // Verified Case selector は、caseが実在するときだけ描画する。
 // 0件のときにselectorを出すと「選べる何かがある」という誤解を生むため、
@@ -2808,12 +2959,68 @@ function closureCell(row, text, opts) {
   return td;
 }
 
+/**
+ * Closure の評価結果が、要約と詳細の表示に必要な形をそろえているか（RF-29-01）。
+ * Closure の判定はしない: 状態の値は EvidenceClosure.CLOSURE_STATUSES（module 自身の一覧）に含まれるかだけを見る。
+ * 件数は 0 以上の整数で ready ≤ 全体、配列の長さは対応する件数と同じ、Promotion Candidate は null か object。
+ * 欠けた値・不正な値を 0 件・なしに読み替えない。形が合わなければ理由の固定の語を返し、合えば null。
+ */
+function closureEvaluationProblem(evaluation, statuses) {
+  var isObject = function (v) { return v !== null && typeof v === 'object' && !Array.isArray(v); };
+  var isCount = function (v) { return typeof v === 'number' && Number.isSafeInteger(v) && v >= 0; };
+  var isText = function (v) { return typeof v === 'string' && v.length > 0; };
+  var isNullableText = function (v) { return v === null || typeof v === 'string'; };
+  var isKeyList = function (v) { return Array.isArray(v) && v.every(isText); };
+  if (!Array.isArray(statuses) || statuses.length === 0 || !statuses.every(isText)) return 'statuses';
+  var isStatus = function (v) { return typeof v === 'string' && statuses.indexOf(v) !== -1; };
+  if (!isObject(evaluation)) return 'evaluation';
+  if (!isStatus(evaluation.status)) return 'status';
+  var pairs = [['readySlotCount', 'requiredSlotCount'], ['readyCategoryCount', 'categoryCount'],
+    ['readyCaseScopeCount', 'caseScopeCount']];
+  for (var i = 0; i < pairs.length; i++) {
+    var ready = evaluation[pairs[i][0]];
+    var total = evaluation[pairs[i][1]];
+    if (!isCount(ready) || !isCount(total) || ready > total) return 'count';
+  }
+  if (!Array.isArray(evaluation.factResults) || evaluation.factResults.length !== evaluation.requiredSlotCount) {
+    return 'factResults';
+  }
+  if (!Array.isArray(evaluation.categoryResults) || evaluation.categoryResults.length !== evaluation.categoryCount) {
+    return 'categoryResults';
+  }
+  if (!Array.isArray(evaluation.caseReadiness) || evaluation.caseReadiness.length !== evaluation.caseScopeCount) {
+    return 'caseReadiness';
+  }
+  if (!Object.prototype.hasOwnProperty.call(evaluation, 'promotionCandidate') ||
+      !(evaluation.promotionCandidate === null || isObject(evaluation.promotionCandidate))) {
+    return 'promotionCandidate';
+  }
+  var factsOk = evaluation.factResults.every(function (f) {
+    return isObject(f) && isText(f.factKey) && isText(f.unit) && (f.scope === null || isObject(f.scope)) &&
+      typeof f.observationPresent === 'boolean' &&
+      (f.currentValue === null || typeof f.currentValue === 'string' ||
+        (typeof f.currentValue === 'number' && isFinite(f.currentValue))) &&
+      (!f.observationPresent || (f.candidateValue !== null && f.candidateValue !== undefined)) &&
+      isNullableText(f.evidenceGateStatus) && typeof f.reconciliationApplicable === 'boolean' &&
+      isNullableText(f.reconciliationStatus) && isStatus(f.closureStatus);
+  });
+  if (!factsOk) return 'factResult';
+  var categoriesOk = evaluation.categoryResults.every(function (c) {
+    return isObject(c) && isText(c.categoryId) && isStatus(c.status) && isKeyList(c.requiredSlotKeys) &&
+      isKeyList(c.blockedSlotKeys) && c.blockedSlotKeys.length <= c.requiredSlotKeys.length;
+  });
+  if (!categoriesOk) return 'categoryResult';
+  return null;
+}
+
 function renderEvidenceClosureMatrix() {
+  // RF-29-01: 描き直しの間は前回の正常な要約を残さない。要約を正常に戻すのは、評価の形を確かめ、
+  // 詳細を最後まで組み立てて画面に付けた後だけ（途中の失敗はすべて下の catch で「表示できない」にする）。
+  setEvidenceSummaryLine('evidence-summary-closure', EVIDENCE_CLOSURE_SUMMARY_FAILED, true);
   var host = document.getElementById('evidence-closure-area');
   if (!host) return;
   host.textContent = '';
 
-  var evaluation;
   try {
     if (typeof EvidenceClosure === 'undefined' || !EvidenceClosure ||
         typeof EvidenceClosure.evaluateClosure !== 'function') {
@@ -2822,181 +3029,194 @@ function renderEvidenceClosureMatrix() {
     // closure の対象は active context の built-in（registryProjectId）。id を UI に書かない。
     var closureProjectId = requireActiveProjectContext().origin.registryProjectId;
     // 実案件のObservationは0件である（Production UIに投入経路は無い）。
-    evaluation = EvidenceClosure.evaluateClosure(closureProjectId, []);
-    if (!evaluation || !Array.isArray(evaluation.factResults)) {
+    var evaluation = EvidenceClosure.evaluateClosure(closureProjectId, []);
+    // 要約と詳細に必要な形（件数・配列・状態）がそろっていなければ表示しない（欠けた値を 0 件・なしに読み替えない）
+    if (closureEvaluationProblem(evaluation, EvidenceClosure.CLOSURE_STATUSES) !== null) {
       throw new Error('unexpected closure evaluation shape');
     }
+
+    // 常に表示する要約（S3-B3B2-B4）の文: 下の集計と同じ評価結果から作る（確認項目・カテゴリ・case scope を分けて書く）。
+    // 書き込むのは詳細を画面に付けた後
+    var summaryText =
+      'Evidence Closure: ' + (CLOSURE_STATUS_LABELS[evaluation.status] || evaluation.status) +
+      ' — 必要な確認項目 ' + evaluation.readySlotCount + ' / ' + evaluation.requiredSlotCount + ' 充足' +
+      '・closureカテゴリ ' + evaluation.readyCategoryCount + ' / ' + evaluation.categoryCount + ' 充足' +
+      '・想定case scope ' + evaluation.readyCaseScopeCount + ' / ' + evaluation.caseScopeCount + ' 充足' +
+      '・Promotion Candidate ' + (evaluation.promotionCandidate ? '生成済み（提案であり現在の真実ではない）' : 'なし');
+
+    var wrap = document.createElement('div');
+    wrap.style.marginTop = '14px';
+
+    var title = document.createElement('label');
+    title.textContent = 'Evidence Closure Status（案件closureに必要な確認項目）';
+    wrap.appendChild(title);
+
+    // ── 集計（すべて評価結果から。UI側で数え直さない）──────────
+    var summary = document.createElement('div');
+    summary.style.cssText = 'font-size:12px;margin-top:6px;line-height:1.9;';
+    [
+      ['現在のclosure状態', CLOSURE_STATUS_LABELS[evaluation.status] || evaluation.status],
+      ['必要な確認項目', evaluation.readySlotCount + ' / ' + evaluation.requiredSlotCount + ' 充足'],
+      ['closureカテゴリ', evaluation.readyCategoryCount + ' / ' + evaluation.categoryCount + ' 充足'],
+      ['想定case scope', evaluation.readyCaseScopeCount + ' / ' + evaluation.caseScopeCount + ' 充足'],
+      ['提出済みEvidence Observation',
+        evaluation.factResults.filter(function (f) { return f.observationPresent; }).length + ' 件'],
+      ['Promotion Candidate', evaluation.promotionCandidate ? '生成済み（提案であり現在の真実ではない）' : 'なし']
+    ].forEach(function (pair) {
+      var line = document.createElement('div');
+      var k = document.createElement('span');
+      k.style.color = 'var(--text3)';
+      k.textContent = pair[0] + ': ';
+      var v = document.createElement('strong');
+      v.textContent = pair[1];
+      line.appendChild(k);
+      line.appendChild(v);
+      summary.appendChild(line);
+    });
+    wrap.appendChild(summary);
+
+    // ── 件数の意味の違いを明示する（4カテゴリ vs 12項目）────────
+    var counts = document.createElement('div');
+    counts.style.cssText = 'font-size:11px;color:var(--text3);margin-top:4px;';
+    counts.textContent =
+      '未解決カテゴリ: ' + evaluation.categoryCount +
+      ' / 必要な確認項目: ' + evaluation.requiredSlotCount +
+      '（確認項目は階・部位ごとに分かれるため、カテゴリ数より多くなります）';
+    wrap.appendChild(counts);
+
+    // ── 解釈の固定注意（runtime値で置き換えない）────────────────
+    var notice = document.createElement('div');
+    notice.className = 'notice';
+    notice.style.cssText = 'margin-top:10px;font-size:11px;line-height:1.8;';
+    [
+      'この表示は案件Evidenceの不足状況を示すものです。',
+      '数値が現在のpreset主張と一致しても、それだけではverifiedになりません。',
+      '一次Evidenceの確認と Promotion Gate の通過が必要です。',
+      'この画面からverifiedへ変更することはできません。',
+      'Promotion Candidateが生成されても、それはcurrent truthではありません。'
+    ].forEach(function (text) {
+      var li = document.createElement('div');
+      li.textContent = '・' + text;
+      notice.appendChild(li);
+    });
+    wrap.appendChild(notice);
+
+    // ── 4カテゴリ（membershipは評価結果から）────────────────────
+    var catTitle = document.createElement('div');
+    catTitle.style.cssText = 'font-size:12px;color:var(--text3);margin-top:12px;margin-bottom:4px;';
+    catTitle.textContent = '未解決カテゴリ';
+    wrap.appendChild(catTitle);
+
+    var catTable = document.createElement('table');
+    catTable.className = 'result-table';
+    catTable.style.fontSize = '12px';
+    var catHead = document.createElement('tr');
+    ['カテゴリ', '状態', '充足', '未充足項目'].forEach(function (h) {
+      var th = document.createElement('th');
+      th.textContent = h;
+      catHead.appendChild(th);
+    });
+    catTable.appendChild(catHead);
+    evaluation.categoryResults.forEach(function (cat) {
+      var tr = document.createElement('tr');
+      closureCell(tr, CLOSURE_CATEGORY_LABELS[cat.categoryId] || cat.categoryId);
+      closureCell(tr, CLOSURE_STATUS_LABELS[cat.status] || cat.status, { nowrap: true });
+      closureCell(tr,
+        (cat.requiredSlotKeys.length - cat.blockedSlotKeys.length) + ' / ' + cat.requiredSlotKeys.length,
+        { nowrap: true });
+      closureCell(tr, String(cat.blockedSlotKeys.length) + ' 件', { muted: true, nowrap: true });
+      catTable.appendChild(tr);
+    });
+    wrap.appendChild(catTable);
+
+    // ── Request Matrix 本体 ─────────────────────────────────────
+    var matTitle = document.createElement('div');
+    matTitle.style.cssText = 'font-size:12px;color:var(--text3);margin-top:14px;margin-bottom:4px;';
+    matTitle.textContent = '必要な確認項目（Evidence Request Matrix）';
+    wrap.appendChild(matTitle);
+
+    var table = document.createElement('table');
+    table.className = 'result-table';
+    table.id = 'evidence-closure-matrix';
+    table.style.fontSize = '12px';
+    var head = document.createElement('tr');
+    ['必要Evidence', '対象', '単位', '現在のpreset主張', 'Evidence Observation',
+      'Evidence Gate', '照合', 'Closure'].forEach(function (h) {
+      var th = document.createElement('th');
+      th.textContent = h;
+      head.appendChild(th);
+    });
+    table.appendChild(head);
+
+    evaluation.factResults.forEach(function (fact) {
+      var tr = document.createElement('tr');
+
+      // 必要Evidence: ラベル + 何を集めればよいかの説明
+      var labelCell = document.createElement('td');
+      var labelMain = document.createElement('div');
+      labelMain.textContent = CLOSURE_FACT_LABELS[fact.factKey] || fact.factKey;
+      labelCell.appendChild(labelMain);
+      var req = document.createElement('div');
+      req.style.cssText = 'font-size:10px;color:var(--text3);margin-top:2px;';
+      req.textContent = CLOSURE_REQUEST_TEXT[fact.factKey] || '';
+      labelCell.appendChild(req);
+      tr.appendChild(labelCell);
+
+      closureCell(tr, closureScopeLabel(fact.scope), { nowrap: true });
+      closureCell(tr, fact.unit, { nowrap: true });
+
+      // 現在のpreset主張。評価高さZのように「突き合わせる正が無い」場合は
+      // 一致/不一致ではなく**不在**として見せる。
+      closureCell(tr,
+        fact.currentValue === null ? '— 現在の正なし' : String(fact.currentValue),
+        { nowrap: true, muted: fact.currentValue === null });
+
+      // Observationが無いことを 0 や現在値で埋めない
+      closureCell(tr,
+        fact.observationPresent ? String(fact.candidateValue) : '未提出',
+        { nowrap: true, muted: !fact.observationPresent });
+
+      closureCell(tr,
+        fact.evidenceGateStatus === null
+          ? '未評価'
+          : (CLOSURE_GATE_LABELS[fact.evidenceGateStatus] || fact.evidenceGateStatus));
+
+      closureCell(tr,
+        fact.reconciliationApplicable === false
+          ? '比較対象なし'
+          : (CLOSURE_RECONCILIATION_LABELS[fact.reconciliationStatus] ||
+              (fact.reconciliationStatus === null ? '未評価' : fact.reconciliationStatus)));
+
+      closureCell(tr, CLOSURE_STATUS_LABELS[fact.closureStatus] || fact.closureStatus,
+        { nowrap: true });
+
+      table.appendChild(tr);
+    });
+    wrap.appendChild(table);
+
+    var foot = document.createElement('div');
+    foot.style.cssText = 'font-size:11px;color:var(--text3);margin-top:6px;line-height:1.7;';
+    foot.textContent =
+      'この表の状態は project-config のEvidence contractとPromotion Gateから算出しています' +
+      '（UI側の固定値ではありません）。公開リポジトリのため、社内資料の名称・URL・IDは表示しません。';
+    wrap.appendChild(foot);
+
+    // 詳細は最後に一度だけ付ける（途中で失敗したら何も付けない）。付けた後で要約を正常にする
+    host.appendChild(wrap);
+    setEvidenceSummaryLine('evidence-summary-closure', summaryText, false);
   } catch (e) {
     // 黙って消さない。表示できないことを「検証済み」と読ませない（F10と同じ理由）。
+    // 途中まで組み立てた詳細は残さない。例外の文（評価の値や入力を含みうる）は画面に出さない（固定文だけ）。
+    host.textContent = '';
     var warn = document.createElement('div');
     warn.className = 'notice';
     warn.style.borderColor = 'rgba(245,158,11,0.4)';
     warn.textContent =
       'Evidence Closure Statusを表示できませんでした。' +
-      '表示できないことを「検証済み」と解釈しないでください: ' +
-      (e && e.message ? e.message : String(e));
+      '表示できないことを「検証済み」と解釈しないでください。';
     host.appendChild(warn);
-    return;
+    setEvidenceSummaryLine('evidence-summary-closure', EVIDENCE_CLOSURE_SUMMARY_FAILED, true);
   }
-
-  var wrap = document.createElement('div');
-  wrap.style.marginTop = '14px';
-
-  var title = document.createElement('label');
-  title.textContent = 'Evidence Closure Status（案件closureに必要な確認項目）';
-  wrap.appendChild(title);
-
-  // ── 集計（すべて評価結果から。UI側で数え直さない）──────────
-  var summary = document.createElement('div');
-  summary.style.cssText = 'font-size:12px;margin-top:6px;line-height:1.9;';
-  [
-    ['現在のclosure状態', CLOSURE_STATUS_LABELS[evaluation.status] || evaluation.status],
-    ['必要な確認項目', evaluation.readySlotCount + ' / ' + evaluation.requiredSlotCount + ' 充足'],
-    ['closureカテゴリ', evaluation.readyCategoryCount + ' / ' + evaluation.categoryCount + ' 充足'],
-    ['想定case scope', evaluation.readyCaseScopeCount + ' / ' + evaluation.caseScopeCount + ' 充足'],
-    ['提出済みEvidence Observation',
-      evaluation.factResults.filter(function (f) { return f.observationPresent; }).length + ' 件'],
-    ['Promotion Candidate', evaluation.promotionCandidate ? '生成済み（提案であり現在の真実ではない）' : 'なし']
-  ].forEach(function (pair) {
-    var line = document.createElement('div');
-    var k = document.createElement('span');
-    k.style.color = 'var(--text3)';
-    k.textContent = pair[0] + ': ';
-    var v = document.createElement('strong');
-    v.textContent = pair[1];
-    line.appendChild(k);
-    line.appendChild(v);
-    summary.appendChild(line);
-  });
-  wrap.appendChild(summary);
-
-  // ── 件数の意味の違いを明示する（4カテゴリ vs 12項目）────────
-  var counts = document.createElement('div');
-  counts.style.cssText = 'font-size:11px;color:var(--text3);margin-top:4px;';
-  counts.textContent =
-    '未解決カテゴリ: ' + evaluation.categoryCount +
-    ' / 必要な確認項目: ' + evaluation.requiredSlotCount +
-    '（確認項目は階・部位ごとに分かれるため、カテゴリ数より多くなります）';
-  wrap.appendChild(counts);
-
-  // ── 解釈の固定注意（runtime値で置き換えない）────────────────
-  var notice = document.createElement('div');
-  notice.className = 'notice';
-  notice.style.cssText = 'margin-top:10px;font-size:11px;line-height:1.8;';
-  [
-    'この表示は案件Evidenceの不足状況を示すものです。',
-    '数値が現在のpreset主張と一致しても、それだけではverifiedになりません。',
-    '一次Evidenceの確認と Promotion Gate の通過が必要です。',
-    'この画面からverifiedへ変更することはできません。',
-    'Promotion Candidateが生成されても、それはcurrent truthではありません。'
-  ].forEach(function (text) {
-    var li = document.createElement('div');
-    li.textContent = '・' + text;
-    notice.appendChild(li);
-  });
-  wrap.appendChild(notice);
-
-  // ── 4カテゴリ（membershipは評価結果から）────────────────────
-  var catTitle = document.createElement('div');
-  catTitle.style.cssText = 'font-size:12px;color:var(--text3);margin-top:12px;margin-bottom:4px;';
-  catTitle.textContent = '未解決カテゴリ';
-  wrap.appendChild(catTitle);
-
-  var catTable = document.createElement('table');
-  catTable.className = 'result-table';
-  catTable.style.fontSize = '12px';
-  var catHead = document.createElement('tr');
-  ['カテゴリ', '状態', '充足', '未充足項目'].forEach(function (h) {
-    var th = document.createElement('th');
-    th.textContent = h;
-    catHead.appendChild(th);
-  });
-  catTable.appendChild(catHead);
-  evaluation.categoryResults.forEach(function (cat) {
-    var tr = document.createElement('tr');
-    closureCell(tr, CLOSURE_CATEGORY_LABELS[cat.categoryId] || cat.categoryId);
-    closureCell(tr, CLOSURE_STATUS_LABELS[cat.status] || cat.status, { nowrap: true });
-    closureCell(tr,
-      (cat.requiredSlotKeys.length - cat.blockedSlotKeys.length) + ' / ' + cat.requiredSlotKeys.length,
-      { nowrap: true });
-    closureCell(tr, String(cat.blockedSlotKeys.length) + ' 件', { muted: true, nowrap: true });
-    catTable.appendChild(tr);
-  });
-  wrap.appendChild(catTable);
-
-  // ── Request Matrix 本体 ─────────────────────────────────────
-  var matTitle = document.createElement('div');
-  matTitle.style.cssText = 'font-size:12px;color:var(--text3);margin-top:14px;margin-bottom:4px;';
-  matTitle.textContent = '必要な確認項目（Evidence Request Matrix）';
-  wrap.appendChild(matTitle);
-
-  var table = document.createElement('table');
-  table.className = 'result-table';
-  table.id = 'evidence-closure-matrix';
-  table.style.fontSize = '12px';
-  var head = document.createElement('tr');
-  ['必要Evidence', '対象', '単位', '現在のpreset主張', 'Evidence Observation',
-    'Evidence Gate', '照合', 'Closure'].forEach(function (h) {
-    var th = document.createElement('th');
-    th.textContent = h;
-    head.appendChild(th);
-  });
-  table.appendChild(head);
-
-  evaluation.factResults.forEach(function (fact) {
-    var tr = document.createElement('tr');
-
-    // 必要Evidence: ラベル + 何を集めればよいかの説明
-    var labelCell = document.createElement('td');
-    var labelMain = document.createElement('div');
-    labelMain.textContent = CLOSURE_FACT_LABELS[fact.factKey] || fact.factKey;
-    labelCell.appendChild(labelMain);
-    var req = document.createElement('div');
-    req.style.cssText = 'font-size:10px;color:var(--text3);margin-top:2px;';
-    req.textContent = CLOSURE_REQUEST_TEXT[fact.factKey] || '';
-    labelCell.appendChild(req);
-    tr.appendChild(labelCell);
-
-    closureCell(tr, closureScopeLabel(fact.scope), { nowrap: true });
-    closureCell(tr, fact.unit, { nowrap: true });
-
-    // 現在のpreset主張。評価高さZのように「突き合わせる正が無い」場合は
-    // 一致/不一致ではなく**不在**として見せる。
-    closureCell(tr,
-      fact.currentValue === null ? '— 現在の正なし' : String(fact.currentValue),
-      { nowrap: true, muted: fact.currentValue === null });
-
-    // Observationが無いことを 0 や現在値で埋めない
-    closureCell(tr,
-      fact.observationPresent ? String(fact.candidateValue) : '未提出',
-      { nowrap: true, muted: !fact.observationPresent });
-
-    closureCell(tr,
-      fact.evidenceGateStatus === null
-        ? '未評価'
-        : (CLOSURE_GATE_LABELS[fact.evidenceGateStatus] || fact.evidenceGateStatus));
-
-    closureCell(tr,
-      fact.reconciliationApplicable === false
-        ? '比較対象なし'
-        : (CLOSURE_RECONCILIATION_LABELS[fact.reconciliationStatus] ||
-            (fact.reconciliationStatus === null ? '未評価' : fact.reconciliationStatus)));
-
-    closureCell(tr, CLOSURE_STATUS_LABELS[fact.closureStatus] || fact.closureStatus,
-      { nowrap: true });
-
-    table.appendChild(tr);
-  });
-  wrap.appendChild(table);
-
-  var foot = document.createElement('div');
-  foot.style.cssText = 'font-size:11px;color:var(--text3);margin-top:6px;line-height:1.7;';
-  foot.textContent =
-    'この表の状態は project-config のEvidence contractとPromotion Gateから算出しています' +
-    '（UI側の固定値ではありません）。公開リポジトリのため、社内資料の名称・URL・IDは表示しません。';
-  wrap.appendChild(foot);
-
-  host.appendChild(wrap);
 }
 
 function renderProjectEvidencePanels() {
@@ -3007,12 +3227,16 @@ function renderProjectEvidencePanels() {
 }
 
 function renderPhase2FEvidencePanels() {
+  // RF-29-01: 3 つの欄がそろって描けたときだけ要約を正常にする（途中の失敗で前回の正常な要約を残さない）。
+  // Closure の要約とは別々に書く（片方の失敗でもう片方を消さない）
+  setEvidenceSummaryLine('evidence-summary-status', EVIDENCE_STATUS_SUMMARY_FAILED, true);
   if (typeof EvidenceLedger === 'undefined') return;
   try {
     var ctx = requireActiveProjectContext();
-    renderEvidenceStatus(ctx);
+    var statusSummary = renderEvidenceStatus(ctx);
     renderVerifiedCaseSelector(ctx);
     renderReconciliation(ctx);
+    renderEvidenceStatusSummary(statusSummary.statuses, statusSummary.verifiedCaseCount);
   } catch (e) {
     // F10: 計算機能は止めないが、**黙って消さない**。
     // Evidence contractやpromotion gateが失敗したとき、この panel が
@@ -3024,17 +3248,17 @@ function renderPhase2FEvidencePanels() {
       var warn = document.createElement('div');
       warn.className = 'notice';
       warn.style.borderColor = 'rgba(245,158,11,0.4)';
-      // textContent固定（例外メッセージをHTMLとして解釈させない）
+      // textContent・固定文（例外の文は評価の値や入力を含みうるので画面に出さない。RF-29-01）
       warn.textContent =
         'Evidence statusを表示できませんでした。検証状況が不明のため、' +
-        '表示されていないことを「検証済み」と解釈しないでください: ' +
-        (e && e.message ? e.message : String(e));
+        '表示されていないことを「検証済み」と解釈しないでください。';
       host.appendChild(warn);
     }
     var caseArea = document.getElementById('verified-case-selector-area');
     if (caseArea) caseArea.textContent = '';
     var recArea = document.getElementById('reconciliation-area');
     if (recArea) recArea.textContent = '';
+    setEvidenceSummaryLine('evidence-summary-status', EVIDENCE_STATUS_SUMMARY_FAILED, true);
   }
 }
 
@@ -3190,6 +3414,22 @@ function exportProjectInput() {
   }
 }
 
+/** 取り込みデータの概要（未読込のときは Import の入口を示す固定文）。S3-B3B2-B4。 */
+var IMPORTED_NONE_TEXT =
+  '取り込みデータはまだありません。下の「入力条件のExport / Import」に Project Input Package（JSON）を貼り付けて「⬆ Import」を押してください。';
+function renderImportedNone() {
+  var summary = document.getElementById('imported-summary');
+  if (summary && !importedPackage) summary.textContent = IMPORTED_NONE_TEXT;
+}
+
+/** 取り込み欄へ移って focus する（取り込みデータ mode の入口。値を変えない）。 */
+function focusProjectInputImport() {
+  var block = document.getElementById('io-block');
+  var area = document.getElementById('io-package');
+  if (block && block.scrollIntoView) block.scrollIntoView({ block: 'center' });
+  if (area) area.focus();
+}
+
 function importProjectInput() {
   var text = document.getElementById('io-package').value;
   try {
@@ -3221,9 +3461,11 @@ function importProjectInput() {
     }
 
     setIoStatus('✓ Importしました。取り込みデータ（未検証）として計算します。', false);
+    renderCoeffNotice();
     runCalc();
   } catch (e) {
     importedPackage = null;
+    renderImportedNone();
     setIoStatus('✗ Importできません: ' + e.message, true);
   }
 }
@@ -3301,7 +3543,7 @@ function renderPresetComparisonHtml(trace) {
       <strong style="color:var(--warn);">⚠ 参考比較（comparison only） — 案件プリセットの算定根拠は未解決です</strong><br>
       これは<strong>現在入力されている風条件で算定した値</strong>と既存の案件プリセット値を並べたものです。案件プリセットがどのH・Z・建物種別で算定されたかは本ツールでは確認できていません（preset provenance unresolved）。<strong>数値が近くても、プリセットの検証状況は変わりません。</strong>この比較でプリセット値を置き換えることもしません。
     </div>
-    <table>
+    <div class="table-wrap"><table>
       <thead><tr><th>項目</th><th>案件プリセット</th><th>告示風圧計算（現在の入力）</th><th>差</th></tr></thead>
       <tbody>
         <tr>
@@ -3311,7 +3553,7 @@ function renderPresetComparisonHtml(trace) {
           <td class="${Math.abs(pct) < 5 ? '' : 'ng'}">${diff >= 0 ? '+' : ''}${fmt(diff, 1)} N/m²（${pct >= 0 ? '+' : ''}${fmt(pct, 2)}%）</td>
         </tr>
       </tbody>
-    </table>
+    </table></div>
     <div style="font-size:11px;color:var(--text3);margin-top:6px;">
       比較に用いた入力: V0=${escHtml(trace.inputs.V0)} m/s ／ 粗度区分=${escHtml(trace.inputs.inputRoughnessCategory)} ／ H=${fmt(trace.normalized.meanHeightH, 2)} m ／ Z=${escHtml(trace.inputs.evaluationHeightM)} m ／ ${trace.inputs.buildingType === 'closed' ? '閉鎖型' : '開放型'}。
       これらは<strong>ユーザーが入力した仮定</strong>であり、案件原典で確認された値ではありません。
@@ -3357,10 +3599,10 @@ function renderWindTraceHtml(trace) {
     <div class="meta-chip" style="display:inline-block;margin-bottom:8px;">
       入力値の検証状況: <span>未検証（ユーザー入力）</span>
     </div>
-    <table>
+    <div class="table-wrap"><table>
       <thead><tr><th>ステップ</th><th>式</th><th>値</th><th>単位</th></tr></thead>
       <tbody>${rows}</tbody>
-    </table>
+    </table></div>
     ${geometry}
     <div style="font-size:11px;color:var(--text3);margin-top:6px;">
       表示のみ丸めています。内部計算では丸めていません。
@@ -3417,23 +3659,6 @@ function renderResults(result) {
   // 風圧算定trace（告示風圧計算モード / 風圧由来の取り込みデータ）
   const traceHtml = renderWindTraceHtml(result.windTrace);
 
-  // 結論カード
-  const conclusionHtml = `
-    <div class="conclusion-card">
-      <div class="sec-title">検討結果</div>
-      ${unverifiedHtml}
-      <div class="conclusion-inner">
-        ${judgeHtml}
-        <div class="conclusion-detail">
-          <div class="conclusion-glass">${bestLabel}</div>
-          <div class="conclusion-meta">
-            <div class="meta-chip">許容風圧 <span>${bestP} N/m²</span></div>
-            <div class="meta-chip">設計風圧 <span>${fmt(designP, 0)} N/m²</span></div>
-            <div class="meta-chip">告示外の追加低減係数 <span>${fmt(extraFactor, 2)}</span></div>
-          </div>
-        </div>
-      </div>
-    </div>`;
 
   // 設計風圧の計算根拠
   const maxSide = posP >= negP
@@ -3493,7 +3718,6 @@ function renderResults(result) {
           <div class="calc-line">${maxSide}</div>
           <div class="calc-line">→ 設計風圧 = <span class="val hl">${fmt(designP, 0)} N/m²</span></div>
           <div class="calc-line" style="margin-top:6px;color:var(--text3);">${windSelectionNote}</div>
-          ${windStatusWarningHtml}
         </div>
       </div>
     </div>`;
@@ -3616,8 +3840,59 @@ function renderResults(result) {
       </div>
     </div>` : '';
 
-  document.getElementById('result-area').innerHTML =
-    conclusionHtml + traceHtml + windHtml + calcDetailHtml + okTableHtml + ngTableHtml + scopeTableHtml;
+  // 結論カード（S3-B3B2-B4: 常に表示する。結果の検証状況・判定・推奨構成・許容 / 設計風圧・係数・適用範囲外の除外）
+  const coeffFlagged = extraFactor !== 1;
+  const conclusionHtml = `
+    <div class="conclusion-card">
+      <div class="sec-title">検討結果</div>
+      ${unverifiedHtml}
+      <div class="conclusion-inner">
+        ${judgeHtml}
+        <div class="conclusion-detail">
+          <div class="conclusion-glass">${bestLabel}</div>
+          <div class="conclusion-meta">
+            <div class="meta-chip">許容風圧 <span>${bestP} N/m²</span></div>
+            <div class="meta-chip">設計風圧 <span>${fmt(designP, 0)} N/m²</span></div>
+            <div class="meta-chip${coeffFlagged ? ' is-flagged' : ''}">告示外の追加低減係数 <span>${fmt(extraFactor, 2)}</span></div>
+          </div>
+        </div>
+      </div>
+      ${conclusionNotesHtml(mode, windStatusWarningHtml, coeffFlagged, extraFactor, outOfScopeCandidates.length, scopeTop.length)}
+    </div>`;
+
+  // 計算根拠・候補一覧は 1 回の操作で開く詳細へ（S3-B3B2-B4）。値・並び・選び方は変えない。
+  // 開いた状態は再計算しても保つ: 描き直す直前の details の開閉をその場で読む（toggle event を待たない。保存はしない）。
+  const prevDetails = document.getElementById('result-details');
+  const detailsOpen = !!(prevDetails && prevDetails.open);
+  const detailsHtml = `
+    <details class="disclosure result-details" id="result-details"${detailsOpen ? ' open' : ''}>
+      <summary>計算根拠・候補一覧（設計風圧の選定・風圧算定トレース・許容風圧の計算根拠・推奨 / NG / 適用範囲外の候補）</summary>
+      <div class="result-details-body">${traceHtml + windHtml + calcDetailHtml + okTableHtml + ngTableHtml + scopeTableHtml}</div>
+    </details>`;
+
+  document.getElementById('result-area').innerHTML = conclusionHtml + detailsHtml;
+}
+
+/**
+ * 結論カードに常に表示する注記（S3-B3B2-B4）。
+ *   - 案件プリセットの設計風圧の検証状況（以前は詳細の中にあった警告をそのまま移す）
+ *   - 告示外の追加低減係数が 1.00 以外であること（色だけでなく文で示す）
+ *   - 板硝子協会計算法の適用範囲外の候補を自動推奨から除外したこと（全件数と、詳細の表に出す件数）
+ * 値は renderResults() と同じ計算結果から渡す。
+ */
+function conclusionNotesHtml(mode, windStatusWarningHtml, coeffFlagged, extraFactor, outOfScopeCount, outOfScopeShown) {
+  const notes = [];
+  if (windStatusWarningHtml) notes.push(windStatusWarningHtml);
+  if (coeffFlagged) {
+    notes.push('<div class="conclusion-note is-warn">⚠ 告示外の追加低減係数 ' + fmt(extraFactor, 2) +
+      ' を適用しています（1.00 = 告示準拠。この低減は告示には規定がありません）。</div>');
+  }
+  if (outOfScopeCount > 0) {
+    notes.push('<div class="conclusion-note is-warn">⚠ 板硝子協会計算法の適用範囲外の候補 ' + outOfScopeCount +
+      ' 件は自動推奨から除外しています（計算根拠・候補一覧の「適用範囲外」に上位 ' + outOfScopeShown +
+      ' 件を表示。採用する場合はメーカー個別検討が必要です）。</div>');
+  }
+  return notes.length ? '<div class="conclusion-notes">' + notes.join('') + '</div>' : '';
 }
 
 /* ============================================================
@@ -3854,7 +4129,24 @@ function runCalc() {
 
 document.getElementById('inp-coeff').addEventListener('input', function() {
   document.getElementById('coeff-display').textContent = parseFloat(this.value).toFixed(2);
+  renderCoeffNotice();
 });
+
+/**
+ * 告示外の追加低減係数が 1.00 以外のとき、入力欄の下に文で示す（S3-B3B2-B4。色だけに頼らない）。
+ * 値を変えない・計算しない（表示だけ）。
+ */
+function renderCoeffNotice() {
+  var input = document.getElementById('inp-coeff');
+  var flag = document.getElementById('coeff-flag');
+  if (!input || !flag) return;
+  var value = parseFloat(input.value);
+  var flagged = !(value === 1);
+  flag.textContent = flagged
+    ? '告示外の追加低減係数 ' + (isFinite(value) ? value.toFixed(2) : '（不正な値）') + ' を適用中です（1.00 以外。告示には規定のない低減です）。'
+    : '';
+  flag.hidden = !flagged;
+}
 
 /* ============================================================
    初期表示時：案件プリセット表示・既定寸法の反映・自動計算
@@ -3882,6 +4174,9 @@ window.addEventListener('DOMContentLoaded', function() {
   // Evidence status / Verified Case / reconciliation は入力に依存しないため
   // 初期化時に一度だけ描画する。
   renderProjectEvidencePanels();
+  // S3-B3B2-B4: 取り込みデータの概要（未読込）と、告示外の追加低減係数の表示
+  renderImportedNone();
+  renderCoeffNotice();
 
   runCalc();
 

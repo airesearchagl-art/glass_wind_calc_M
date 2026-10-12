@@ -127,7 +127,16 @@ const single = () => page.evaluate(() => {
     badgeAfter: badge ? getComputedStyle(badge, '::after').content : null,
     opacity: Number(getComputedStyle(area).opacity),
     judged: getSingleResultFreshness(),
-    result: area.innerText
+    // S3-B4: 計算根拠・候補一覧は閉じた <details id="result-details"> に入った。閉じた details の中は innerText に出ないので、
+    // 読むときだけ開いて結果欄の全文を読み、元の開閉に戻す（B4 前と同じ範囲の文を比べる。textContent に替えると隠れた文まで拾うので使わない）
+    result: (() => {
+      const d = document.getElementById('result-details');
+      const was = d ? d.open : false;
+      if (d) d.open = true;
+      const t = area.innerText;
+      if (d) d.open = was;
+      return t;
+    })()
   };
 });
 const isState = (s, state) => s.attr === state && s.judged === state &&

@@ -203,7 +203,9 @@ async function observe(page, opts) {
         $('inp-wind-zone').value = z; runCalc();
         const t = [...document.querySelectorAll('.sec-title')].find((e) => /参考比較/.test(e.textContent));
         let n = t ? t.nextElementSibling : null;
-        while (n && n.tagName !== 'TABLE') n = n.nextElementSibling;
+        // S3-B4: 表は狭い画面で表の中だけ横スクロールさせる <div class="table-wrap"> に入った（見出しの次の兄弟の中の表を読む）
+        while (n && n.tagName !== 'TABLE' && !(n.classList.contains('table-wrap') && n.querySelector(':scope > table'))) n = n.nextElementSibling;
+        if (n && n.tagName !== 'TABLE') n = n.querySelector(':scope > table');
         out.comparison[z] = n ? rowsOf(n)[0] : null;
       }
       $('inp-wind-compare').value = 'off';

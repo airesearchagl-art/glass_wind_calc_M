@@ -9,7 +9,7 @@
       "command": "node tools/browser-checks/browser-w4.mjs",
       "evidenceClass": "observational",
       "admissibility": "UNVERIFIED",
-      "target": "the Evidence Closure Matrix renders and protected facts read back from the loaded page",
+      "target": "the Evidence Closure Matrix renders and protected facts read back from the loaded page; in preset mode the case-verification summary is visible, the Evidence details (<details id=\"evidence-details\">) start closed and open in one action to the same matrix, the summary numbers equal the matrix header and a forced failure is shown in the summary (S3-B3B2-B4)",
       "oracle": "real Chromium",
       "sharedDependencies": [
         "none for the page: it is loaded over file:// and observed through a real Chromium; the protected-facts check (B-facts) reads the page's active ProjectContext and takes its expectation from outside the page — the runtime-default built-in under Node (project-config/registry.js getRuntimeDefaultBuiltInPresetId / getBuiltInPreset) and the hand-written evidenceStateExpected in this file"
@@ -217,7 +217,7 @@
       "command": "node tools/browser-checks/probe-w4.mjs",
       "evidenceClass": "observational",
       "admissibility": "UNVERIFIED",
-      "target": "DOM injection probes against the closure UI; no page errors",
+      "target": "DOM injection probes against the closure UI; no page errors; an evaluation with injected strings as status values fails closed (RF-29-01)",
       "oracle": "real Chromium",
       "sharedDependencies": [
         "Playwright absolute path (P2K-F06)"
@@ -291,7 +291,7 @@
       "positiveControl": "every single-case input of every mode marks the result as earlier and recalculating restores it; the Workspace goes from none to fresh to earlier (summary and list) and back; a current CSV is written with the WorkspaceCore column header",
       "negativeControl": "mutants B1-01 to B1-20 (snapshot comparison removed, the width not compared, notification wind conditions not compared, invalid input treated as current, a failed calculation leaving the previous result current, only the Workspace case count compared, diagnostics not compared, an added case leaving the old summary current, a stale CSV written, notification labelled as manual input, a mode switch leaving the old result current, the result-list banner removed, the preset-comparison toggle not compared, the old-CSV warning written to the operation status line, a new current CSV not clearing the warning, the output-field content not checked, the warning tied to the summary freshness instead of the CSV inputs, setView not re-judging the Workspace, a Workspace JSON export not clearing the warning, output-field edits not re-judged) each fail at least one check here or in tests/result-freshness-ui.test.js",
       "proves": "how index.html shows whether a single-case or Workspace result belongs to the current inputs, gates the result CSV and labels notification-mode pressures in a real browser for the head measured",
-      "doesNotProve": "anything about an unmeasured head; that any result is correct or verified (calculated is not verified); Project Pack freshness (measured by the Pack harnesses); the three-view navigation (measured by three-view-navigation); the responsive layout and Pack Review UI, which do not exist yet",
+      "doesNotProve": "anything about an unmeasured head; that any result is correct or verified (calculated is not verified); Project Pack freshness (measured by the Pack harnesses); the three-view navigation (measured by three-view-navigation); the single-case input order, case-verification summary and narrow-screen layout (measured by single-ux); the Pack Review UI, which does not exist yet",
       "instrumentFiles": [
         "tools/browser-checks/result-freshness.mjs",
         "tools/browser-checks/resolve-playwright.mjs",
@@ -313,9 +313,31 @@
       "positiveControl": "each tab shows its own view only, the inputs, results, Workspace and staged Pack survive single → batch → pack round trips, and the arrow / Home / End keys move the selection and focus together",
       "negativeControl": "mutants B2-01 to B2-14 (the Pack view also shown in the Workspace view, the Pack view also shown in the single-case view, the Pack tab not changing the panel, [hidden] overridden by CSS, aria-selected out of step with the shown panel, arrow keys inert, the Workspace freshness not re-judged on switching, the old-CSV warning cleared on switching, the Pack view changing the single-case result, switching unloading the Pack, the Pack view printed, an unknown view value showing several panels, the tabindex not moved with the selection, focus left in a hidden panel) each fail at least one check here or in tests/three-view-navigation.test.js",
       "proves": "that index.html shows one purpose-based view at a time with an accessible tab pattern, keeps every view's state across switches and keeps the Project Pack view out of the other views and out of print, in a real browser for the head measured",
-      "doesNotProve": "anything about an unmeasured head; the Pack Review UI (B3), Evidence collapsing or the input order (B4), the Workspace layout (B5) or a fully responsive page (the existing 390 px overflow of the single-case view is unchanged); the pre-existing print issues (the header, printing from the single-case view)",
+      "doesNotProve": "anything about an unmeasured head; the Pack Review UI (B3), the single-case input order, Evidence collapsing and the single-case 390 px layout (B4, measured by single-ux), the Workspace layout (B5) or a fully responsive Workspace / Pack view; the pre-existing print issues (the header, printing from the single-case view)",
       "instrumentFiles": [
         "tools/browser-checks/three-view-navigation.mjs",
+        "tools/browser-checks/resolve-playwright.mjs",
+        "tools/browser-checks/browser-outcome.mjs"
+      ],
+      "finding": null,
+      "reason": "no browser measurement exists for the current target head; a verifier must run it at theirs"
+    },
+    {
+      "id": "single-ux",
+      "command": "node tools/browser-checks/single-ux.mjs",
+      "evidenceClass": "observational",
+      "admissibility": "UNVERIFIED",
+      "target": "the single-case input and result presentation in index.html (S3-B3B2-B4): the inputs are ordered ① how the design pressure is decided → ② glass conditions → ③ the selected mode's wind-pressure inputs → ④ the coefficient outside the Notification → ⑤ calculate, with no required input inside a <details>; the selected mode's meaning is always shown and its longer explanation opens in one action; in preset mode a case-verification summary (Evidence status counts and Evidence Closure counts, written by the existing renderers from the same evaluation only after the evaluation has the shape the summary and details need and the details have been built completely (RF-29-01), and an explicit failure line, without exception text, otherwise) is always shown below the calculate button while the Evidence status, Verified Case, reconciliation and Closure areas sit in a details that starts closed; the result shows the verification state, the B1 freshness, OK / NG, the recommended glass, allowable and design pressure, the coefficient (flagged in text when not 1.00) and the out-of-scope exclusion count, and moves the calculation basis and candidate lists into a details opened in one action; at 1280×800 W / H, the calculate button and the result heading and conclusion are in the first viewport for preset and manual; at 390×844 the page does not scroll horizontally in any mode with details closed or open, tables scroll inside their own wrapper and no overflow:hidden clips text",
+      "oracle": "real Chromium",
+      "sharedDependencies": [
+        "the harness drives the page through its UI (mode select, input fields, calculate, details summaries by click and keyboard, Export / Import) and, for failure and authority checks only, replaces EvidenceClosure.evaluateClosure / renderEvidenceStatus inside the page and restores them; expected calculation values come from calc.js under Node, expected Closure counts from project-config/evidence-closure.js and registry.js under Node, fixed texts from literals in the harness; long strings are synthetic and injected into the page only for the layout checks; synthetic values only"
+      ],
+      "positiveControl": "every mode shows its own hint and required inputs, the Evidence details open in one click to 6 status rows and the full Closure matrix whose numbers equal the Node-side evaluation, the result details open to the calculation basis whose values equal calc.js under Node, and a coefficient of 0.90 is flagged in the input and the conclusion",
+      "negativeControl": "mutants B4-01 to B4-14 (the Evidence summary hidden, the Closure summary numbers fixed, an Evidence failure shown as normal, the Evidence details shown outside preset mode, the details opened without the real table, a required input moved into a closed details, the calculate button pushed out of the first viewport, the 390 px overflow restored, a stale result shown as current, the out-of-scope warning hidden, the coefficient flag hidden, the calculation basis removed from the details, the unverified state removed from the conclusion, the Evidence details open by default) and RF29-M01 to RF29-M08 (the shape check removed, the summary committed before the details are built, the catch leaving the previous summary, partial details left in place, the exception text echoed, invalid counts accepted, a missing Promotion Candidate read as none, a status failure also marking the Closure summary) each fail at least one check here or in tests/single-ux.test.js",
+      "proves": "how index.html orders the single-case inputs, keeps the case-verification summary and the result's trust information visible while collapsing the details, and lays out the single-case view at 1280×800 and 390×844, in a real browser for the head measured",
+      "doesNotProve": "anything about an unmeasured head; that any result is correct or verified (calculated is not verified); the Workspace and Project Pack views (B5 / B3); other viewport sizes or fonts than the ones measured; the pre-existing print issues",
+      "instrumentFiles": [
+        "tools/browser-checks/single-ux.mjs",
         "tools/browser-checks/resolve-playwright.mjs",
         "tools/browser-checks/browser-outcome.mjs"
       ],
@@ -512,6 +534,11 @@
       "id": "three-view-one-panel-at-a-time",
       "statement": "exactly one of the single-case, Workspace and Project Pack views is shown at any time (an unknown view value changes nothing); the selected tab, aria-selected, tabindex and the shown panel agree, also under ArrowLeft / ArrowRight / Home / End; switching keeps the single-case inputs, result and freshness, the Workspace, its freshness, the stale-CSV refusal and the old-CSV warning, and the staged unreviewed Pack with its results, without recalculating, importing, exporting or storing anything; the Pack is shown only in its own view and never printed; the Review print gate is unchanged; no storage, network, URL or console output",
       "instrument": "three-view-navigation"
+    },
+    {
+      "id": "single-case-trust-visible-details-collapsed",
+      "statement": "in the single-case view the required inputs of the selected mode are never inside a <details>; the case-verification summary is visible in preset mode only, takes its numbers from the same evaluation as the Evidence details (a replaced evaluation changes both), is shown as normal only after that evaluation has the required shape and the details have been built completely, and otherwise states a failure (without exception text) instead of a count, 'none' or 'verified'; the verification state, freshness, OK / NG, recommended glass, allowable / design pressure, coefficient (flagged when not 1.00) and out-of-scope exclusion count stay visible while the calculation basis and candidate lists are collapsed; the page does not scroll horizontally at 390 px; no storage, network, URL or console output",
+      "instrument": "single-ux"
     },
     {
       "id": "matrix-renders",
