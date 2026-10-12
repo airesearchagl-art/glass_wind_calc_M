@@ -1,7 +1,8 @@
 # S3-B3B2-B3 Pack Review の画面 — Before / After（合成のスクリーンショット）
 
 S3-B3B2-B3（Project Pack 画面への Pack Review の接続）のレビュー用の画像です。Before は main `5c5a352` の Project Pack 画面
-（Pack Review の欄はまだ無い）、After はこの branch の `b3e1745` を、Chromium で `file://` から開いて撮りました。
+（Pack Review の欄はまだ無い）、After はこの branch の RF-30-01 の commit `e151693`（信頼の文言の本文を 12px・
+--text2、集計の見出しを --text2 にした後）を、Chromium で `file://` から開いて撮りました。Before の画像は main のままなので撮り直していません。
 
 - 値はすべて合成です（`tests/fixtures/project-pack/` の合成 fixture と `tests/support/synthetic-pack.js` の合成 Pack）。実案件のデータ・資料は含みません。
 - 画面の内容は撮った時点の index.html のものです。計算の値・Evidence / Closure の判定の根拠ではありません（計算済み ≠ 検証済み。Review は正式な案件承認の資料ではありません）。
