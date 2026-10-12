@@ -912,7 +912,7 @@ test('P2L-S3B3B2A1-R20: 別の module instance の review は通らず、依存�
   assert.equal(/global\.ProjectPack(Batch|Execution)/.test(REVIEW_CODE), false);
 });
 
-test('P2L-S3B3B2A1-R21: Workspace・Review Package・計算 module・DOM に触れない（index.html にもまだ載せない）', () => {
+test('P2L-S3B3B2A1-R21: Workspace・Review Package・計算 module・DOM に触れない（index.html は依存の後に 1 度だけ読み込む）', () => {
   const touched = [];
   const spy = (name) => new Proxy(function () {}, {
     get(_t, k) { touched.push(name + '.' + String(k)); return spy(name + '.' + String(k)); },
@@ -944,8 +944,17 @@ test('P2L-S3B3B2A1-R21: Workspace・Review Package・計算 module・DOM に触�
   const order = ['B.assertBatchOrigin(', 'readOptions(', 'projectRow(', 'summarize(', 'groupByRecommended(', 'compareRows(',
     'reExecute(', 'assertOverlap(', 'projectDetail(', 'assertPackReviewShape(', 'deepFreeze(review)', 'issued.add(review)'];
   order.reduce((prev, s) => { const i = at(s); assert.equal(i > prev, true, s + ' の順'); return i; }, -1);
-  // A1 は pure contract だけ。index.html・Workspace・Review Package の契約は変わらない
-  assert.equal(read('index.html').includes('project-pack-review'), false);
+  // A1 は pure contract だけ。Workspace・Review Package の契約は変わらない。
+  // S3-B3B2-B3 で移行: 旧「index.html は project-pack-review を読み込まない」→ 新「index.html は
+  // project-pack-review.js を 1 度だけ、依存（execution → batch）と report の後に読み込む」。理由: B3 は Project Pack
+  // 画面へ Review を接続する phase（module は変えない）。代わりの保証: module 自身が DOM・storage・Workspace に
+  // 触れないことは上の spy と token の確認がそのまま確かめ、UI 側の生成経路は tests/project-pack-review-ui.test.js が確かめる。
+  const html = read('index.html');
+  const tag = (src) => html.indexOf('<script src="project-config/' + src + '"></script>');
+  assert.equal(html.split('project-pack-review.js').length - 1, 1, 'review の script は 1 つだけ');
+  assert.equal(tag('project-pack-execution.js') !== -1 && tag('project-pack-execution.js') < tag('project-pack-batch.js') &&
+    tag('project-pack-batch.js') < tag('project-pack-report.js') && tag('project-pack-report.js') < tag('project-pack-review.js'),
+  true, 'execution → batch → report → review の順');
   assert.equal(WorkspaceCore.MAX_CASES, 1000);
   assert.deepEqual([...ProjectInput.SOURCE_KINDS], ['registered_preset', 'manual', 'notification_calculation', 'imported_unverified']);
   assert.equal(ProjectInput.SCHEMA_VERSION, 2);
