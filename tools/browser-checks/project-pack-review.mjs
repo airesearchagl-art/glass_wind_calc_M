@@ -154,11 +154,15 @@ const PROBE = () => {
   try { wrap(Document.prototype, 'execCommand', 'clipboard'); } catch (e) { /* none */ }
 };
 
-/** ProjectPackReview の global への代入を包み、buildPackReview の呼び出しを数える（window.__failReview なら失敗させる）。 */
+/**
+ * ProjectPackReview の global への代入を包み、buildPackReview の呼び出しを数える（window.__failReview なら失敗させる。
+ * window.__dropFirstDetail なら、選んだ詳細の先頭を外して module を呼ぶ = 選択と違う詳細を持つ発行物が返る）。
+ */
 const COUNT_REVIEW = () => {
   let wrapped;
   window.__reviewBuilds = 0;
   window.__failReview = false;
+  window.__dropFirstDetail = false;
   Object.defineProperty(window, 'ProjectPackReview', { configurable: true,
     get() { return wrapped; },
     set(real) {
@@ -166,7 +170,8 @@ const COUNT_REVIEW = () => {
         buildPackReview: function (b, c, o) {
           window.__reviewBuilds++;
           if (window.__failReview) throw new Error('SECRET-REVIEW-ERROR /private/path <img src=x>');
-          return real.buildPackReview.call(real, b, c, o);
+          const opts = window.__dropFirstDetail ? Object.assign({}, o, { detailCaseIds: o.detailCaseIds.slice(1) }) : o;
+          return real.buildPackReview.call(real, b, c, opts);
         }
       }));
     } });
@@ -356,7 +361,11 @@ const pageMs = Date.now() - tPage;
 const s6 = await reviewState(page);
 check('R32-paging', s6.nav === '101–150 / 2000 ケース（3 / 40 ページ）' && same(s6.rows, BIG_O.slice(100, 150).map(rowText)) &&
   s6.builds === 1, s6.nav);
-for (let i = 0; i < 37; i++) await page.click('#pack-review-rows button:nth-of-type(2)');
+// 「次のページ」が押せる間だけ押す（押せなくなったら止める。押せないボタンを押して待ち続けない）
+for (let i = 0; i < 45; i++) {
+  if (await page.evaluate(() => { const b = document.querySelector('#pack-review-rows button:nth-of-type(2)'); return !b || b.disabled; })) break;
+  await page.click('#pack-review-rows button:nth-of-type(2)');
+}
 await page.waitForTimeout(20);
 const s7 = await reviewState(page);
 const nextDisabled = await page.evaluate(() => document.querySelector('#pack-review-rows button:nth-of-type(2)').disabled);
@@ -460,6 +469,13 @@ const s15 = await reviewState(page);
     Math.max(...NOTIF_O.map((x) => x.designPressure)).toFixed(1) && same(s15.rows, NOTIF_O.map(rowText)), '3 ケースの一覧と集計');
   const detailsOpen = await page.evaluate(() => [document.getElementById('pack-review-details').open, document.getElementById('pack-review-comparison').open]);
   check('R33-details-collapsed', same(detailsOpen, [false, false]), '詳細・比較は折りたたみ（開いて読む）');
+  // module が選択と違う詳細を持つ review を返したら（発行物でも）表示しない
+  await page.evaluate(() => { window.__dropFirstDetail = true; });
+  await generate(page);
+  const mismatch = await reviewState(page);
+  await page.evaluate(() => { window.__dropFirstDetail = false; });
+  check('R13-detail-mismatch-refused', gone(mismatch) && mismatch.status === FAILURE_TEXT && mismatch.statusError, mismatch.status);
+  await generate(page);
 }
 
 /* ---------- R16–R18: 比較（notification fixture） ---------- */
@@ -604,6 +620,12 @@ const b5 = (await reviewState(page)).builds;
 await generate(page);
 const s25 = await reviewState(page);
 check('R05-copy-rejected', gone(s25) && s25.status === FAILURE_TEXT && s25.statusError && s25.builds === b5, '一括の結果の JSON 複製では作らない');
+// 作成時の試行と違う（読込の試行が進んだ）結果からは作らない（発行物で、同じ context の結果でも）
+await runBatch(page);
+await page.evaluate(() => { projectPackAttempt += 1; });
+await generate(page);
+const s26 = await reviewState(page);
+check('R05-attempt-changed-rejected', gone(s26) && s26.status === FAILURE_TEXT && s26.builds === b5, '読込の試行が変わった結果からは作らない');
 
 /* ---------- R30・R28: 保存・通信・URL・console・active ---------- */
 
