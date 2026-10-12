@@ -125,6 +125,11 @@ test('P2L-S3B3B2B3-U01 (R01・R28): script は execution → batch → report �
   REVIEW_VIEW_IDS.forEach((id) => assert.equal(HTML.split('id="' + id + '"').length - 1, 0, id + ' を markup に置いた'));
   const sectionIds = [...reviewSection().matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
   assert.deepEqual(sectionIds.slice().sort(), REVIEW_IDS.slice().sort());
+  // 全体の tr:first-child の強調（単一ケースの候補表の推奨行）を Review の表には使わない（先頭のケース・組を強調しない）
+  assert.match(STATIC, /\.pack-review-table tr:first-child \{ background: none; \}/);
+  assert.match(STATIC, /\.pack-review-table tr:first-child td \{ color: var\(--text2\); font-weight: 400; \}/);
+  // 結果の grid は列を minmax(0, 1fr) にする（中の表の幅でページを広げない）
+  assert.match(STATIC, /\.pack-review-result \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
 });
 
 test('P2L-S3B3B2B3-U02 (R01): 生成は明示操作だけ（読込・preview・ケース選択・計算の完了・ページ切替・選択の変更では作らない）', () => {

@@ -730,7 +730,14 @@ async function layout(p, width) {
         'btn-pack-review', 'btn-pack-review-clear'].every((id) => inside($(id))),
       tablesScroll: scrollers.length > 0 && scrollers.every((s) => r(s).right <= w + 0.5 && getComputedStyle(s).overflowX === 'auto'),
       rowsScrolls: (() => { const s = document.querySelector('#pack-review-rows .pack-batch-scroll'); return !!s && s.scrollWidth > s.clientWidth; })(),
-      cardRight: r($('pack-review-card')).right
+      cardRight: r($('pack-review-card')).right,
+      // 表の先頭行を他の行と同じ見た目にする（先頭のケース・組を「支配」のように強調しない）
+      firstRowPlain: [...document.querySelectorAll('#pack-review-result tbody')].every((tb) => {
+        const rows = [...tb.children];
+        if (rows.length < 2) return true;
+        const look = (tr) => { const c = getComputedStyle(tr.children[0]); return [c.color, c.fontWeight, getComputedStyle(tr).backgroundColor].join('|'); };
+        return look(rows[0]) === look(rows[1]);
+      })
     };
   }, width);
 }
@@ -747,8 +754,8 @@ for (const [w, h] of [[1280, 800], [390, 844]]) {
   const L = await layout(p, w);
   if (w === 1280) {
     check('R33-1280-layout', L.docOverflow <= 0 && L.trustVisible && L.controlsInside && L.gen.bottom - L.trust.top < h &&
-      L.summary.top < L.groups.top && L.groups.top < L.rows.top && L.tablesScroll,
-    `overflow=${L.docOverflow} trust→button=${Math.round(L.gen.bottom - L.trust.top)}px（ボタンは信頼の文言と同じ画面）`);
+      L.summary.top < L.groups.top && L.groups.top < L.rows.top && L.tablesScroll && L.firstRowPlain,
+    `overflow=${L.docOverflow} trust→button=${Math.round(L.gen.bottom - L.trust.top)}px（ボタンは信頼の文言と同じ画面）・表の先頭行を強調しない=${L.firstRowPlain}`);
   } else {
     check('R33-390-layout', L.docOverflow <= 0 && L.trustVisible && L.controlsInside && L.tablesScroll && L.rowsScrolls && L.cardRight <= w,
       `overflow=${L.docOverflow} 一覧は欄の中で横スクロール・信頼の文言は折りたたまない`);
