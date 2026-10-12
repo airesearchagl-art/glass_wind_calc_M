@@ -480,7 +480,8 @@
 
   /* ===== Project Pack Review（Phase 2L-B2 / S3-B3B2-B3）: 未レビューの全ケース計算の結果を確かめる欄 ===== */
   .pack-review { margin-top: 16px; }
-  .pack-review-trust { margin: 0 0 10px; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+  /* RF-30-01: 後に定義される .notice（11px・--text3）に上書きされないよう、.notice と組み合わせて指定する（この注意文だけ） */
+  .notice.pack-review-trust { margin: 0 0 10px; font-size: 12px; color: var(--text2); line-height: 1.8; overflow-wrap: anywhere; }
   .pack-review-trust strong { color: var(--warn); }
   .pack-review-options { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin: 8px 0; }
   .pack-review-options[hidden] { display: none; }
@@ -498,7 +499,7 @@
   .pack-review-result h3 { font-size: 12px; margin: 0 0 4px; color: var(--text2); }
   .pack-review-stats { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
   .pack-review-stat { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; min-width: 0; }
-  .pack-review-stat .k { display: block; font-size: 11px; color: var(--text3); }
+  .pack-review-stat .k { display: block; font-size: 11px; color: var(--text2); }
   .pack-review-stat .v { display: block; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .pack-review-stat .ids { display: block; font-size: 11px; color: var(--text2); overflow-wrap: anywhere; }
   .pack-review-stat .ids .disclosure { margin: 0; font-size: 11px; }

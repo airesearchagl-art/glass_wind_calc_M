@@ -1568,7 +1568,8 @@ module・計算式・batch・report の契約は変えていません。結果�
   - 2 ケースの比較: 比較 A・B に異なる 2 ケースを選んだときだけ。差は **B − A** で、`review.comparison` から読みます。片方に値が無いときは
     「—」で、0 にしません。どちらが案件に適合するかの判定はしません。比較しないときは `comparisonCaseIds` を渡しません。
 - **信頼の文言**（常に表示・折りたたまない）: `pack_unreviewed` / `calculated_not_verified`、計算済み ≠ 検証済み、OK は計算上の候補判定、
-  案件原典とメーカー検討で確認すること、この Review は正式な案件承認の資料ではないこと。
+  案件原典とメーカー検討で確認すること、この Review は正式な案件承認の資料ではないこと。本文は 12px・描画上のコントラスト 4.5:1 以上で、
+  集計の見出し（最大設計風圧・最小余裕比など）も 4.5:1 以上です（RF-30-01。他の注意文の見た目は変えていません）。
 - active context・ProjectInput・Workspace・Evidence Ledger・Closure・Promotion へ流しません。保存・送信・URL・console への書き出しは
   しません。表示は `textContent` / `createElement` だけで、例外の文面・出典の申告（sourceClaim など）は表示しません。
 - **画面の幅**: 1280×800 では信頼の文言と生成のボタンが同じ画面に入り、集計 → グループ → 一覧の順で、詳細と比較は開いて読みます。

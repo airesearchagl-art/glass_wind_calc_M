@@ -192,6 +192,38 @@ async function newPage(viewport, initScripts) {
 
 /* ---------- helpers ---------- */
 
+/**
+ * RF-30-01: 文字の読みやすさ（page の中で読む）。描画上の背景は、要素から祖先へ背景色を集め、canvas（白）から順に
+ * alpha で重ねて求める（.notice の半透明の背景も含む）。コントラストは WCAG 2.x の相対輝度の比。
+ * 返すもの: 信頼の文言の本文・強調部分、集計の見出し（.k）、Review の欄の外の .notice（全体の .notice を変えていないか）。
+ */
+const READ_TEXT = () => {
+  const parse = (v) => { const p = v.match(/rgba?\(([^)]+)\)/)[1].split(',').map(parseFloat); return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 }; };
+  const over = (t, b) => ({ r: t.r * t.a + b.r * (1 - t.a), g: t.g * t.a + b.g * (1 - t.a), b: t.b * t.a + b.b * (1 - t.a), a: 1 });
+  const background = (el) => {
+    const layers = [];
+    for (let e = el; e; e = e.parentElement) layers.push(parse(getComputedStyle(e).backgroundColor));
+    return layers.reverse().reduce((under, layer) => over(layer, under), { r: 255, g: 255, b: 255, a: 1 });
+  };
+  const lum = (c) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b); };
+  const read = (el) => {
+    if (!el) return { ratio: 0, fontSize: null };
+    const bg = background(el);
+    const fg = over(parse(getComputedStyle(el).color), bg);
+    const a = lum(fg), b = lum(bg);
+    return { ratio: Math.round(((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)) * 100) / 100, fontSize: getComputedStyle(el).fontSize };
+  };
+  const trust = document.getElementById('pack-review-trust');
+  const outside = [...document.querySelectorAll('.notice')].find((e) => !e.closest('#pack-review-section'));
+  return {
+    body: read(trust), strong: read(trust && trust.querySelector('strong')),
+    labels: [...document.querySelectorAll('#pack-review-summary .pack-review-stat .k')].map(read),
+    otherNotice: outside ? { fontSize: getComputedStyle(outside).fontSize, color: getComputedStyle(outside).color } : null
+  };
+};
+const MIN_CONTRAST = 4.5;
+const readable = (t) => t.ratio >= MIN_CONTRAST;
+
 async function showView(p, view) {
   if (await p.evaluate((v) => document.getElementById('view-' + v).hidden, view)) await p.click('#view-tab-' + view);
 }
@@ -308,6 +340,14 @@ const ACTIVE0 = await activeSnapshot(page);
 const s0 = await reviewState(page);
 check('R02-startup', s0.gen && s0.clear && s0.optionsHidden && gone(s0) && s0.status === NOT_READY_TEXT, s0.status);
 check('R27-trust-startup', s0.trustVisible && TRUST_TEXTS.every((t) => s0.trustText.replace(/\s+/g, ' ').includes(t)), '起動時から信頼の文言が見える');
+{
+  const t0 = await page.evaluate(READ_TEXT);
+  check('R27-trust-readable-startup', readable(t0.body) && t0.body.fontSize === '12px' && readable(t0.strong),
+    `本文 ${t0.body.ratio}:1 ${t0.body.fontSize}・強調 ${t0.strong.ratio}:1（${MIN_CONTRAST}:1 以上・本文 12px）`);
+  // 全体の .notice（他の注意文）は変えていない（11px・--text3 のまま）
+  check('R27-global-notice-unchanged', !!t0.otherNotice && t0.otherNotice.fontSize === '11px' && t0.otherNotice.color === 'rgb(90, 96, 128)',
+    JSON.stringify(t0.otherNotice));
+}
 
 const NOTIF = fixture('notification1458');
 const NOTIF_O = oracleAll(NOTIF);
@@ -752,6 +792,11 @@ for (const [w, h] of [[1280, 800], [390, 844]]) {
   await p.locator('#pack-review-section').scrollIntoViewIfNeeded();
   await p.evaluate(() => document.getElementById('pack-review-title').scrollIntoView());
   const L = await layout(p, w);
+  const T = await p.evaluate(READ_TEXT);
+  check('R27-' + w + '-trust-readable', readable(T.body) && T.body.fontSize === '12px' && readable(T.strong),
+    `本文 ${T.body.ratio}:1 ${T.body.fontSize}・強調 ${T.strong.ratio}:1`);
+  check('R33-' + w + '-summary-labels-readable', T.labels.length === 6 && T.labels.every(readable),
+    `集計の見出し ${T.labels.map((x) => x.ratio + ':1').join(' / ')}（最大設計風圧・最小余裕比を含む 6 項目）`);
   if (w === 1280) {
     check('R33-1280-layout', L.docOverflow <= 0 && L.trustVisible && L.controlsInside && L.gen.bottom - L.trust.top < h &&
       L.summary.top < L.groups.top && L.groups.top < L.rows.top && L.tablesScroll && L.firstRowPlain,

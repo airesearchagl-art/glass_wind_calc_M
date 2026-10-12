@@ -205,6 +205,28 @@ test('P2L-S3B3B2B3-U05 (R27): 信頼の文言は常に見える場所にあり�
   TRUST_TEXTS.forEach((t) => assert.equal(trust.replace(/\s+/g, ' ').includes(t), true, t));
   assert.equal(section.indexOf('id="pack-review-trust"') < section.indexOf('id="pack-review-options"'), true, '信頼の文言が操作の後にある');
   assert.equal(/<details[^>]*>[\s\S]*id="pack-review-trust"/.test(section), false, '信頼の文言を折りたたみの中に入れた');
+  // RF-30-01: 信頼の文言の本文は 12px・--text2（後に定義される .notice の 11px・--text3 に上書きされない selector）。
+  // 集計の見出しも --text2。全体の .notice は変えない。実際の描画上のコントラスト（4.5:1 以上）は browser の R27 / R33 が測る
+  const rule = (sel) => {
+    const m = STATIC.match(new RegExp('\\n  ' + sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ' \\{([^}]*)\\}'));
+    assert.ok(m, sel + ' の CSS が無い');
+    return m[1];
+  };
+  assert.match(rule('.notice.pack-review-trust'), /font-size: 12px;/);
+  assert.match(rule('.notice.pack-review-trust'), /color: var\(--text2\);/);
+  assert.match(rule('.pack-review-stat .k'), /color: var\(--text2\);/);
+  assert.match(rule('.notice'), /font-size: 11px;[\s\S]*color: var\(--text3\);/, '全体の .notice を変えた');
+  assert.equal(/\n  \.pack-review-trust \{/.test(STATIC), false, '.notice に上書きされる selector が残っている');
+  // 静的な目安: --text2 を、.notice の半透明の背景を card（--surface）に重ねた色の上に置いたコントラスト
+  const vars = Object.fromEntries([...STATIC.matchAll(/--(\w+): (#[0-9a-f]{6});/g)].map((m) => [m[1], m[2]]));
+  const rgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const lum = (c) => c.map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); })
+    .reduce((acc, v, i) => acc + v * [0.2126, 0.7152, 0.0722][i], 0);
+  const noticeBg = rule('.notice').match(/background: rgba\((\d+),(\d+),(\d+),([\d.]+)\)/).slice(1).map(Number);
+  const bg = rgb(vars.surface).map((v, i) => noticeBg[i] * noticeBg[3] + v * (1 - noticeBg[3]));
+  const contrast = (fg, back) => { const a = lum(fg), b = lum(back); return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05); };
+  assert.equal(contrast(rgb(vars.text2), bg) >= 4.5, true, '信頼の文言の本文の色が 4.5:1 に届かない');
+  assert.equal(contrast(rgb(vars.text2), rgb(vars.surface)) >= 4.5, true, '集計の見出しの色が 4.5:1 に届かない');
   const literals = (reviewCode().match(/'(?:[^'\\]|\\.)*'/g) || []).join('\n');
   let text = section + '\n' + literals;
   NEGATIONS.forEach((n) => { text = text.split(n).join(''); });
