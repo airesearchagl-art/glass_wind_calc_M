@@ -11,7 +11,9 @@
  *   - JSON の値は、発行された review そのもの（同じ位置を並行に辿り、数値は Object.is、文字列は === で比べる）。
  *     書式は JSON.stringify(外枠, null, 2) と比べる（-0 を含まない review のとき）。値の保持と決定性は別の test
  *   - Markdown の表は、この test の中の小さな parser でセルに分け、escape を戻した値を review の値と比べる
- *     （Markdown の escape は非可逆なので、元の値への完全な逆変換は求めない。比べるのは可視化した形）
+ *     （Markdown の escape は非可逆なので、元の値への完全な逆変換は求めない。比べるのは可視化した形）。数値の表示の
+ *     桁は画面（index.html の packReviewPressure / packReviewRatio / packReviewMargin / packReviewDifference）の契約:
+ *     風圧・余裕差は toFixed(1)、余裕比は toFixed(3)、比較の差は寸法 0 桁・評価高さ 3 桁で、正なら +
  *   - Markdown の構造の安全は、無害な文字列の review と敵対的な文字列の review の差分で確かめる（行の数と種類・
  *     表のセルの数・escape されていない ASCII 記号の並びが同じ）。GitHub / Obsidian での実際の描画はこの test では
  *     確かめない（PR の証跡と Human verification）
@@ -75,6 +77,17 @@ const MODE_FIELDS = {
 };
 
 const MAX = 8 * 1024 * 1024;
+/** 固定の注意 4 件（G0 の notices。順番も文面も固定。module からは取らない）。 */
+const NOTICES = Object.freeze([
+  '未レビュー：この出力は、未レビュー（pack_unreviewed）の Project Pack から計算した結果です。',
+  '計算済み ≠ 検証済み：値は計算したもので、検証されたものではありません（calculated_not_verified）。',
+  'OK は計算上の候補判定です。Evidence の確認・安全性の判定・承認ではありません。',
+  '正式な案件承認の資料ではありません。値は案件の出典資料・メーカー資料と照合してください。'
+]);
+const ENVELOPE_KEYS = ['exportType', 'exportSchemaVersion', 'sourceKind', 'trust', 'interpretation', 'notices', 'review'];
+const ROUNDING_NOTE = '数値の表示：風圧（設計風圧・正圧・負圧・許容風圧）と余裕差は小数 1 桁、余裕比は小数 3 桁に丸めて表示して' +
+  'います（画面と同じ。寸法・評価高さ・面積・係数・件数は review の値のまま）。比較の差も同じ桁で、寸法の差は整数、評価高さの' +
+  '差は小数 3 桁です。丸めは表示だけで、計算・照合・差は丸めない値で行っています。全桁の値は JSON 出力にあります。';
 const MSG = Object.freeze({
   origin: 'ProjectPackReviewExport: review: is not an issued Pack review of the given batch result and context',
   mdCap: (n) => 'ProjectPackReviewExport: markdown: output exceeds ' + n + ' bytes (not truncated)',
@@ -123,13 +136,21 @@ function stubExport() {
 const DASH = '—';
 const TOKEN_RE = /⟨U\+[0-9A-F]{4,6}⟩/g;
 const num = (v) => (Object.is(v, -0) ? '-0' : String(v));
-const orDash = (v, extra) => (v === null ? DASH + (extra || '') : num(v));
+// 表示の桁（画面の契約）。丸めは review の値をそのまま toFixed するだけ
+const p1 = (v) => v.toFixed(1);
+const r3 = (v) => v.toFixed(3);
+const pOrDash = (v, extra) => (v === null ? DASH + (extra || '') : p1(v));
+const rOrDash = (v, extra) => (v === null ? DASH + (extra || '') : r3(v));
+const MODE_PRESSURE_KIND = { evaluationHeightM: 'height', positivePressure: 'pressure', negativePressure: 'pressure',
+  negativePressureMagnitude: 'pressure' };
+const modeValue = (k, v) => (MODE_PRESSURE_KIND[k] === 'pressure' ? p1(v) : num(v));
+const modeDigits = (k) => (MODE_PRESSURE_KIND[k] === 'pressure' ? 1 : 3);
 const place = (r, k) => (hasOwn(r, k) ? r[k] : DASH + '（宣言なし）');
-const signed = (v) => (v === null ? DASH + '（片方に値なし）' : v > 0 ? '+' + num(v) : num(v));
+const signed = (v, digits) => (v === null ? DASH + '（片方に値なし）' : (v > 0 ? '+' : '') + v.toFixed(digits));
 const same = (v) => (v === null ? DASH + '（片方に値なし）' : v ? '一致' : '不一致');
 const idList = (list) => (list.length === 0 ? DASH : list.join(', '));
 const bestLabel = (best) => (best === null ? DASH + '（推奨候補なし）' : best.label);
-const bestP = (best) => (best === null ? DASH : num(best.P));
+const bestP = (best) => (best === null ? DASH : p1(best.P));
 
 /** 表の 1 行をセルに分ける（\ の付いた文字はセルの区切りにしない）。セルの前後の 1 文字の空白だけを外す。 */
 function cellsOf(line) {
@@ -255,10 +276,11 @@ const visualized = (s) => Array.from(s).map((ch) => {
 ============================================================ */
 
 test('P2L-S3B3B2C1A-X01: export の API は toMarkdown / serializeJson と定数だけ（取り込み・逆変換の関数は無い）', () => {
-  assert.deepEqual(Object.keys(Export), ['EXPORT_TYPE', 'EXPORT_VERSION', 'SOURCE_KIND', 'TRUST', 'INTERPRETATION',
+  assert.deepEqual(Object.keys(Export), ['EXPORT_TYPE', 'EXPORT_SCHEMA_VERSION', 'SOURCE_KIND', 'TRUST', 'INTERPRETATION',
     'MAX_OUTPUT_BYTES', 'toMarkdown', 'serializeJson']);
   assert.equal(Export.EXPORT_TYPE, 'glass_wind_pack_review_export');
-  assert.equal(Export.EXPORT_VERSION, 1);
+  assert.equal(Export.EXPORT_SCHEMA_VERSION, 1);
+  assert.equal(Export.EXPORT_VERSION, undefined, 'G0 の名前は exportSchemaVersion');
   assert.equal(Export.SOURCE_KIND, 'project_pack_unreviewed');
   assert.equal(Export.TRUST, 'pack_unreviewed');
   assert.equal(Export.INTERPRETATION, 'calculated_not_verified');
@@ -425,9 +447,10 @@ test('P2L-S3B3B2C1A-X07: JSON は version 付きの外枠に review をそのま
     const r = Review.buildPackReview(b, c, fullOptions(b));
     const json = Export.serializeJson(r, b, c);
     const parsed = JSON.parse(json);
-    assert.deepEqual(Object.keys(parsed), ['exportType', 'exportVersion', 'sourceKind', 'trust', 'interpretation', 'review']);
+    assert.deepEqual(Object.keys(parsed), ENVELOPE_KEYS);
     assert.equal(parsed.exportType, 'glass_wind_pack_review_export');
-    assert.equal(parsed.exportVersion, 1);
+    assert.equal(parsed.exportSchemaVersion, 1);
+    assert.deepEqual(parsed.notices, NOTICES);
     assert.equal(parsed.sourceKind, 'project_pack_unreviewed');
     assert.equal(parsed.trust, 'pack_unreviewed');
     assert.equal(parsed.interpretation, 'calculated_not_verified');
@@ -438,8 +461,8 @@ test('P2L-S3B3B2C1A-X07: JSON は version 付きの外枠に review をそのま
     assert.equal(parsed.review.selectedDetails.length, Math.min(50, b.totalCases));
     assert.notEqual(parsed.review.comparison, null);
     // 書式は JSON.stringify(外枠, null, 2) と同じ（末尾に改行 1 つ）
-    const envelope = { exportType: 'glass_wind_pack_review_export', exportVersion: 1, sourceKind: 'project_pack_unreviewed',
-      trust: 'pack_unreviewed', interpretation: 'calculated_not_verified', review: r };
+    const envelope = { exportType: 'glass_wind_pack_review_export', exportSchemaVersion: 1, sourceKind: 'project_pack_unreviewed',
+      trust: 'pack_unreviewed', interpretation: 'calculated_not_verified', notices: NOTICES, review: r };
     assert.equal(json, JSON.stringify(envelope, null, 2) + '\n');
   }
 });
@@ -525,10 +548,10 @@ test('P2L-S3B3B2C1A-X09: JSON は決定的（同じ review・同じ入力から�
 
 function expectedRowCells(review, r) {
   return [r.caseId, r.paneId, place(r, 'floor'), place(r, 'zone'), r.glassType, num(r.widthMm), num(r.heightMm),
-    num(r.designPressure), r.pressureSource]
-    .concat(MODE_FIELDS[review.pressureMode].map((k) => num(r[k])))
+    p1(r.designPressure), r.pressureSource]
+    .concat(MODE_FIELDS[review.pressureMode].map((k) => modeValue(k, r[k])))
     .concat([bestLabel(r.bestCandidate), bestP(r.bestCandidate), num(r.okCount), num(r.ngCount), num(r.outOfScopeCount),
-      orDash(r.marginRatio), orDash(r.marginPressure)]);
+      rOrDash(r.marginRatio), pOrDash(r.marginPressure)]);
 }
 
 /** Markdown の内容を review の値と照合する（全ケース・全グループ・詳細・比較・trust）。 */
@@ -538,12 +561,18 @@ function assertMarkdownMatches(md, r) {
   const lines = md.split('\n');
   assert.equal(lines[0], '# Pack Review（未レビュー）');
   assert.equal(lines[2], '> **未レビュー**（`pack_unreviewed`）・**計算済み ≠ 検証済み**（`calculated_not_verified`）');
+  assert.equal(lines[3], '>');
+  NOTICES.forEach((notice, i) => assert.equal(lines[4 + i], '> - ' + visualized(notice), '固定の注意 ' + i));
+  assert.equal(lines[8], '> - 余裕比・余裕差は確認用の指標で、安全性の判定・承認ではありません。');
+  assert.equal(lines[9], '> - この文書は Project Pack・入力 package・Workspace の入力として読み込むものではありません。');
+  assert.equal(lines[10], '');
+  assert.equal(lines[11], ROUNDING_NOTE, '丸めの注記');
   assert.equal(lines[lines.length - 2], '> **未レビュー**（`pack_unreviewed`）・**計算済み ≠ 検証済み**（`calculated_not_verified`）。' +
     '正式な案件承認の資料ではありません。');
   assert.equal(lines[lines.length - 1], '', '末尾は改行 1 つ');
   // 出力の情報
   assert.deepEqual(tableUnder(md, '## 出力の情報').rows, [
-    ['出力形式', '`glass_wind_pack_review_export`（version 1）'], ['review', 'glass_wind_pack_review（schemaVersion 1）'],
+    ['出力形式', '`glass_wind_pack_review_export`（exportSchemaVersion 1）'], ['review', 'glass_wind_pack_review（schemaVersion 1）'],
     ['sourceKind', '`project_pack_unreviewed`'], ['trust', '`pack_unreviewed`'], ['interpretation', '`calculated_not_verified`'],
     ['公開表示名', r.publicLabel], ['pressureModel.mode', r.pressureMode],
     ['単位', '長さ ' + u.length + ' ／ 高さ ' + u.height + ' ／ 風圧 ' + u.pressure + ' ／ 面積 ' + u.area],
@@ -556,8 +585,8 @@ function assertMarkdownMatches(md, r) {
     ['推奨候補あり', String(s.withOkCandidateCount)], ['推奨候補なし', String(s.withoutOkCandidateCount)],
     ['適用範囲外の候補を含むケース', String(s.outOfScopePresentCount)]]);
   const metrics = tableUnder(md, '## 集計', 1).rows;
-  [['最大設計風圧（' + u.pressure + '）', orDash(s.maxDesignPressure), String(s.maxDesignPressureCaseIds.length), idList(s.maxDesignPressureCaseIds)],
-    ['最小余裕比（推奨候補の許容風圧 ÷ 設計風圧）', orDash(s.minMarginRatio, '（推奨候補のあるケースなし）'),
+  [['最大設計風圧（' + u.pressure + '）', pOrDash(s.maxDesignPressure), String(s.maxDesignPressureCaseIds.length), idList(s.maxDesignPressureCaseIds)],
+    ['最小余裕比（推奨候補の許容風圧 ÷ 設計風圧）', rOrDash(s.minMarginRatio, '（推奨候補のあるケースなし）'),
       String(s.minMarginRatioCaseIds.length), idList(s.minMarginRatioCaseIds)]
   ].forEach((cells, i) => cells.forEach((cell, j) => assert.equal(metrics[i][j] === cell, true, '集計の指標 [' + i + '][' + j + ']')));
   assert.equal(metrics.length, 2);
@@ -587,10 +616,10 @@ function assertMarkdownMatches(md, r) {
     const expected = [['caseId', d.caseId], ['paneId', d.paneId], ['階', place(d, 'floor')], ['部位', place(d, 'zone')],
       ['ガラス', d.glassType], ['告示外の追加低減係数', num(d.extraFactor)], ['幅 W（' + u.length + '）', num(d.widthMm)],
       ['高さ H（' + u.length + '）', num(d.heightMm)], ['面積（' + u.area + '）', num(d.areaM2)], ['pressureModel.mode', d.pressureMode],
-      ['設計風圧（' + u.pressure + '）', num(d.designPressure)], ['風圧の出どころ', d.pressureSource]];
-    MODE_FIELDS[r.pressureMode].forEach((k) => expected.push([t.rows[expected.length][0], num(d[k])]));
+      ['設計風圧（' + u.pressure + '）', p1(d.designPressure)], ['風圧の出どころ', d.pressureSource]];
+    MODE_FIELDS[r.pressureMode].forEach((k) => expected.push([t.rows[expected.length][0], modeValue(k, d[k])]));
     expected.push(['推奨候補', bestLabel(d.bestCandidate)], ['許容風圧（' + u.pressure + '）', bestP(d.bestCandidate)],
-      ['余裕比', orDash(d.marginRatio)], ['余裕差（' + u.pressure + '）', orDash(d.marginPressure)], ['OK', num(d.okCount)],
+      ['余裕比', rOrDash(d.marginRatio)], ['余裕差（' + u.pressure + '）', pOrDash(d.marginPressure)], ['OK', num(d.okCount)],
       ['NG', num(d.ngCount)], ['適用範囲外', num(d.outOfScopeCount)]);
     assert.deepEqual(t.rows, expected, heading);
   });
@@ -602,7 +631,7 @@ function assertMarkdownMatches(md, r) {
   const withCandidates = r.selectedDetails.filter((d) => d.candidateSummary.length > 0);
   assert.equal(candidateTables.length, withCandidates.length, '候補の一覧の表の数');
   withCandidates.forEach((d, i) => d.candidateSummary.forEach((cand, j) =>
-    assert.deepEqual(candidateTables[i].rows[j], [cand.label, num(cand.P), statusText[cand.status]], '候補 ' + i + '/' + j)));
+    assert.deepEqual(candidateTables[i].rows[j], [cand.label, p1(cand.P), statusText[cand.status]], '候補 ' + i + '/' + j)));
   candidateTables.forEach((t, i) => assert.equal(t.rows.length, withCandidates[i].candidateSummary.length, '候補の数 ' + i));
   // 比較（a・b・差・一致のすべて）
   const c = r.comparison;
@@ -615,15 +644,16 @@ function assertMarkdownMatches(md, r) {
     const expected = [['caseId', a.caseId, b.caseId, ''], ['paneId', a.paneId, b.paneId, same(c.sameValue.paneId)],
       ['階', place(a, 'floor'), place(b, 'floor'), same(c.sameValue.floor)], ['部位', place(a, 'zone'), place(b, 'zone'), same(c.sameValue.zone)],
       ['ガラス', a.glassType, b.glassType, same(c.sameValue.glassType)],
-      ['幅 W（' + u.length + '）', num(a.widthMm), num(b.widthMm), signed(c.difference.widthMm)],
-      ['高さ H（' + u.length + '）', num(a.heightMm), num(b.heightMm), signed(c.difference.heightMm)],
-      ['設計風圧（' + u.pressure + '）', num(a.designPressure), num(b.designPressure), signed(c.difference.designPressure)],
+      ['幅 W（' + u.length + '）', num(a.widthMm), num(b.widthMm), signed(c.difference.widthMm, 0)],
+      ['高さ H（' + u.length + '）', num(a.heightMm), num(b.heightMm), signed(c.difference.heightMm, 0)],
+      ['設計風圧（' + u.pressure + '）', p1(a.designPressure), p1(b.designPressure), signed(c.difference.designPressure, 1)],
       ['風圧の出どころ', a.pressureSource, b.pressureSource, '']];
-    MODE_FIELDS[r.pressureMode].forEach((k) => expected.push([t.rows[expected.length][0], num(a[k]), num(b[k]), signed(c.difference[k])]));
+    MODE_FIELDS[r.pressureMode].forEach((k) => expected.push([t.rows[expected.length][0], modeValue(k, a[k]), modeValue(k, b[k]),
+      signed(c.difference[k], modeDigits(k))]));
     expected.push(['推奨候補', bestLabel(a.bestCandidate), bestLabel(b.bestCandidate), same(c.sameValue.recommendedLabel)],
-      ['許容風圧（' + u.pressure + '）', bestP(a.bestCandidate), bestP(b.bestCandidate), signed(c.difference.allowablePressure)],
-      ['余裕比', orDash(a.marginRatio), orDash(b.marginRatio), signed(c.difference.marginRatio)],
-      ['余裕差（' + u.pressure + '）', orDash(a.marginPressure), orDash(b.marginPressure), signed(c.difference.marginPressure)],
+      ['許容風圧（' + u.pressure + '）', bestP(a.bestCandidate), bestP(b.bestCandidate), signed(c.difference.allowablePressure, 1)],
+      ['余裕比', rOrDash(a.marginRatio), rOrDash(b.marginRatio), signed(c.difference.marginRatio, 3)],
+      ['余裕差（' + u.pressure + '）', pOrDash(a.marginPressure), pOrDash(b.marginPressure), signed(c.difference.marginPressure, 1)],
       ['OK', num(a.okCount), num(b.okCount), ''], ['NG', num(a.ngCount), num(b.ngCount), ''],
       ['適用範囲外', num(a.outOfScopeCount), num(b.outOfScopeCount), '']);
     assert.deepEqual(t.rows, expected);
@@ -954,4 +984,135 @@ test('P2L-S3B3B2C1A-X18: privacy（出典の申告・context・Pack の痕跡・
     assert.equal(/k1_outer|k2_inner|rawRatio|adopted_side|wouldPass|t_total|t_max|sourceScopeId|claimedLevel/.test(json + md), false);
     assert.equal(/https?:|sharepoint|notion|\.pdf/i.test(md), false);
   }
+});
+
+/* ============================================================
+   C1A-G0-RF-01: G0 の契約との整合（X19 JSON の外枠・X20 固定の注意 4 件・X21 Markdown の表示の桁）
+============================================================ */
+
+test('P2L-S3B3B2C1A-X19: JSON の外枠は G0 の契約（exportSchemaVersion・notices 4 件・key の順）。review の中身・発行元の検査・-0 は変えない', () => {
+  for (const mode of MODES) {
+    const { c, b } = genuine(mode);
+    const r = Review.buildPackReview(b, c, fullOptions(b));
+    const json = Export.serializeJson(r, b, c);
+    const parsed = JSON.parse(json);
+    // 旧（3c08ecc）からの差分: exportVersion → exportSchemaVersion、notices を interpretation と review の間に追加
+    assert.deepEqual(Object.keys(parsed), ENVELOPE_KEYS);
+    assert.equal(hasOwn(parsed, 'exportVersion'), false);
+    assert.equal(parsed.exportSchemaVersion, 1);
+    assert.deepEqual(parsed.notices, NOTICES);
+    assert.deepEqual(json.split('\n').slice(0, 8), ['{', '  "exportType": "glass_wind_pack_review_export",',
+      '  "exportSchemaVersion": 1,', '  "sourceKind": "project_pack_unreviewed",', '  "trust": "pack_unreviewed",',
+      '  "interpretation": "calculated_not_verified",', '  "notices": [', '    ' + JSON.stringify(NOTICES[0]) + ',']);
+    // review の中身・key の順・値は変わらない（外枠だけが変わった）
+    assert.equal(JSON.stringify(parsed.review) === JSON.stringify(r), true, mode + ': review の中身');
+    // 発行元の検査は保たれる
+    assert.throws(() => Export.serializeJson(r, Batch.executeAll(c), c), { message: MSG.origin });
+    assert.throws(() => Export.serializeJson(r, b, ctx(mode)), { message: MSG.origin });
+  }
+  // 標準の JSON.stringify との差は -0 だけ: JSON.stringify は 0 と書き、この module は -0 と書く（JSON.parse で -0 に戻る）
+  const X = stubExport();
+  const { c, b } = genuine('case_direct');
+  const forged = plain(Review.buildPackReview(b, c));
+  forged.rows[0].marginPressure = -0;
+  const out = X.serializeJson(forged, null, null);
+  const std = JSON.stringify({ exportType: 'glass_wind_pack_review_export', exportSchemaVersion: 1,
+    sourceKind: 'project_pack_unreviewed', trust: 'pack_unreviewed', interpretation: 'calculated_not_verified',
+    notices: NOTICES, review: forged }, null, 2) + '\n';
+  assert.equal(out.split('"marginPressure": -0').length - 1, 1, '前提: -0 は 1 か所');
+  assert.notEqual(out, std);
+  assert.equal(out.replace('"marginPressure": -0', '"marginPressure": 0'), std);
+  assert.equal(Object.is(JSON.parse(out).review.rows[0].marginPressure, -0), true);
+});
+
+test('P2L-S3B3B2C1A-X20: 固定の注意 4 件（JSON の notices と Markdown の冒頭が同じ文面・同じ順。review の値に依存しない）', () => {
+  // 4 件が示すこと: 未レビュー・計算済み ≠ 検証済み・OK の限定的な意味・正式な承認資料ではない
+  assert.equal(NOTICES.length, 4);
+  assert.match(NOTICES[0], /^未レビュー：.*pack_unreviewed/);
+  assert.match(NOTICES[1], /^計算済み ≠ 検証済み：.*calculated_not_verified/);
+  assert.match(NOTICES[2], /^OK は計算上の候補判定です。.*承認ではありません/);
+  assert.match(NOTICES[3], /^正式な案件承認の資料ではありません。/);
+  const X = stubExport();
+  for (const mode of MODES) {
+    const { c, b } = genuine(mode);
+    const r = Review.buildPackReview(b, c, fullOptions(b));
+    assert.deepEqual(JSON.parse(Export.serializeJson(r, b, c)).notices, NOTICES, mode + ': JSON');
+    const md = Export.toMarkdown(r, b, c);
+    const quoted = md.split('\n').filter((line) => line.startsWith('> - ')).slice(0, 4).map((line) => decode(line.slice(4)));
+    assert.deepEqual(quoted, NOTICES, mode + ': Markdown（JSON と同じ文面・順）');
+    // review の文字列を敵対的にしても、notices と Markdown の冒頭は変わらない
+    const adversarial = mapStrings(plain(r), (s, i) => ADVERSARIAL[i % ADVERSARIAL.length]);
+    assert.deepEqual(JSON.parse(X.serializeJson(adversarial, null, null)).notices, NOTICES);
+    assert.deepEqual(X.toMarkdown(adversarial, null, null).split('\n').slice(0, 12), md.split('\n').slice(0, 12));
+  }
+  // 静的: notices は module の中の 4 件の literal（凍結）で、review の値から作らない
+  assert.match(EXPORT_CODE, /var NOTICES = Object\.freeze\(\[\n(\s+'[^'\n]+',?\n){4}\s+\]\);/);
+  assert.match(EXPORT_CODE, /notices: NOTICES\.slice\(\),/);
+});
+
+test('P2L-S3B3B2C1A-X21: Markdown の数値は画面と同じ表示の桁（風圧・余裕差 1 桁・余裕比 3 桁・差は + 付き・null は「—」）。丸めは表示だけで全桁は JSON', () => {
+  const { c, b } = genuine('notification1458');
+  const r = Review.buildPackReview(b, c, { detailCaseIds: ['G002'], comparisonCaseIds: ['G001', 'G003'] });
+  const md = Export.toMarkdown(r, b, c);
+  const json = Export.serializeJson(r, b, c);
+  // G002 の行（固定値: 設計風圧 1685.04324816824・負圧 -1409.5342125273235・P 3543.183090705487・
+  // 余裕比 2.1027253125741283・余裕差 1858.1398425372467。評価高さ・寸法は review の値のまま）
+  const row = tableUnder(md, '## ケース一覧（全 3 ケース）').rows.find((x) => x[0] === 'G002');
+  assert.deepEqual(row, ['G002', 'P002', '3', 'corner', 'lowe_fl', '760', '1880', '1685.0', 'pack_notification_calculation',
+    '10.2', '1685.0', '-1409.5', 'Low-E5 + A + FL5', '3543.2', '43', '0', '6', '2.103', '1858.1']);
+  ['1685.04324816824', '-1409.5342125273235', '3543.183090705487', '2.1027253125741283', '1858.1398425372467']
+    .forEach((v) => {
+      assert.equal(json.includes(v), true, 'JSON は全桁: ' + v);
+      assert.equal(md.includes(v.replace('-', '\\-')) || md.includes(v), false, 'Markdown は丸めた表示: ' + v);
+    });
+  // 詳細と候補の一覧も同じ桁
+  const detail = tableUnder(md, '### 詳細 1：ケース G002').rows;
+  assert.deepEqual(detail.filter((x) => /^(設計風圧|正圧|負圧・符号付き|許容風圧|余裕比|余裕差|評価高さ|面積|告示外)/.test(x[0])).map((x) => x[1]),
+    ['1', '1.4288', '1685.0', '10.2', '1685.0', '-1409.5', '3543.2', '2.103', '1858.1']);
+  assert.deepEqual(tableUnder(md, '#### 候補の一覧（49 件）').rows[0], ['Low-E5 + A + FL5', '3543.2', 'OK（計算上の候補判定）']);
+  // 集計（最大設計風圧 1 桁・最小余裕比 3 桁）
+  assert.deepEqual(tableUnder(md, '## 集計', 1).rows.map((x) => x[1]), ['1833.1', '1.015']);
+  // 比較: A G001 / B G003。正の差は +、寸法の差は整数、評価高さの差は 3 桁、0 の差に + を付けない
+  const cmp = tableUnder(md, '## 2 ケースの比較').rows;
+  const at = (label) => cmp.find((x) => x[0] === label).slice(1);
+  assert.deepEqual(at('幅 W（mm）'), ['1020', '1020', '0']);
+  assert.deepEqual(at('設計風圧（N/m²）'), ['1454.7', '1833.1', '+378.4']);
+  assert.deepEqual(at('評価高さ（m）'), ['3.4', '16.1', '+12.700']);
+  assert.deepEqual(at('負圧・符号付き（N/m²）'), ['-1153.3', '-1153.3', '0.0']);
+  assert.deepEqual(at('許容風圧（N/m²）'), ['1477.2', '2215.7', '+738.6']);
+  assert.deepEqual(at('余裕比'), ['1.015', '1.209', '+0.193']);
+  assert.deepEqual(at('余裕差（N/m²）'), ['22.5', '382.6', '+360.2']);
+  // 丸めの注記
+  assert.equal(md.split('\n')[11], ROUNDING_NOTE);
+  // 丸めは表示だけ: 差は review の差を丸める（丸めた A・B から計算し直さない）。負の差は - のまま、null は「—」
+  const X = stubExport();
+  const forged = plain(r);
+  forged.comparison.a.designPressure = 1.04;
+  forged.comparison.b.designPressure = 1.16;
+  forged.comparison.difference.designPressure = 0.12;   // 丸めた A（1.0）・B（1.2）の差なら +0.2 になる
+  forged.comparison.difference.widthMm = -10;
+  forged.comparison.difference.allowablePressure = null;
+  forged.rows[0].bestCandidate = null;
+  forged.rows[0].marginRatio = null;
+  forged.rows[0].marginPressure = null;
+  forged.summary.minMarginRatio = null;
+  const fmd = X.toMarkdown(forged, null, null);
+  const fc = tableUnder(fmd, '## 2 ケースの比較').rows;
+  const fat = (label) => fc.find((x) => x[0] === label).slice(1);
+  assert.deepEqual(fat('設計風圧（N/m²）'), ['1.0', '1.2', '+0.1']);
+  assert.equal(fat('幅 W（mm）')[2], '-10');
+  assert.equal(fat('許容風圧（N/m²）')[2], '—（片方に値なし）');
+  const frow = tableUnder(fmd, '## ケース一覧（全 3 ケース）').rows[0];
+  assert.deepEqual(frow.slice(12, 14).concat(frow.slice(17)), ['—（推奨候補なし）', '—', '—', '—'], 'null は 0 にしない');
+  assert.equal(tableUnder(fmd, '## 集計', 1).rows[1][1], '—（推奨候補のあるケースなし）');
+  // 表示の丸めは初期化時に掴んだ toFixed（後から Number.prototype を差し替えても表示は変わらない）
+  const sb = loadExport({ ProjectPackReview: Review });
+  const before = sb.ProjectPackReviewExport.toMarkdown(r, b, c);
+  vm.runInContext('Number.prototype.toFixed = function () { return "TAMPERED"; };', sb);
+  assert.equal(sb.ProjectPackReviewExport.toMarkdown(r, b, c), before);
+  assert.equal(before, md);
+  // 静的: 表示の丸めは toFixed だけで、値を計算し直す関数を使わない
+  ['Math.round', 'Math.trunc', 'Math.ceil', 'toPrecision', 'parseFloat', 'Number('].forEach((token) =>
+    assert.equal(EXPORT_CODE.includes(token), false, token));
+  assert.equal((EXPORT_CODE.match(/toFixed\.call\(/g) || []).length, 1);
 });

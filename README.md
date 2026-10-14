@@ -1621,7 +1621,7 @@ ProjectPackReviewExport.serializeJson(review, batchResult, ctx)   → JSON の�
 - どちらも最初に `assertReviewOrigin` を通します。通らなければ固定文
   `ProjectPackReviewExport: review: is not an issued Pack review of the given batch result and context`（どの検査で落ちたか・入力値・
   内部の例外の文面は出しません）。書き出しの途中の失敗も `… could not be generated` の固定文です。
-- export: `EXPORT_TYPE`（`glass_wind_pack_review_export`）・`EXPORT_VERSION`（1）・`SOURCE_KIND`・`TRUST`・`INTERPRETATION`・
+- export: `EXPORT_TYPE`（`glass_wind_pack_review_export`）・`EXPORT_SCHEMA_VERSION`（1）・`SOURCE_KIND`・`TRUST`・`INTERPRETATION`・
   `MAX_OUTPUT_BYTES`・`toMarkdown`・`serializeJson`。
 - 依存は `ProjectPackReview` だけで、**module の初期化時に 1 度だけ**掴みます（後から差し替えた・現れた global は使わず、初期化時に
   無ければ fail closed）。trust と review の版（`glass_wind_pack_review` schemaVersion 1）が一致しない依存は使いません。
@@ -1630,43 +1630,63 @@ ProjectPackReviewExport.serializeJson(review, batchResult, ctx)   → JSON の�
 ### JSON
 
 ```
-{ exportType: 'glass_wind_pack_review_export', exportVersion: 1,
+{ exportType: 'glass_wind_pack_review_export', exportSchemaVersion: 1,
   sourceKind: 'project_pack_unreviewed', trust: 'pack_unreviewed', interpretation: 'calculated_not_verified',
+  notices: [ …固定の 4 件 ],
   review: { …発行された review をそのまま（key の順・全ケース・全グループ・選んだ詳細・比較） } }
 ```
 
+- 外枠の key はこの 7 つで、この順に固定です（G0 の契約。C1-A の最初の版の `exportVersion` は `exportSchemaVersion` に改めました）。
+- `notices` は固定の 4 件で、順番も文面も固定です（review の値から作りません。Markdown の冒頭にも同じ 4 件を書きます）:
+  1. 未レビュー：この出力は、未レビュー（pack_unreviewed）の Project Pack から計算した結果です。
+  2. 計算済み ≠ 検証済み：値は計算したもので、検証されたものではありません（calculated_not_verified）。
+  3. OK は計算上の候補判定です。Evidence の確認・安全性の判定・承認ではありません。
+  4. 正式な案件承認の資料ではありません。値は案件の出典資料・メーカー資料と照合してください。
 - 書式は `JSON.stringify(外枠, null, 2)` と同じです（末尾に改行 1 つ）。値は own の data だけを型を確かめながら書き、`toJSON`・
-  prototype を使いません。数値は丸めず（`-0` も `-0` のまま）、文字列は JSON の escape で完全に戻ります（改行・不可視の文字・
-  孤立したサロゲートを含む値も。出力は UTF-8 として正しい）。
+  prototype を使いません。数値は丸めず全桁のままで、文字列は JSON の escape で完全に戻ります（改行・不可視の文字・孤立した
+  サロゲートを含む値も。出力は UTF-8 として正しい）。
+- **標準の `JSON.stringify` との違いは `-0` だけ**です: `JSON.stringify(-0)` は `0` と書きますが、この module は `-0` と書きます
+  （`JSON.parse('-0')` は `-0` に戻るので、値がそのまま保たれます）。`-0` を含まない review では、出力は `JSON.stringify` と byte
+  単位で同じです。
 - **決定的**: 同じ review、同じ入力から作り直した review、別の module instance で byte 列が同じです。時刻・乱数・環境の値を
   入れません。
 
 ### Markdown
 
-- 構成: 見出し → trust の引用（冒頭）→ 出力の情報 → 集計（件数、最大設計風圧と最小余裕比は別の指標で、同値の caseId はすべて）→
+- 構成: 見出し → trust の引用（冒頭。JSON の notices と同じ 4 件を含む）→ 数値の表示の注記 → 出力の情報 → 集計（件数、最大設計風圧と最小余裕比は別の指標で、同値の caseId はすべて）→
   グループ（推奨候補・階・部位のすべての組と caseId）→ ケース一覧（全ケース・review の行のすべての field）→ 選んだケースの詳細
   （選んだ順・候補の一覧のすべて）→ 2 ケースの比較（A・B・差（B − A）・一致）→ trust の引用（末尾）。省略・切り詰め・折りたたみは
   しません。
-- 数値は丸めません（JavaScript の最短表記）。null は「—」で、0 にしません。宣言の無い階・部位は「—（宣言なし）」です。
+- **数値の表示は画面（S3-B3B2-B3）と同じ桁**です: 風圧（設計風圧・正圧・負圧・許容風圧・候補の許容風圧・最大設計風圧）と
+  余裕差は小数 1 桁、余裕比（最小余裕比を含む）は小数 3 桁（`toFixed`）。寸法・評価高さ・面積・告示外の追加低減係数・件数は
+  review の値のままです。比較の差（B − A）も画面と同じ桁（寸法は整数・評価高さは小数 3 桁・風圧と余裕差は 1 桁・余裕比は 3 桁）で、
+  正の差には `+` を付けます。null は「—」で、0 にしません。宣言の無い階・部位は「—（宣言なし）」です。
+- 丸めは**表示だけ**です。余裕比・差を丸めた値から計算し直さず、review の値（丸めていない値で計算・照合済み）を丸めて書きます。
+  `toFixed` は module の初期化時に 1 度だけ掴みます。冒頭に丸めの注記を書き、全桁の値は JSON にあります。
 - **escape（すべての文字列が同じ 1 つの関数を通る）**: publicLabel・caseId・paneId・階・部位・ガラス・候補の label・出どころ・
   単位など review の文字列の ASCII の記号 `` !"#$%&'()*+,-./:;<=>?[\]^_`{|}~ `` には `\` を付けます（CommonMark の backslash
   escape。強調・リンク・画像・HTML・コード・表の区切り・見出し・引用・リスト・取り消し線・数式・wiki link・埋め込み・コメント・
   ハイライト・タグ・脚注などの記法として働きません）。`@` だけは全角の `＠`（U+FF20）にします: GitHub の cmark-gfm は backslash
   escape を解いた後の文字列から e-mail（`user@example.com`・`mailto:`・`xmpp:`）を自動リンクにするためです（GitHub のメンションにも
-  なりません）。
+  なりません）。これは Markdown に限った**非可逆の表示の変換**で、JSON の値（`@`）は変えません。
 - **不可視の文字の可視化**: 制御文字（C0・DEL・C1。改行・タブを含む）・Unicode の書式文字（Cf）・行 / 段落の区切り・孤立した
   サロゲート・異体字セレクタ・タグ文字・空白に見える埋め字・非文字は `⟨U+XXXX⟩` と書きます。値が行や表のセルを増やすことは
   ありません。通常の空白・NBSP・全角空白はそのままです。
 - この変換は**非可逆**です（たとえば `⟨U+200B⟩` という文字列そのものと ZWSP は同じ表記になり、`＠` と `@` は区別できず、表のセルの
   前後の空白は GFM が落とします）。元の値への完全な逆変換は求めません。値を正確に受け渡すときは JSON を使います。
-- Markdown の外側の挙動は対象外です: GitHub がコメント・Issue で行う Issue 参照（`#123`）や、絵文字の短縮表記（`:smile:`）の変換は、
-  Markdown を HTML にした後の処理なので backslash escape では止まりません（記号として表示されるか、絵文字に変わるだけで、表・行の
-  構造は変わりません）。
+- **未検証・表示先に依存すること**（記録）:
+  - GitHub がコメント・Issue で行う Issue 参照（`#123`）の自動リンクや、絵文字の短縮表記（`:smile:`）の変換は、Markdown を HTML に
+    した後の処理なので backslash escape では止まりません。どう表示されるかは表示先（リポジトリのファイル・コメント・Issue）に
+    依存し、GitHub 上では確かめていません（GitHub の描画 API はこの作業環境から使えませんでした）。
+  - Obsidian での表示（wiki link・ハイライト・コメント・タグ・数式・callout などの記法が escape で働かないこと）は未検証です
+    （Human verification）。
+  - 入力値によって表・行・HTML の構造が増えないことは、Node の test（X11・X12）と、CommonMark / GFM の実装（GitHub の cmark-gfm を
+    含む）での描画の差分で確かめています。
 
 ### 出力の上限
 
 Markdown / JSON それぞれ **8 MiB**（UTF-8 の byte 数、`MAX_OUTPUT_BYTES`）。hard 上限で、超えたら切り詰めず、一部も返さずに
-`… output exceeds 8388608 bytes (not truncated)` で失敗します。合成 2000 ケース（詳細 50・比較 1）では Markdown 約 0.6–0.7 MB・
+`… output exceeds 8388608 bytes (not truncated)` で失敗します。合成 2000 ケース（詳細 50・比較 1）では Markdown 約 0.5 MB・
 JSON 約 1.3–1.8 MB で、上限の内側です。時間は性能目標として assert せず、`tests/project-pack-review-export.test.js` の X13 が
 実行環境（Node の版・OS・CPU）と一緒に test の出力（diagnostic）へ記録します。
 
@@ -1678,7 +1698,10 @@ JSON 約 1.3–1.8 MB で、上限の内側です。時間は性能目標とし�
   （Object.is・-0・敵対的な文字列）と決定性（別の test）・Markdown の全件の照合（test の中の小さな parser）・本物の経路の敵対的な
   publicLabel と、全 field の敵対的な合成文字列での構造の差分（行の数と種類・表のセルの数・escape されていない記号の並び）・
   不可視の文字の全範囲・2000 ケース × 3 mode・8 MiB の境界（上限だけを変えた module で、ちょうど上限は通り 1 byte 超えは失敗）・
-  固定文・一方向・依存と純粋さ・privacy）。期待値は export の出力から作らず、発行された review の値から取ります。
+  固定文・一方向・依存と純粋さ・privacy）と、G0 の契約との整合（C1A-G0-RF-01）の X19–X21（JSON の外枠の差分: `exportSchemaVersion`・
+  固定の notices 4 件・key の順・review の中身と発行元の検査は不変・`-0` だけが `JSON.stringify` と違う ／ 固定の注意 4 件が JSON と
+  Markdown で同じで review の値に依存しない ／ Markdown の表示の桁・`+`・null は「—」・丸めは表示だけで差を計算し直さない・
+  `toFixed` は初期化時に掴む）。期待値は export の出力から作らず、発行された review の値と画面の桁の契約から取ります。
 - `tests/project-pack-review.test.js` は 2 か所を移行しました: R01 の API 一覧（`assertReviewOrigin` を追加）と、R21 の
   `B.assertBatchOrigin(` の数（1 → 2。buildPackReview の最初の gate に 1 か所、assertReviewOrigin に 1 か所。buildPackReview の
   中で最初に 1 回だけ呼ぶことは、そのまま確かめます）。
@@ -2073,7 +2096,7 @@ node --test
 | `tests/single-ux.test.js` | 単一ケースの見せ方（Phase 2L-B4 / S3-B3B2-B4）: ①〜⑤ の入力の順・必須入力は details の外・mode の意味と trust の文は常に表示・案件の検証状況の要約は評価結果から書き失敗は失敗と書く（初期値は fail closed）・詳細は最初は閉じる・結論（検証状況・判定・推奨・許容 / 設計風圧・係数・適用範囲外の除外）は常に表示し計算根拠は詳細へ・表は横スクロールの wrapper・grid は minmax(0, …)・鮮度の表示は結果欄の外 |
 | `tests/project-pack-review.test.js` | Project Pack Review（Phase 2L-B2 / S3-B3B2-A1）: batch の発行元の gate（同じ context instance だけ）・全行を batch の並びで・余裕比 / 余裕差の定義・summary は最大設計風圧と最小余裕比を分ける・grouping・2 ケースの比較・詳細は同じ context での再計算と完全照合（1 field でも違えば全体を拒否）・50 件の上限・trust 固定・deep-frozen と発行物の gate・依存は初期化時に固定・Workspace / Review Package に触れない・privacy |
 | `tests/project-pack-review-ui.test.js` | Pack Review の画面（Phase 2L-B2 / S3-B3B2-B3）: script の順と初期化時の掴み・独立 section・「Pack Reviewを生成」を押したときだけ・作る直前と確定の直前の確認（module の assertBatchOrigin の代わりにしない）・値は review の発行物から（null は「—」・最大設計風圧と最小余裕比を分ける・同値はすべて・未宣言を補わない・差は B − A）・2000 ケースを切り詰めずに 50 行ずつ・詳細は batch の caseId だけ・重複と 51 件目を拒否・消える経路・信頼の文言は常に表示・保存 / 通信 / innerHTML なし |
-| `tests/project-pack-review-export.test.js` | Pack Review の出力（Phase 2L-B2 / S3-B3B2-C1-A）: 発行元は review・batch・ctx の完全な instance 一致（古い review と別の batch / ctx は拒否・元の 3 つをすべて持てば通るという限界を記録）・batch の gate の維持・記録は成功した発行だけで返す API なし・JSON は version 付きの外枠と値 / 精度の保持（-0 を含む）と決定性・Markdown は全件を省略せず、文字列は 1 つの関数で escape（@ は全角）・不可視の文字は ⟨U+XXXX⟩・敵対的な文字列で構造が変わらない・2000 ケース × 3 mode・8 MiB の hard 上限・固定文・取り込み口なし・依存は初期化時に固定 |
+| `tests/project-pack-review-export.test.js` | Pack Review の出力（Phase 2L-B2 / S3-B3B2-C1-A）: 発行元は review・batch・ctx の完全な instance 一致（古い review と別の batch / ctx は拒否・元の 3 つをすべて持てば通るという限界を記録）・batch の gate の維持・記録は成功した発行だけで返す API なし・JSON は exportSchemaVersion と固定の notices 4 件の外枠・値 / 精度の保持（-0 を含む）と決定性・Markdown は全件を省略せず画面と同じ表示の桁で、文字列は 1 つの関数で escape（@ は全角）・不可視の文字は ⟨U+XXXX⟩・敵対的な文字列で構造が変わらない・2000 ケース × 3 mode・8 MiB の hard 上限・固定文・取り込み口なし・依存は初期化時に固定 |
 
 ### 必須ケース
 

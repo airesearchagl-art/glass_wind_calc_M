@@ -10,7 +10,7 @@
  *   ProjectPackReview.assertReviewOrigin(review, batch, ctx)   … 発行物で、batch と ctx（どちらも同じ instance）
  *                                                                から発行された review だけを通す（最初の gate）
  *     → toMarkdown()     … 人が読む文書（入力の文字列はすべて同じ escape を通す・不可視の文字は可視化する）
- *     → serializeJson()  … version 付きの外枠に review をそのまま入れた JSON（値と精度を保つ）
+ *     → serializeJson()  … exportSchemaVersion 付きの外枠（固定の notices 4 件）に review をそのまま入れた JSON（値と精度を保つ）
  *
  * どちらも review の全ケースの行・全グループ・選んだケースの詳細・比較を省略しない。計算はしない（review の
  * 値を写すだけ）。取り込み（import / deserialize）の機能は持たない。出力は再計算用の入力ではなく、Project Pack・
@@ -19,7 +19,8 @@
  * ── trust ────────────────────────────────────────────────
  *
  * sourceKind = project_pack_unreviewed・trust = pack_unreviewed・interpretation = calculated_not_verified で
- * 固定する（JSON の外枠と Markdown の冒頭・末尾）。OK は計算上の候補判定で、検証・承認ではない。
+ * 固定する（JSON の外枠と Markdown の冒頭・末尾）。固定の注意 4 件（NOTICES）を JSON の notices と Markdown の冒頭の
+ * 両方に書く。OK は計算上の候補判定で、検証・承認ではない。
  *
  * ── 発行元の真正性と画面の現在性 ─────────────────────────
  *
@@ -33,10 +34,13 @@
  *     すべて前に \ を付け、@ は全角の ＠ にし（GitHub の e-mail 自動リンク・メンションを防ぐ）、制御文字・不可視の
  *     書式文字・異体字セレクタ・タグ文字・孤立したサロゲートなど（INVISIBLE_RANGES）は ⟨U+XXXX⟩ の形で見えるように
  *     する。改行・| を含む値でも行や表のセルは増えない。この変換は元に戻せない（非可逆。正確な値は JSON）。
- *     数値は有限の number からこの module が作る表記（丸めない）。
- *   - JSON: 外枠 { exportType, exportVersion, sourceKind, trust, interpretation, review } を固定の key 順で書く。
- *     値は own の data だけを型を確かめながら書き（toJSON・prototype を使わない）、数値は丸めない（-0 も保つ）。
- *     同じ review からは常に同じ byte 列になる（時刻・乱数を入れない）。
+ *   - Markdown の数値は画面（S3-B3B2-B3）と同じ表示の桁: 風圧（設計風圧・正圧・負圧・許容風圧）と余裕差は小数 1 桁、
+ *     余裕比は小数 3 桁（toFixed）。寸法・評価高さ・面積・係数は review の値のまま。比較の差は正なら + を付ける。
+ *     丸めは表示だけで、値を計算し直さない（余裕比・差は review の値を丸めて書く）。全桁の値は JSON にある。
+ *   - JSON: 外枠 { exportType, exportSchemaVersion, sourceKind, trust, interpretation, notices, review } を固定の key 順で
+ *     書く。notices は固定の 4 件（未レビュー・計算済み ≠ 検証済み・OK の限定的な意味・正式な承認資料ではない）。
+ *     値は own の data だけを型を確かめながら書き（toJSON・prototype を使わない）、数値は丸めない（-0 も -0 と書く。
+ *     標準の JSON.stringify は -0 を 0 と書く点だけが違う）。同じ review からは常に同じ byte 列になる（時刻・乱数なし）。
  *   - 上限 MAX_OUTPUT_BYTES（各 8 MiB・UTF-8）は出力の資源保護。超えたら切り詰めず、一部も返さずに失敗する。
  *   - 例外の文面は固定。入力値・caseId・内部の例外の文面を含めない。
  *
@@ -66,11 +70,22 @@
   // ============================================================
 
   var EXPORT_TYPE = 'glass_wind_pack_review_export';
-  var EXPORT_VERSION = 1;
+  var EXPORT_SCHEMA_VERSION = 1;
   var SOURCE_KIND = 'project_pack_unreviewed';
   var TRUST = 'pack_unreviewed';
   var INTERPRETATION = 'calculated_not_verified';
   var MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
+
+  /**
+   * 出力に必ず付ける固定の注意（JSON の notices・Markdown の冒頭の引用）。順番も文面も固定で、review の値から
+   * 作らない。
+   */
+  var NOTICES = Object.freeze([
+    '未レビュー：この出力は、未レビュー（pack_unreviewed）の Project Pack から計算した結果です。',
+    '計算済み ≠ 検証済み：値は計算したもので、検証されたものではありません（calculated_not_verified）。',
+    'OK は計算上の候補判定です。Evidence の確認・安全性の判定・承認ではありません。',
+    '正式な案件承認の資料ではありません。値は案件の出典資料・メーカー資料と照合してください。'
+  ]);
 
   // この module が書ける review の版（違う版の review を推測で書かない）
   var REVIEW_TYPE = 'glass_wind_pack_review';
@@ -85,12 +100,25 @@
   MODE_PRESSURE_FIELDS[MODE_NOTIFICATION] = ['evaluationHeightM', 'positivePressure', 'negativePressure'];
   MODE_PRESSURE_FIELDS[MODE_PRESSURE_MAP] = ['positivePressure', 'negativePressureMagnitude'];
   MODE_PRESSURE_FIELDS[MODE_CASE_DIRECT] = [];
+  // [見出し, 単位の種類]。単位の種類が pressure なら小数 1 桁で表示し、height（評価高さ）は review の値のまま
+  // （比較の差は小数 3 桁。画面と同じ）
   var PRESSURE_FIELD_LABELS = {
     evaluationHeightM: ['評価高さ', 'height'],
     positivePressure: ['正圧', 'pressure'],
     negativePressure: ['負圧・符号付き', 'pressure'],
     negativePressureMagnitude: ['負圧の大きさ', 'pressure']
   };
+  // 表示の桁（画面の packReviewPressure / packReviewRatio / packReviewMargin / packReviewDifference と同じ）
+  var DIGITS_PRESSURE = 1;
+  var DIGITS_RATIO = 3;
+  var DIGITS_LENGTH_DIFFERENCE = 0;
+  var DIGITS_HEIGHT_DIFFERENCE = 3;
+  var ROUNDING_NOTE = '数値の表示：風圧（設計風圧・正圧・負圧・許容風圧）と余裕差は小数 ' + DIGITS_PRESSURE + ' 桁、余裕比は小数 ' +
+    DIGITS_RATIO + ' 桁に丸めて表示しています（画面と同じ。寸法・評価高さ・面積・係数・件数は review の値のまま）。比較の差も' +
+    '同じ桁で、寸法の差は整数、評価高さの差は小数 ' + DIGITS_HEIGHT_DIFFERENCE + ' 桁です。丸めは表示だけで、計算・照合・差は' +
+    '丸めない値で行っています。全桁の値は JSON 出力にあります。';
+  // 表示の丸めに使う関数（初期化時に 1 度だけ掴む。後から Number.prototype を差し替えても使わない）
+  var toFixed = Number.prototype.toFixed;
   var STATUS_LABELS = { ok: 'OK（計算上の候補判定）', ng: 'NG', out_of_scope: '適用範囲外' };
 
   /**
@@ -285,16 +313,37 @@
     return String(v);
   }
 
-  var DASH = '—';
-
-  function numOrDash(v, whenNull) {
-    return v === null ? DASH + (whenNull || '') : num(v);
+  /** 表示の丸め（toFixed。値を計算し直さない）。有限の number だけ。 */
+  function fixed(v, digits) {
+    if (typeof v !== 'number' || !isFinite(v)) broken();
+    return toFixed.call(v, digits);
   }
 
-  /** 差（B − A）。正なら + を付ける。片方に値が無ければ null のまま「—」（0 にしない）。 */
-  function signed(v) {
+  var DASH = '—';
+
+  /** 風圧・余裕差（小数 1 桁）。null は「—」のまま（0 にしない）。 */
+  function pressureOrDash(v, whenNull) {
+    return v === null ? DASH + (whenNull || '') : fixed(v, DIGITS_PRESSURE);
+  }
+
+  /** 余裕比（小数 3 桁）。null は「—」のまま（0 にしない）。 */
+  function ratioOrDash(v, whenNull) {
+    return v === null ? DASH + (whenNull || '') : fixed(v, DIGITS_RATIO);
+  }
+
+  /** 差（B − A。review の差を丸めて書くだけ）。正なら + を付ける。片方に値が無ければ「—」（0 にしない）。 */
+  function signed(v, digits) {
     if (v === null) return DASH + '（片方に値なし）';
-    return v > 0 ? '+' + num(v) : num(v);
+    return (v > 0 ? '+' : '') + fixed(v, digits);
+  }
+
+  /** mode ごとの風圧の field の表示（風圧は小数 1 桁、評価高さは review の値のまま）。 */
+  function modeValue(k, v) {
+    return PRESSURE_FIELD_LABELS[k][1] === 'pressure' ? fixed(v, DIGITS_PRESSURE) : num(v);
+  }
+
+  function modeDigits(k) {
+    return PRESSURE_FIELD_LABELS[k][1] === 'pressure' ? DIGITS_PRESSURE : DIGITS_HEIGHT_DIFFERENCE;
   }
 
   function sameText(v) {
@@ -318,7 +367,7 @@
   }
 
   function bestP(best) {
-    return best === null ? DASH : num(best.P);
+    return best === null ? DASH : fixed(best.P, DIGITS_PRESSURE);
   }
 
   function unitOf(review, kind) {
@@ -347,11 +396,12 @@
   function trustBlock(lines) {
     lines.push('> **未レビュー**（`' + TRUST + '`）・**計算済み ≠ 検証済み**（`' + INTERPRETATION + '`）');
     lines.push('>');
-    lines.push('> この文書は、未レビューの Project Pack から計算した結果を確認するために書き出した派生物です。' +
-      '正式な案件承認の資料ではありません。');
-    lines.push('> OK は計算上の候補判定で、Evidence の確認ではありません。値は案件の出典資料・メーカー資料と照合してください。');
-    lines.push('> 余裕比・余裕差は確認用の指標で、安全性の判定・承認ではありません。');
-    lines.push('> この文書は Project Pack・入力 package・Workspace の入力として読み込むものではありません。');
+    // JSON の notices と同じ固定の 4 件（同じ escape を通す）
+    NOTICES.forEach(function (notice) { lines.push('> - ' + escapeMarkdownText(notice)); });
+    lines.push('> - 余裕比・余裕差は確認用の指標で、安全性の判定・承認ではありません。');
+    lines.push('> - この文書は Project Pack・入力 package・Workspace の入力として読み込むものではありません。');
+    lines.push('');
+    lines.push(ROUNDING_NOTE);
     lines.push('');
   }
 
@@ -359,7 +409,7 @@
     lines.push('## 出力の情報');
     lines.push('');
     table(lines, ['項目', '値'], [
-      ['出力形式', '`' + EXPORT_TYPE + '`（version ' + EXPORT_VERSION + '）'],
+      ['出力形式', '`' + EXPORT_TYPE + '`（exportSchemaVersion ' + EXPORT_SCHEMA_VERSION + '）'],
       ['review', escapeMarkdownText(review.reviewType) + '（schemaVersion ' + num(review.schemaVersion) + '）'],
       ['sourceKind', '`' + SOURCE_KIND + '`'],
       ['trust', '`' + TRUST + '`'],
@@ -385,9 +435,9 @@
       ['適用範囲外の候補を含むケース', count(s.outOfScopePresentCount)]
     ]);
     table(lines, ['指標', '値', '該当ケース数', '該当 caseId（全ケース計算の並び順）'], [
-      ['最大設計風圧（' + unitOf(review, 'pressure') + '）', numOrDash(s.maxDesignPressure),
+      ['最大設計風圧（' + unitOf(review, 'pressure') + '）', pressureOrDash(s.maxDesignPressure),
         count(s.maxDesignPressureCaseIds.length), idList(s.maxDesignPressureCaseIds)],
-      ['最小余裕比（推奨候補の許容風圧 ÷ 設計風圧）', numOrDash(s.minMarginRatio, '（推奨候補のあるケースなし）'),
+      ['最小余裕比（推奨候補の許容風圧 ÷ 設計風圧）', ratioOrDash(s.minMarginRatio, '（推奨候補のあるケースなし）'),
         count(s.minMarginRatioCaseIds.length), idList(s.minMarginRatioCaseIds)]
     ]);
     lines.push('最大設計風圧と最小余裕比は別の指標です（同じケースとは限りません）。同じ値のケースはすべて全ケース計算の' +
@@ -427,11 +477,11 @@
     lines.push('');
     table(lines, headers, review.rows.map(function (r) {
       return [escapeMarkdownText(r.caseId), escapeMarkdownText(r.paneId), declared(r, 'floor'), declared(r, 'zone'),
-        escapeMarkdownText(r.glassType), num(r.widthMm), num(r.heightMm), num(r.designPressure),
+        escapeMarkdownText(r.glassType), num(r.widthMm), num(r.heightMm), fixed(r.designPressure, DIGITS_PRESSURE),
         escapeMarkdownText(r.pressureSource)]
-        .concat(fields.map(function (k) { return num(r[k]); }))
+        .concat(fields.map(function (k) { return modeValue(k, r[k]); }))
         .concat([bestLabel(r.bestCandidate), bestP(r.bestCandidate), count(r.okCount), count(r.ngCount),
-          count(r.outOfScopeCount), numOrDash(r.marginRatio), numOrDash(r.marginPressure)]);
+          count(r.outOfScopeCount), ratioOrDash(r.marginRatio), pressureOrDash(r.marginPressure)]);
     }));
   }
 
@@ -460,13 +510,13 @@
         ['高さ H（' + unitOf(review, 'length') + '）', num(d.heightMm)],
         ['面積（' + unitOf(review, 'area') + '）', num(d.areaM2)],
         ['pressureModel.mode', escapeMarkdownText(d.pressureMode)],
-        ['設計風圧（' + unitOf(review, 'pressure') + '）', num(d.designPressure)],
+        ['設計風圧（' + unitOf(review, 'pressure') + '）', fixed(d.designPressure, DIGITS_PRESSURE)],
         ['風圧の出どころ', escapeMarkdownText(d.pressureSource)]
-      ].concat(fields.map(function (k) { return [pressureHeader(review, k), num(d[k])]; })).concat([
+      ].concat(fields.map(function (k) { return [pressureHeader(review, k), modeValue(k, d[k])]; })).concat([
         ['推奨候補', bestLabel(d.bestCandidate)],
         ['許容風圧（' + unitOf(review, 'pressure') + '）', bestP(d.bestCandidate)],
-        ['余裕比', numOrDash(d.marginRatio)],
-        ['余裕差（' + unitOf(review, 'pressure') + '）', numOrDash(d.marginPressure)],
+        ['余裕比', ratioOrDash(d.marginRatio)],
+        ['余裕差（' + unitOf(review, 'pressure') + '）', pressureOrDash(d.marginPressure)],
         ['OK', count(d.okCount)],
         ['NG', count(d.ngCount)],
         ['適用範囲外', count(d.outOfScopeCount)]
@@ -480,7 +530,7 @@
       }
       table(lines, ['候補', '許容風圧（' + unitOf(review, 'pressure') + '）', '判定'], d.candidateSummary.map(function (c) {
         if (!hasOwn(STATUS_LABELS, c.status)) broken();
-        return [escapeMarkdownText(c.label), num(c.P), STATUS_LABELS[c.status]];
+        return [escapeMarkdownText(c.label), fixed(c.P, DIGITS_PRESSURE), STATUS_LABELS[c.status]];
       }));
     });
   }
@@ -508,19 +558,20 @@
       ['階', declared(a, 'floor'), declared(b, 'floor'), sameText(same.floor)],
       ['部位', declared(a, 'zone'), declared(b, 'zone'), sameText(same.zone)],
       ['ガラス', escapeMarkdownText(a.glassType), escapeMarkdownText(b.glassType), sameText(same.glassType)],
-      ['幅 W（' + unitOf(review, 'length') + '）', num(a.widthMm), num(b.widthMm), signed(d.widthMm)],
-      ['高さ H（' + unitOf(review, 'length') + '）', num(a.heightMm), num(b.heightMm), signed(d.heightMm)],
-      ['設計風圧（' + unitOf(review, 'pressure') + '）', num(a.designPressure), num(b.designPressure), signed(d.designPressure)],
+      ['幅 W（' + unitOf(review, 'length') + '）', num(a.widthMm), num(b.widthMm), signed(d.widthMm, DIGITS_LENGTH_DIFFERENCE)],
+      ['高さ H（' + unitOf(review, 'length') + '）', num(a.heightMm), num(b.heightMm), signed(d.heightMm, DIGITS_LENGTH_DIFFERENCE)],
+      ['設計風圧（' + unitOf(review, 'pressure') + '）', fixed(a.designPressure, DIGITS_PRESSURE),
+        fixed(b.designPressure, DIGITS_PRESSURE), signed(d.designPressure, DIGITS_PRESSURE)],
       ['風圧の出どころ', escapeMarkdownText(a.pressureSource), escapeMarkdownText(b.pressureSource), '']
     ].concat(fields.map(function (k) {
-      return [pressureHeader(review, k), num(a[k]), num(b[k]), signed(d[k])];
+      return [pressureHeader(review, k), modeValue(k, a[k]), modeValue(k, b[k]), signed(d[k], modeDigits(k))];
     })).concat([
       ['推奨候補', bestLabel(a.bestCandidate), bestLabel(b.bestCandidate), sameText(same.recommendedLabel)],
       ['許容風圧（' + unitOf(review, 'pressure') + '）', bestP(a.bestCandidate), bestP(b.bestCandidate),
-        signed(d.allowablePressure)],
-      ['余裕比', numOrDash(a.marginRatio), numOrDash(b.marginRatio), signed(d.marginRatio)],
-      ['余裕差（' + unitOf(review, 'pressure') + '）', numOrDash(a.marginPressure), numOrDash(b.marginPressure),
-        signed(d.marginPressure)],
+        signed(d.allowablePressure, DIGITS_PRESSURE)],
+      ['余裕比', ratioOrDash(a.marginRatio), ratioOrDash(b.marginRatio), signed(d.marginRatio, DIGITS_RATIO)],
+      ['余裕差（' + unitOf(review, 'pressure') + '）', pressureOrDash(a.marginPressure), pressureOrDash(b.marginPressure),
+        signed(d.marginPressure, DIGITS_PRESSURE)],
       ['OK', count(a.okCount), count(b.okCount), ''],
       ['NG', count(a.ngCount), count(b.ngCount), ''],
       ['適用範囲外', count(a.outOfScopeCount), count(b.outOfScopeCount), '']
@@ -598,7 +649,7 @@
   }
 
   /**
-   * 発行された review を JSON にする（version 付きの外枠。review は key の順・値・精度のまま）。review は
+   * 発行された review を JSON にする（exportSchemaVersion 付きの外枠と固定の notices。review は key の順・値・精度のまま）。review は
    * batchResult と ctx（どちらも同じ instance）から発行されたものでなければならない。
    */
   function serializeJson(review, batchResult, ctx) {
@@ -607,10 +658,11 @@
     try {
       text = jsonText({
         exportType: EXPORT_TYPE,
-        exportVersion: EXPORT_VERSION,
+        exportSchemaVersion: EXPORT_SCHEMA_VERSION,
         sourceKind: SOURCE_KIND,
         trust: TRUST,
         interpretation: INTERPRETATION,
+        notices: NOTICES.slice(),
         review: review
       }, '') + '\n';
     } catch (e) {
@@ -621,7 +673,7 @@
 
   return deepFreeze({
     EXPORT_TYPE: EXPORT_TYPE,
-    EXPORT_VERSION: EXPORT_VERSION,
+    EXPORT_SCHEMA_VERSION: EXPORT_SCHEMA_VERSION,
     SOURCE_KIND: SOURCE_KIND,
     TRUST: TRUST,
     INTERPRETATION: INTERPRETATION,
