@@ -478,6 +478,39 @@
   }
   textarea#pack-report-out[hidden] { display: none; }
 
+  /* ===== Project Pack Review（Phase 2L-B2 / S3-B3B2-B3）: 未レビューの全ケース計算の結果を確かめる欄 ===== */
+  .pack-review { margin-top: 16px; }
+  /* RF-30-01: 後に定義される .notice（11px・--text3）に上書きされないよう、.notice と組み合わせて指定する（この注意文だけ） */
+  .notice.pack-review-trust { margin: 0 0 10px; font-size: 12px; color: var(--text2); line-height: 1.8; overflow-wrap: anywhere; }
+  .pack-review-trust strong { color: var(--warn); }
+  .pack-review-options { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); margin: 8px 0; }
+  .pack-review-options[hidden] { display: none; }
+  .pack-review-options .form-group { margin: 0; min-width: 0; }
+  .pack-review-options input[type="text"] { width: 100%; }
+  .pack-review-detail-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+  .pack-review-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; font-size: 11px; }
+  .pack-review-chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border);
+    border-radius: 6px; padding: 1px 2px 1px 8px; max-width: 100%; overflow-wrap: anywhere; }
+  .pack-review-chip button { padding: 0 6px; font-size: 11px; line-height: 1.6; }
+  .pack-review-compare { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+  .pack-review-compare select { width: 100%; min-width: 0; }
+  .pack-review-result { margin-top: 12px; font-size: 12px; line-height: 1.8; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; min-width: 0; }
+  .pack-review-result[hidden] { display: none; }
+  .pack-review-result h3 { font-size: 12px; margin: 0 0 4px; color: var(--text2); }
+  .pack-review-stats { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .pack-review-stat { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 10px; min-width: 0; }
+  .pack-review-stat .k { display: block; font-size: 11px; color: var(--text2); }
+  .pack-review-stat .v { display: block; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .pack-review-stat .ids { display: block; font-size: 11px; color: var(--text2); overflow-wrap: anywhere; }
+  .pack-review-stat .ids .disclosure { margin: 0; font-size: 11px; }
+  .pack-review-ids { font-family: var(--font-mono); font-size: 11px; overflow-wrap: anywhere; }
+  .pack-review-table td.ids { white-space: normal; min-width: 160px; }
+  /* 全体の tr:first-child の強調（単一ケースの候補表の先頭行）を Review の表には使わない（先頭のケース・グループを特別扱いしない） */
+  .pack-review-table tr:first-child { background: none; }
+  .pack-review-table tr:first-child td { color: var(--text2); font-weight: 400; }
+  .pack-review-note { font-size: 11px; color: var(--text2); line-height: 1.8; overflow-wrap: anywhere; }
+  @media (max-width: 480px) { .pack-review-compare { grid-template-columns: minmax(0, 1fr); } }
+
   /* ===== 結果の鮮度（Phase 2L-B2 / S3-B3B2-B1） ===== */
   .result-wrap { display: flex; flex-direction: column; gap: 12px; }
   .result-freshness {
@@ -1177,6 +1210,63 @@
     </div>
   </div>
 </section>
+<!-- Project Pack Review（Phase 2L-B2 / S3-B3B2-B3）: 全件そろった全ケース計算の結果から、ボタンを押したときだけ
+     ProjectPackReview で review を作り、集計・グループ・ケース一覧・選んだケースの詳細・2 ケースの比較を表示する。
+     値は review の発行物から読むだけで、この欄では計算しない。Project Pack 欄（上の section）の中身は変えない。 -->
+<section class="pack-wrap pack-review" id="pack-review-section" aria-labelledby="pack-review-title">
+  <div class="card" id="pack-review-card">
+    <h2 class="card-title" id="pack-review-title">Pack Review（未レビューの計算結果の確認）</h2>
+    <div class="notice pack-review-trust" id="pack-review-trust" role="note">
+      <strong>pack_unreviewed ／ calculated_not_verified — 計算済み ≠ 検証済み。</strong>
+      OK は計算上の候補判定です。案件原典（構造計算書・図面など）とメーカー検討で確認してください。
+      この Review は正式な案件承認の資料ではありません。
+    </div>
+    <p class="pack-note">
+      全ケース計算が完了した後、「Pack Reviewを生成」を押したときだけ作ります（読込・ケースの選択・計算の完了・
+      ページの切替・画面の切替では作りません）。値は全ケース計算の結果から写したもので、この欄では計算し直しません
+      （選んだケースの詳細だけは、同じ Pack から計算し直して一覧と完全に一致したときだけ表示します）。
+      案件プリセット・入力欄・一括検討・Evidence・Closure には反映しません。保存・送信はしません。
+    </p>
+    <div class="pack-review-options" id="pack-review-options" hidden>
+      <div class="form-group">
+        <label for="pack-review-detail-input">詳細を表示するケース（caseId・最大 50 件）</label>
+        <div class="pack-review-detail-add">
+          <input type="text" id="pack-review-detail-input" spellcheck="false" autocomplete="off"
+            placeholder="caseId を入力して「詳細に追加」"
+            onkeydown="if (event.key === 'Enter') { event.preventDefault(); addProjectPackReviewDetailFromInput(); }">
+          <button type="button" id="btn-pack-review-detail-add" class="btn-secondary"
+            onclick="addProjectPackReviewDetailFromInput()">詳細に追加</button>
+        </div>
+        <div class="pack-review-note" id="pack-review-detail-count" role="status" aria-live="polite"></div>
+        <div class="pack-review-chips" id="pack-review-detail-list" aria-label="詳細に選んだケース"></div>
+        <button type="button" id="btn-pack-review-detail-clear" class="btn-secondary btn-inline"
+          onclick="clearProjectPackReviewDetailSelection()">詳細の選択をすべて外す</button>
+      </div>
+      <div class="form-group">
+        <div class="pack-review-note" id="pack-review-compare-label">2 ケースの比較（任意。差は B − A）</div>
+        <div class="pack-review-compare" role="group" aria-labelledby="pack-review-compare-label">
+          <div>
+            <label for="pack-review-compare-a">比較 A</label>
+            <select id="pack-review-compare-a" onchange="projectPackReviewSelectionChanged()"></select>
+          </div>
+          <div>
+            <label for="pack-review-compare-b">比較 B</label>
+            <select id="pack-review-compare-b" onchange="projectPackReviewSelectionChanged()"></select>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="pack-review-note" id="pack-review-options-note">詳細・比較は、選んでから「Pack Reviewを生成」を押すと表示します。生成した後に選択を変えると、前の Review は消えます（生成し直してください）。</p>
+    <div class="pack-exec-controls">
+      <button type="button" id="btn-pack-review" class="btn-secondary"
+        onclick="generateProjectPackReview()" disabled>Pack Reviewを生成</button>
+      <button type="button" id="btn-pack-review-clear" class="btn-secondary"
+        onclick="clearProjectPackReviewByUser()" disabled>Reviewを消去</button>
+    </div>
+    <div class="pack-status" id="pack-review-status" role="status" aria-live="polite">Project Pack を読み込み、全ケース計算を完了すると Pack Review を生成できます。</div>
+    <div class="pack-review-result" id="pack-review-result" hidden></div>
+  </div>
+</section>
 </div>
 
 <!-- ===== Batch / Scenario Workspace（Phase 2G） ===== -->
@@ -1543,6 +1633,7 @@
 <script src="project-config/project-pack-execution.js"></script>
 <script src="project-config/project-pack-batch.js"></script>
 <script src="project-config/project-pack-report.js"></script>
+<script src="project-config/project-pack-review.js"></script>
 <script src="workspace.js"></script>
 <script src="project-profile.js"></script>
 <script src="review-package.js"></script>
@@ -2356,6 +2447,10 @@ function clearProjectPackBatch(statusText, isError) {
   // 一括の結果が無くなれば、そこから作った派生レポートも消す（S3-B3B1）
   clearProjectPackReport(projectPackReportOutput ? PROJECT_PACK_REPORT_CLEARED : '');
   renderProjectPackReportControls();
+  // 一括の結果が無くなれば、そこから作った Pack Review も消す（S3-B3B2-B3。選択も持ち越さない）
+  clearProjectPackReview(currentProjectPackReview ? PROJECT_PACK_REVIEW_CLEARED : PROJECT_PACK_REVIEW_NOT_READY);
+  projectPackReviewResetSelection();
+  renderProjectPackReviewControls();
 }
 
 /* staged context に合わせて欄を開閉する。ctx が null なら閉じる。どちらでも一覧と進行中の run は捨てる。 */
@@ -2466,6 +2561,8 @@ function stepProjectPackBatch(job) {
   renderProjectPackBatchStatus('全 ' + result.totalCases + ' ケースを計算しました（未レビュー。計算済み ≠ 検証済み）。', false);
   renderProjectPackReportControls();
   renderProjectPackReportStatus(PROJECT_PACK_REPORT_IDLE, false);
+  renderProjectPackReviewControls();
+  renderProjectPackReviewStatus(PROJECT_PACK_REVIEW_IDLE, false);
 }
 
 /* ページの切替。確定した一覧を表示し直すだけで、計算しない。 */
@@ -2666,6 +2763,612 @@ function showProjectPackReport(kind) {
 function clearProjectPackReportByUser() {
   clearProjectPackReport('出力を消去しました。現在有効な出力はありません。');
   renderProjectPackReportControls();
+  return true;
+}
+
+/* ============================================================
+   Project Pack Review（Phase 2L-B2 / S3-B3B2-B3）— 明示操作だけ・確定した一括結果からだけ・未レビュー
+
+   確定した全ケース計算の結果（stagedProjectPackBatch）と、それを発行した staged context（stagedProjectPackContext）から、
+   ProjectPackReview.buildPackReview() で review を作り、集計・グループ・ケース一覧・選んだケースの詳細・2 ケースの比較を
+   表示する。値はすべて review の発行物から読む（この欄で風圧・余裕比などを計算し直さない）。
+   - 発行元の確認は module に任せる: buildPackReview() は ProjectPackBatch.assertBatchOrigin(batch, ctx) で、同じ context
+     instance から発行された batch だけを通す。UI 側の確認（下の projectPackReviewIsCurrent）はその代わりではなく、
+     現在の Pack・試行・batch・計算中でないことを、作る直前と表示を確定する直前に確かめるためのもの。
+   - 作るのは「Pack Reviewを生成」を押したときだけ。読込・preview・ケースの選択・計算の完了・ページの切替・画面の切替では
+     作らない。失敗したら固定文だけを出し、途中まで作った review を残さない（前の review も残さない）。
+   - 新しい Pack の読込開始・読込失敗・解除・計算の開始・キャンセル・計算の失敗・context の変化では、一括の結果と一緒に
+     消える（clearProjectPackBatch が clearProjectPackReview を呼ぶ）。画面の切替では消さない・作り直さない。
+   - 詳細（最大 50 件）と比較（異なる 2 件・差は B − A）は、選んでから生成したときだけ表示する。生成後に選択を変えて
+     前の review が新しい指定と一致しなくなったら、前の review は表示しない（消す。作り直すのは生成のボタンだけ）。
+   - 一覧は 50 行ずつ表示するが、review は全ケースのまま持つ（表示のために切り詰めた review を作らない）。
+   - 推奨候補の無いケースの余裕比・余裕差は null のまま「—」と表示する（0 にしない）。最大設計風圧と最小余裕比は別の指標。
+   - review を active context・入力 package・一括検討・Evidence・Closure・Promotion へ流さない。保存・送信しない。
+   - 表示は textContent / createElement だけ。例外の文面・出典の申告（sourceClaim など）は表示しない。
+   - ProjectPackReview はこの script の初期化時に 1 度だけ掴む（後から global を読み直さない）。
+============================================================ */
+
+var PACK_REVIEW_MODULE = (typeof ProjectPackReview === 'object' && ProjectPackReview) ? ProjectPackReview : null;
+var PROJECT_PACK_REVIEW_PAGE_SIZE = 50;
+var PROJECT_PACK_REVIEW_MAX_DETAILS = 50;
+var PROJECT_PACK_REVIEW_INLINE_IDS = 10;
+var PROJECT_PACK_REVIEW_FAILURE = 'Pack Review を生成できませんでした。現在有効な Review はありません。';
+var PROJECT_PACK_REVIEW_NOT_READY = 'Project Pack を読み込み、全ケース計算を完了すると Pack Review を生成できます。';
+var PROJECT_PACK_REVIEW_IDLE = 'Pack Review は「Pack Reviewを生成」を押したときだけ作ります。詳細・比較は、選んでから生成すると表示します。';
+var PROJECT_PACK_REVIEW_CLEARED = '全ケース計算の結果が変わったので、Pack Review を消しました。現在有効な Review はありません。';
+var PROJECT_PACK_REVIEW_SELECTION_STALE = '詳細・比較の選択が変わったので、前の Pack Review を消しました。「Pack Reviewを生成」を押すと新しい選択で作ります。現在有効な Review はありません。';
+var PROJECT_PACK_REVIEW_DETAIL_UNKNOWN = 'そのケースは全ケース計算の結果にありません（入力した文字列は表示しません）。詳細には追加していません。';
+var PROJECT_PACK_REVIEW_DETAIL_DUPLICATE = 'そのケースはすでに詳細に選んでいます。重複しては追加しません。';
+var PROJECT_PACK_REVIEW_DETAIL_LIMIT = '詳細に選べるのは最大 50 件です。これ以上は追加しません（選択を切り詰めることもしません）。';
+var PROJECT_PACK_REVIEW_DETAIL_TOO_MANY = '詳細の選択が 50 件を超えているため、Pack Review を生成しませんでした（切り詰めません）。現在有効な Review はありません。';
+var PROJECT_PACK_REVIEW_COMPARE_INCOMPLETE = '比較は A と B の 2 ケースを選んでください（片方だけでは比較しません）。現在有効な Review はありません。';
+var PROJECT_PACK_REVIEW_COMPARE_SAME = '比較の A と B に同じケースは選べません。現在有効な Review はありません。';
+// 生成の失敗として表示してよい文（これ以外の理由はすべて PROJECT_PACK_REVIEW_FAILURE にする。例外の文面は出さない）
+var PROJECT_PACK_REVIEW_SELECTION_FAILURES = [PROJECT_PACK_REVIEW_DETAIL_TOO_MANY, PROJECT_PACK_REVIEW_COMPARE_INCOMPLETE,
+  PROJECT_PACK_REVIEW_COMPARE_SAME];
+var currentProjectPackReview = null;
+var projectPackReviewDetailIds = [];
+var projectPackReviewChoicesBatch = null;
+
+function renderProjectPackReviewStatus(text, isError) {
+  var status = document.getElementById('pack-review-status');
+  if (!status) return;
+  status.className = isError ? 'pack-status is-error' : 'pack-status';
+  status.textContent = text;
+}
+
+/* review を消す（state と表示の両方）。詳細・比較の選択は残す（選択を消すのは projectPackReviewResetSelection）。 */
+function clearProjectPackReview(statusText, isError) {
+  currentProjectPackReview = null;
+  var box = document.getElementById('pack-review-result');
+  if (box) { box.textContent = ''; box.hidden = true; }
+  var clear = document.getElementById('btn-pack-review-clear');
+  if (clear) clear.disabled = true;
+  renderProjectPackReviewStatus(statusText || '', isError === true);
+}
+
+/* この batch と context から review を作ってよいか（発行物・現在の結果と context・作成時の試行・計算中でない）。
+   発行元の確認（同じ context instance から発行されたか）は buildPackReview() の assertBatchOrigin が行う。 */
+function projectPackReviewIsCurrent(batch, ctx) {
+  return PACK_REVIEW_MODULE !== null && PACK_BATCH_MODULE !== null && batch !== null && ctx !== null &&
+    PACK_BATCH_MODULE.isBatchResult(batch) && batch === stagedProjectPackBatch && ctx === stagedProjectPackContext &&
+    projectPackBatchJob === null && projectPackBatchOrigin !== null && projectPackBatchOrigin.batch === batch &&
+    projectPackBatchOrigin.attempt === projectPackAttempt && projectPackBatchOrigin.ctx === ctx;
+}
+
+/* 詳細・比較の選択を消す（一括の結果が変わったとき。caseId の集合が変わりうるので持ち越さない）。 */
+function projectPackReviewResetSelection() {
+  projectPackReviewDetailIds = [];
+  projectPackReviewChoicesBatch = null;
+  ['pack-review-compare-a', 'pack-review-compare-b'].forEach(function (id) {
+    var select = document.getElementById(id);
+    if (select) select.textContent = '';
+  });
+  var input = document.getElementById('pack-review-detail-input');
+  if (input) input.value = '';
+  renderProjectPackReviewDetailList();
+}
+
+/* 確定した一括結果があって計算中の run が無いときだけ、生成のボタンと選択の欄を出す。 */
+function renderProjectPackReviewControls() {
+  var batch = stagedProjectPackBatch;
+  var ready = projectPackReviewIsCurrent(batch, stagedProjectPackContext);
+  var generate = document.getElementById('btn-pack-review');
+  if (generate) generate.disabled = !ready;
+  var clear = document.getElementById('btn-pack-review-clear');
+  if (clear) clear.disabled = currentProjectPackReview === null;
+  var options = document.getElementById('pack-review-options');
+  if (options) options.hidden = !ready;
+  if (ready && projectPackReviewChoicesBatch !== batch) {
+    // 比較の選択肢は batch の caseId を batch の並びのまま（値は caseId だけ）
+    ['pack-review-compare-a', 'pack-review-compare-b'].forEach(function (id) {
+      var select = document.getElementById(id);
+      if (!select) return;
+      select.textContent = '';
+      select.appendChild(packReviewOption('', '（比較しない）'));
+      batch.rows.forEach(function (row) { select.appendChild(packReviewOption(row.caseId, row.caseId)); });
+      select.value = '';
+    });
+    projectPackReviewChoicesBatch = batch;
+  }
+  renderProjectPackReviewDetailList();
+}
+
+function packReviewOption(value, text) {
+  var opt = document.createElement('option');
+  opt.value = value;
+  opt.textContent = text;
+  return opt;
+}
+
+/* 現在の一括結果の caseId（詳細の選択が結果の中のケースかを確かめるため）。 */
+function projectPackReviewKnownCaseIds() {
+  var known = Object.create(null);
+  if (!projectPackReviewIsCurrent(stagedProjectPackBatch, stagedProjectPackContext)) return known;
+  stagedProjectPackBatch.rows.forEach(function (row) { known[row.caseId] = true; });
+  return known;
+}
+
+/* 詳細に 1 件追加する。追加できなければ固定文を返す（入力した文字列は表示しない）。 */
+function addProjectPackReviewDetail(caseId) {
+  if (typeof caseId !== 'string' || projectPackReviewKnownCaseIds()[caseId] !== true) return PROJECT_PACK_REVIEW_DETAIL_UNKNOWN;
+  if (projectPackReviewDetailIds.indexOf(caseId) !== -1) return PROJECT_PACK_REVIEW_DETAIL_DUPLICATE;
+  if (projectPackReviewDetailIds.length >= PROJECT_PACK_REVIEW_MAX_DETAILS) return PROJECT_PACK_REVIEW_DETAIL_LIMIT;
+  projectPackReviewDetailIds.push(caseId);
+  projectPackReviewSelectionChanged();
+  return null;
+}
+
+function addProjectPackReviewDetailFromInput() {
+  var input = document.getElementById('pack-review-detail-input');
+  var caseId = input ? input.value.trim() : '';
+  if (input) input.value = '';
+  var refused = addProjectPackReviewDetail(caseId);
+  if (refused !== null) renderProjectPackReviewStatus(refused, true);
+  return refused === null;
+}
+
+function removeProjectPackReviewDetail(caseId) {
+  var at = projectPackReviewDetailIds.indexOf(caseId);
+  if (at === -1) return false;
+  projectPackReviewDetailIds.splice(at, 1);
+  projectPackReviewSelectionChanged();
+  return true;
+}
+
+function clearProjectPackReviewDetailSelection() {
+  projectPackReviewDetailIds = [];
+  projectPackReviewSelectionChanged();
+  return true;
+}
+
+/* 選んだ詳細の一覧（chip と件数）。値は caseId だけ。 */
+function renderProjectPackReviewDetailList() {
+  var list = document.getElementById('pack-review-detail-list');
+  if (list) {
+    list.textContent = '';
+    projectPackReviewDetailIds.forEach(function (caseId) {
+      var chip = packEl('span', null, 'pack-review-chip');
+      chip.appendChild(packEl('span', caseId));
+      var remove = packEl('button', '×', 'btn-secondary');
+      remove.type = 'button';
+      remove.setAttribute('aria-label', '詳細の選択から外す: ' + caseId);
+      remove.onclick = function () { removeProjectPackReviewDetail(caseId); };
+      chip.appendChild(remove);
+      list.appendChild(chip);
+    });
+  }
+  var count = document.getElementById('pack-review-detail-count');
+  if (count) count.textContent = '詳細に選んだケース: ' + projectPackReviewDetailIds.length + ' / ' + PROJECT_PACK_REVIEW_MAX_DETAILS + ' 件';
+}
+
+/* 今の選択（詳細・比較）。比較は A・B の両方が空なら null。形が不正なら固定文の Error を投げる（切り詰めない）。 */
+function projectPackReviewRequestedSelection() {
+  var detail = projectPackReviewDetailIds.slice();
+  if (detail.length > PROJECT_PACK_REVIEW_MAX_DETAILS) throw projectPackReviewSelectionError(PROJECT_PACK_REVIEW_DETAIL_TOO_MANY);
+  var a = document.getElementById('pack-review-compare-a');
+  var b = document.getElementById('pack-review-compare-b');
+  var av = a ? a.value : '';
+  var bv = b ? b.value : '';
+  var comparison = null;
+  if (av !== '' || bv !== '') {
+    if (av === '' || bv === '') throw projectPackReviewSelectionError(PROJECT_PACK_REVIEW_COMPARE_INCOMPLETE);
+    if (av === bv) throw projectPackReviewSelectionError(PROJECT_PACK_REVIEW_COMPARE_SAME);
+    comparison = [av, bv];
+  }
+  return { detailCaseIds: detail, comparisonCaseIds: comparison };
+}
+
+function projectPackReviewSelectionError(fixedText) {
+  var e = new Error('Pack Review selection');
+  e.projectPackReviewFixedText = fixedText;
+  return e;
+}
+
+function projectPackReviewSameSelection(x, y) {
+  return x.detailCaseIds.length === y.detailCaseIds.length &&
+    x.detailCaseIds.every(function (id, i) { return id === y.detailCaseIds[i]; }) &&
+    (x.comparisonCaseIds === null) === (y.comparisonCaseIds === null) &&
+    (x.comparisonCaseIds === null || (x.comparisonCaseIds[0] === y.comparisonCaseIds[0] && x.comparisonCaseIds[1] === y.comparisonCaseIds[1]));
+}
+
+/* 表示中の review が今の選択（詳細・比較の指定）で作ったものか（選択が不正なら false）。 */
+function projectPackReviewSelectionMatches(state) {
+  try {
+    return projectPackReviewSameSelection(projectPackReviewRequestedSelection(), state.selection);
+  } catch (e) {
+    return false;
+  }
+}
+
+/* review の詳細・比較が、渡した選択どおりか（順序・件数・caseId）。 */
+function projectPackReviewMatchesSelection(review, selection) {
+  var details = review.selectedDetails;
+  if (details.length !== selection.detailCaseIds.length) return false;
+  if (!details.every(function (d, i) { return d.caseId === selection.detailCaseIds[i]; })) return false;
+  if (selection.comparisonCaseIds === null) return review.comparison === null;
+  return review.comparison !== null && review.comparison.caseIds.length === 2 &&
+    review.comparison.caseIds[0] === selection.comparisonCaseIds[0] && review.comparison.caseIds[1] === selection.comparisonCaseIds[1] &&
+    review.comparison.a.caseId === selection.comparisonCaseIds[0] && review.comparison.b.caseId === selection.comparisonCaseIds[1];
+}
+
+/* 詳細・比較の選択が変わった。表示中の review が新しい指定と一致しなくなったら、前の review を消す
+   （作り直さない。作るのは「Pack Reviewを生成」を押したときだけ）。 */
+function projectPackReviewSelectionChanged() {
+  renderProjectPackReviewDetailList();
+  var state = currentProjectPackReview;
+  if (!state || projectPackReviewSelectionMatches(state)) return;
+  clearProjectPackReview(PROJECT_PACK_REVIEW_SELECTION_STALE, false);
+  renderProjectPackReviewControls();
+}
+
+function generateProjectPackReview() {
+  clearProjectPackReview('');
+  var batch = stagedProjectPackBatch;
+  var ctx = stagedProjectPackContext;
+  var attempt = projectPackAttempt;
+  var state;
+  try {
+    if (!projectPackReviewIsCurrent(batch, ctx)) throw new Error('stale or missing batch result');
+    var selection = projectPackReviewRequestedSelection();
+    // 比較しないときは comparisonCaseIds を渡さない（空配列・null を値として渡さない）
+    var options = { detailCaseIds: selection.detailCaseIds.slice() };
+    if (selection.comparisonCaseIds !== null) options.comparisonCaseIds = selection.comparisonCaseIds.slice();
+    var review = PACK_REVIEW_MODULE.buildPackReview(batch, ctx, options);
+    PACK_REVIEW_MODULE.assertPackReview(review);
+    if (review.trust !== 'pack_unreviewed' || review.interpretation !== 'calculated_not_verified') throw new Error('unexpected trust');
+    if (review.totalCases !== batch.totalCases || review.rows.length !== batch.rows.length) throw new Error('incomplete review');
+    if (!projectPackReviewMatchesSelection(review, selection)) throw new Error('review does not match the selection');
+    state = { review: review, batch: batch, ctx: ctx, attempt: attempt, selection: selection, page: 0 };
+    // 表示は切り離した要素へ組み立て、最後に一度だけ欄へ付ける（途中で失敗したら何も付けない）
+    var view = packReviewView(state);
+    // 確定の直前にもう一度確かめる（作っている間に解除・読込・計算の開始があれば捨てる）
+    if (!projectPackReviewIsCurrent(batch, ctx) || attempt !== projectPackAttempt) throw new Error('stale batch result');
+    var box = document.getElementById('pack-review-result');
+    if (!box) throw new Error('no output area');
+    box.textContent = '';
+    box.appendChild(view);
+    box.hidden = false;
+    currentProjectPackReview = state;
+  } catch (e) {
+    var fixed = e && PROJECT_PACK_REVIEW_SELECTION_FAILURES.indexOf(e.projectPackReviewFixedText) !== -1
+      ? e.projectPackReviewFixedText : PROJECT_PACK_REVIEW_FAILURE;
+    clearProjectPackReview(fixed, true);
+    renderProjectPackReviewControls();
+    return false;
+  }
+  renderProjectPackReviewControls();
+  renderProjectPackReviewStatus('Pack Review を生成しました（全 ' + state.review.totalCases + ' ケース・詳細 ' +
+    state.review.selectedDetails.length + ' 件・比較 ' + (state.review.comparison ? 'あり' : 'なし') +
+    '。未レビュー・計算済み ≠ 検証済み）。', false);
+  return true;
+}
+
+/* 一覧のページの切替。表示中の review の行を表示し直すだけで、review を作り直さない・計算しない。 */
+function showProjectPackReviewPage(page) {
+  var state = currentProjectPackReview;
+  if (!state) return false;
+  if (!projectPackReviewIsCurrent(state.batch, state.ctx) || state.attempt !== projectPackAttempt) {
+    clearProjectPackReview(PROJECT_PACK_REVIEW_CLEARED, false);
+    renderProjectPackReviewControls();
+    return false;
+  }
+  var box = document.getElementById('pack-review-rows');
+  if (!box) return false;
+  renderProjectPackReviewRows(box, state, page);
+  return true;
+}
+
+/* ---------- 表示（textContent / createElement だけ。値は review の発行物からだけ読む） ---------- */
+
+function packReviewPressure(value) {
+  return value.toFixed(1);
+}
+
+/* 余裕比・余裕差。推奨候補が無いケースは null のまま「—」（0 にしない）。 */
+function packReviewRatio(value) {
+  return value === null ? '—（推奨候補なし）' : value.toFixed(3);
+}
+
+function packReviewMargin(value) {
+  return value === null ? '—（推奨候補なし）' : value.toFixed(1);
+}
+
+/* 比較の A・B の値（寸法・評価高さは review の値のまま、風圧は小数 1 桁）。 */
+function packReviewValue(value, digits) {
+  return digits === 1 ? value.toFixed(1) : String(value);
+}
+
+/* 比較の差（B − A）。片方に値が無ければ null のまま「—」（0 にしない）。 */
+function packReviewDifference(value, digits) {
+  if (value === null) return '—（片方に値なし）';
+  return (value > 0 ? '+' : '') + value.toFixed(digits);
+}
+
+/* 階・部位は宣言されているものだけ（宣言の無いものを補わない）。 */
+function packReviewPlace(row) {
+  var parts = [];
+  if (Object.prototype.hasOwnProperty.call(row, 'floor')) parts.push(floorDisplayLabel(row.floor));
+  if (Object.prototype.hasOwnProperty.call(row, 'zone')) parts.push(packZoneText(row.zone));
+  return parts.length > 0 ? parts.join(' / ') : '—（宣言なし）';
+}
+
+function packReviewIds(ids) {
+  return ids.length > 0 ? ids.join(', ') : '—';
+}
+
+function packReviewCell(tr, tag, text, className) {
+  tr.appendChild(packEl(tag, text, className));
+}
+
+function packReviewTable(headers) {
+  var table = packEl('table', null, 'pack-batch-table pack-review-table');
+  var head = packEl('tr');
+  headers.forEach(function (h) {
+    var th = packEl('th', h);
+    th.setAttribute('scope', 'col');
+    head.appendChild(th);
+  });
+  var thead = packEl('thead');
+  thead.appendChild(head);
+  table.appendChild(thead);
+  var tbody = packEl('tbody');
+  table.appendChild(tbody);
+  return { table: table, body: tbody };
+}
+
+function packReviewScroll(table) {
+  var scroll = packEl('div', null, 'pack-batch-scroll');
+  scroll.appendChild(table);
+  return scroll;
+}
+
+/* 集計の 1 項目。該当の caseId はすべて（batch 順・切り詰めない）。多いときは件数を出し、一覧は開いて読む。 */
+function packReviewStat(box, label, value, ids) {
+  var stat = packEl('div', null, 'pack-review-stat');
+  stat.appendChild(packEl('span', label, 'k'));
+  stat.appendChild(packEl('span', value, 'v'));
+  if (ids !== undefined) {
+    var wrap = packEl('div', null, 'ids');
+    wrap.appendChild(packEl('span', '該当 ' + ids.length + ' 件', 'ids-count'));
+    var list = packEl('div', packReviewIds(ids), 'pack-review-ids');
+    if (ids.length > PROJECT_PACK_REVIEW_INLINE_IDS) {
+      var more = packEl('details', null, 'disclosure');
+      more.appendChild(packEl('summary', 'caseId を表示'));
+      more.appendChild(list);
+      wrap.appendChild(more);
+    } else {
+      wrap.appendChild(list);
+    }
+    stat.appendChild(wrap);
+  }
+  box.appendChild(stat);
+  return stat;
+}
+
+/* review 全体の表示（切り離した要素）。 */
+function packReviewView(state) {
+  var review = state.review;
+  var root = packEl('div');
+  packSection(root, '未レビューの Pack Review', [
+    'trust: ' + review.trust + '（未レビュー） ／ interpretation: ' + review.interpretation + '（計算済み ≠ 検証済み）',
+    '公開表示名: ' + review.publicLabel,
+    'pressureModel.mode: ' + review.pressureMode,
+    '全ケース数: ' + review.totalCases + '（全ケース計算の結果のすべての行）'
+  ]);
+  root.appendChild(packReviewSummaryView(review));
+  root.appendChild(packReviewGroupsView(review));
+  var rows = packEl('div');
+  rows.id = 'pack-review-rows';
+  renderProjectPackReviewRows(rows, state, state.page);
+  root.appendChild(rows);
+  root.appendChild(packReviewDetailsView(review));
+  root.appendChild(packReviewComparisonView(review));
+  root.appendChild(packEl('p', 'OK は計算上の候補判定で、Evidence の確認ではありません。この Review は未レビューの Pack から' +
+    '計算した結果を確かめるためのもので、正式な案件承認の資料ではありません。案件プリセット・入力欄・一括検討・Evidence・' +
+    'Closure には反映しません。', 'pack-review-note'));
+  return root;
+}
+
+/* 集計（review.summary の値だけ。最大設計風圧と最小余裕比は別の指標として並べる）。 */
+function packReviewSummaryView(review) {
+  var s = review.summary;
+  var box = packEl('div');
+  box.id = 'pack-review-summary';
+  box.appendChild(packEl('h3', '集計'));
+  var stats = packEl('div', null, 'pack-review-stats');
+  packReviewStat(stats, '全ケース数', String(s.totalCases));
+  packReviewStat(stats, '推奨候補あり', String(s.withOkCandidateCount));
+  packReviewStat(stats, '推奨候補なし', String(s.withoutOkCandidateCount));
+  packReviewStat(stats, '適用範囲外の候補を含むケース', String(s.outOfScopePresentCount));
+  packReviewStat(stats, '最大設計風圧 ' + review.units.pressure, packReviewPressure(s.maxDesignPressure),
+    s.maxDesignPressureCaseIds);
+  packReviewStat(stats, '最小余裕比（推奨候補の許容風圧 ÷ 設計風圧）',
+    s.minMarginRatio === null ? '—（推奨候補のあるケースなし）' : packReviewRatio(s.minMarginRatio),
+    s.minMarginRatioCaseIds);
+  box.appendChild(stats);
+  box.appendChild(packEl('p', '最大設計風圧と最小余裕比は別の指標です（同じケースとは限りません）。同じ値のケースはすべて' +
+    '全ケース計算の並び順で示します。余裕比は安全性の判定・承認ではありません。', 'pack-review-note'));
+  return box;
+}
+
+/* グループ（review.groups の 3 分類をそのまま。件数・並びは review のとおり。caseId の一覧は開いて読む）。 */
+function packReviewGroupsView(review) {
+  var box = packEl('div');
+  box.id = 'pack-review-groups';
+  box.appendChild(packEl('h3', 'グループ'));
+  var specs = [
+    { title: '推奨候補の構成別', groups: review.groups.byRecommended,
+      name: function (g) { return g.label === null ? '推奨候補なし' : g.label; } },
+    { title: '階別', groups: review.groups.byFloor,
+      name: function (g) { return g.declared ? floorDisplayLabel(g.floor) : '未宣言（階の宣言なし）'; } },
+    { title: '部位別', groups: review.groups.byZone,
+      name: function (g) { return g.declared ? packZoneText(g.zone) : '未宣言（部位の宣言なし）'; } }
+  ];
+  specs.forEach(function (spec) {
+    var t = packReviewTable([spec.title, 'ケース数', 'caseId（全ケース計算の並び順）']);
+    spec.groups.forEach(function (g) {
+      var tr = packEl('tr');
+      packReviewCell(tr, 'td', spec.name(g));
+      packReviewCell(tr, 'td', String(g.count), 'num');
+      var cell = packEl('td', null, 'ids');
+      var more = packEl('details', null, 'disclosure');
+      more.appendChild(packEl('summary', g.count + ' 件の caseId を表示'));
+      more.appendChild(packEl('div', packReviewIds(g.caseIds), 'pack-review-ids'));
+      cell.appendChild(more);
+      tr.appendChild(cell);
+      t.body.appendChild(tr);
+    });
+    box.appendChild(packReviewScroll(t.table));
+  });
+  box.appendChild(packEl('p', 'グループは Review の確認用です。Evidence の分類や、案件の正式な階・部位の一覧ではありません。',
+    'pack-review-note'));
+  return box;
+}
+
+/* ケース一覧の 1 ページ（review.rows の全件から。ページの切替では作り直さない）。 */
+function renderProjectPackReviewRows(box, state, page) {
+  var review = state.review;
+  box.textContent = '';
+  var size = PROJECT_PACK_REVIEW_PAGE_SIZE;
+  var pages = Math.max(1, Math.ceil(review.rows.length / size));
+  var current = Math.min(Math.max(0, Math.floor(page) || 0), pages - 1);
+  var from = current * size;
+  var rows = review.rows.slice(from, from + size);
+  box.appendChild(packEl('h3', 'ケース一覧（全 ' + review.totalCases + ' ケース）'));
+  var nav = packEl('div', null, 'pack-exec-controls');
+  var prev = packEl('button', '前のページ', 'btn-secondary');
+  prev.type = 'button';
+  prev.disabled = current === 0;
+  prev.onclick = function () { showProjectPackReviewPage(current - 1); };
+  var next = packEl('button', '次のページ', 'btn-secondary');
+  next.type = 'button';
+  next.disabled = current >= pages - 1;
+  next.onclick = function () { showProjectPackReviewPage(current + 1); };
+  nav.appendChild(prev);
+  nav.appendChild(next);
+  nav.appendChild(packEl('span', (rows.length > 0 ? (from + 1) + '–' + (from + rows.length) : '0') + ' / ' +
+    review.totalCases + ' ケース（' + (current + 1) + ' / ' + pages + ' ページ）', 'batch-count'));
+  box.appendChild(nav);
+  var t = packReviewTable(['ケース', 'Pane', '階/部位', '寸法 W×H ' + review.units.length, 'ガラス',
+    '設計風圧 ' + review.units.pressure, '推奨候補', '許容風圧 ' + review.units.pressure, '余裕比', '余裕差 ' + review.units.pressure,
+    '候補数 OK/NG/適用範囲外']);
+  rows.forEach(function (r) {
+    var tr = packEl('tr');
+    packReviewCell(tr, 'td', r.caseId);
+    packReviewCell(tr, 'td', r.paneId);
+    packReviewCell(tr, 'td', packReviewPlace(r));
+    packReviewCell(tr, 'td', r.widthMm + ' × ' + r.heightMm, 'num');
+    packReviewCell(tr, 'td', r.glassType);
+    packReviewCell(tr, 'td', packReviewPressure(r.designPressure), 'num');
+    packReviewCell(tr, 'td', r.bestCandidate ? r.bestCandidate.label : '—（推奨候補なし）');
+    packReviewCell(tr, 'td', r.bestCandidate ? packReviewPressure(r.bestCandidate.P) : '—', 'num');
+    packReviewCell(tr, 'td', packReviewRatio(r.marginRatio), 'num');
+    packReviewCell(tr, 'td', packReviewMargin(r.marginPressure), 'num');
+    packReviewCell(tr, 'td', r.okCount + ' / ' + r.ngCount + ' / ' + r.outOfScopeCount, 'num');
+    t.body.appendChild(tr);
+  });
+  box.appendChild(packReviewScroll(t.table));
+  state.page = current;
+}
+
+/* 選んだケースの詳細（review.selectedDetails。同じ Pack から計算し直して一覧と完全に一致したものだけ）。 */
+function packReviewDetailsView(review) {
+  var details = packEl('details', null, 'disclosure');
+  details.id = 'pack-review-details';
+  details.appendChild(packEl('summary', '選んだケースの詳細（' + review.selectedDetails.length + ' 件）'));
+  var body = packEl('div', null, 'disclosure-body');
+  if (review.selectedDetails.length === 0) {
+    body.appendChild(packEl('p', '詳細を表示するケースは選ばれていません。上の欄で caseId を選び、生成し直すと表示します。', 'pack-review-note'));
+  }
+  review.selectedDetails.forEach(function (d) {
+    var lines = ['caseId: ' + d.caseId + ' ／ Pane: ' + d.paneId, '階/部位: ' + packReviewPlace(d),
+      '寸法: ' + d.widthMm + ' × ' + d.heightMm + ' ' + review.units.length + '（面積 ' + d.areaM2 + ' ' + review.units.area + '）',
+      'ガラス: ' + d.glassType + ' ／ 告示外の追加低減係数: ' + d.extraFactor,
+      '風圧の出どころ: ' + d.pressureSource + '（pressureModel.mode: ' + d.pressureMode + '）',
+      '設計風圧: ' + packReviewPressure(d.designPressure) + ' ' + review.units.pressure];
+    if (Object.prototype.hasOwnProperty.call(d, 'positivePressure')) lines.push('正圧: ' + packReviewPressure(d.positivePressure));
+    if (Object.prototype.hasOwnProperty.call(d, 'negativePressure')) lines.push('負圧: ' + packReviewPressure(d.negativePressure));
+    if (Object.prototype.hasOwnProperty.call(d, 'negativePressureMagnitude')) {
+      lines.push('負圧（絶対値）: ' + packReviewPressure(d.negativePressureMagnitude));
+    }
+    if (Object.prototype.hasOwnProperty.call(d, 'evaluationHeightM')) lines.push('評価高さ: ' + d.evaluationHeightM + ' m');
+    lines.push('推奨候補: ' + (d.bestCandidate ? d.bestCandidate.label + '（許容風圧 ' + packReviewPressure(d.bestCandidate.P) + '）' : '—（推奨候補なし）'));
+    lines.push('余裕比: ' + packReviewRatio(d.marginRatio) + ' ／ 余裕差: ' + packReviewMargin(d.marginPressure));
+    lines.push('候補数 OK / NG / 適用範囲外: ' + d.okCount + ' / ' + d.ngCount + ' / ' + d.outOfScopeCount);
+    var section = packSection(body, 'ケース ' + d.caseId, lines);
+    var list = packEl('details', null, 'disclosure');
+    list.appendChild(packEl('summary', '候補の一覧（' + d.candidateSummary.length + ' 件）'));
+    var t = packReviewTable(['候補', '許容風圧 ' + review.units.pressure, '判定']);
+    d.candidateSummary.forEach(function (c) {
+      var tr = packEl('tr');
+      packReviewCell(tr, 'td', c.label);
+      packReviewCell(tr, 'td', packReviewPressure(c.P), 'num');
+      packReviewCell(tr, 'td', c.status === 'ok' ? 'OK（計算上の候補判定）' : c.status === 'ng' ? 'NG' : '適用範囲外');
+      t.body.appendChild(tr);
+    });
+    list.appendChild(packReviewScroll(t.table));
+    section.appendChild(list);
+  });
+  details.appendChild(body);
+  return details;
+}
+
+/* 2 ケースの比較（review.comparison。差は B − A。片方に値が無ければ「—」）。 */
+function packReviewComparisonView(review) {
+  var details = packEl('details', null, 'disclosure');
+  details.id = 'pack-review-comparison';
+  var c = review.comparison;
+  details.appendChild(packEl('summary', c ? '2 ケースの比較（A: ' + c.caseIds[0] + ' ／ B: ' + c.caseIds[1] + '）' : '2 ケースの比較（なし）'));
+  var body = packEl('div', null, 'disclosure-body');
+  if (!c) {
+    body.appendChild(packEl('p', '比較は選ばれていません。比較 A・B を選び、生成し直すと表示します。', 'pack-review-note'));
+    details.appendChild(body);
+    return details;
+  }
+  var unit = review.units.pressure;
+  var specs = [['widthMm', '幅 W ' + review.units.length, 0], ['heightMm', '高さ H ' + review.units.length, 0],
+    ['designPressure', '設計風圧 ' + unit, 1], ['evaluationHeightM', '評価高さ m', 3], ['positivePressure', '正圧 ' + unit, 1],
+    ['negativePressure', '負圧 ' + unit, 1], ['negativePressureMagnitude', '負圧（絶対値） ' + unit, 1]];
+  var t = packReviewTable(['項目', 'A', 'B', '差（B − A）']);
+  specs.forEach(function (spec) {
+    if (!Object.prototype.hasOwnProperty.call(c.difference, spec[0])) return;
+    var tr = packEl('tr');
+    packReviewCell(tr, 'td', spec[1]);
+    packReviewCell(tr, 'td', packReviewValue(c.a[spec[0]], spec[2]), 'num');
+    packReviewCell(tr, 'td', packReviewValue(c.b[spec[0]], spec[2]), 'num');
+    packReviewCell(tr, 'td', packReviewDifference(c.difference[spec[0]], spec[2]), 'num');
+    t.body.appendChild(tr);
+  });
+  [['allowablePressure', '推奨候補の許容風圧 ' + unit, function (r) { return r.bestCandidate ? packReviewPressure(r.bestCandidate.P) : '—（推奨候補なし）'; }, 1],
+    ['marginRatio', '余裕比', function (r) { return packReviewRatio(r.marginRatio); }, 3],
+    ['marginPressure', '余裕差 ' + unit, function (r) { return packReviewMargin(r.marginPressure); }, 1]].forEach(function (spec) {
+    var tr = packEl('tr');
+    packReviewCell(tr, 'td', spec[1]);
+    packReviewCell(tr, 'td', spec[2](c.a), 'num');
+    packReviewCell(tr, 'td', spec[2](c.b), 'num');
+    packReviewCell(tr, 'td', packReviewDifference(c.difference[spec[0]], spec[3]), 'num');
+    t.body.appendChild(tr);
+  });
+  body.appendChild(packReviewScroll(t.table));
+  var same = packReviewTable(['属性', 'A と B']);
+  [['paneId', 'Pane'], ['glassType', 'ガラス'], ['recommendedLabel', '推奨候補の構成'], ['floor', '階'], ['zone', '部位']].forEach(function (spec) {
+    var v = c.sameValue[spec[0]];
+    var tr = packEl('tr');
+    packReviewCell(tr, 'td', spec[1]);
+    packReviewCell(tr, 'td', v === null ? '—（片方または両方に値なし）' : v ? '一致' : '不一致');
+    same.body.appendChild(tr);
+  });
+  body.appendChild(packReviewScroll(same.table));
+  body.appendChild(packEl('p', '比較は 2 ケースの値の違いを示すだけで、どちらが案件に適合するかを判定するものではありません。',
+    'pack-review-note'));
+  details.appendChild(body);
+  return details;
+}
+
+function clearProjectPackReviewByUser() {
+  clearProjectPackReview('Pack Review を消去しました。現在有効な Review はありません。');
+  renderProjectPackReviewControls();
   return true;
 }
 

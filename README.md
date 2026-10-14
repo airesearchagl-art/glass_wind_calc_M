@@ -1340,8 +1340,8 @@ JSON 約 1.1 MB・CSV 約 0.5 MB で、上限の内側です。
 
 確定した全ケース計算の結果（S3-B3A）を、**確認しやすい形にまとめた review** を作る pure module です。
 `project-config/project-pack-review.js`（`ProjectPackReview`）。結果は**未レビュー（`pack_unreviewed`）で、計算済み ≠ 検証済み**です。
-今回は pure contract だけで、画面（index.html）・Markdown / JSON の出力・印刷にはまだ接続していません。Workspace・Review Package は
-変更せず、使いません。
+S3-B3B2-A1 は pure contract だけでした。画面（index.html）への接続は S3-B3B2-B3 で行いました（下の「Pack Review の画面」。
+この module は変更していません）。Markdown / JSON の出力・印刷にはまだ接続していません。Workspace・Review Package は変更せず、使いません。
 
 ### 流れ
 
@@ -1400,9 +1400,8 @@ ProjectPackBatch.assertBatchOrigin(batchResult, ctx)   … 発行物で、ctx（
 
 ### 後続（未実装）
 
-画面での表示（phase B）、Markdown / JSON の出力、印刷、Redacted、Workspace との相互変換は、この PR では行っていません。
-画面は `buildPackReview(stagedProjectPackBatch, stagedProjectPackContext, options)` を呼び、発行物の確認には
-`isPackReview` / `assertPackReview` を使う想定です。鮮度（Pack の再読込・再計算・キャンセルでの無効化）は画面側の責務です。
+Markdown / JSON の出力、印刷、Redacted、Workspace との相互変換は行っていません。画面での表示は S3-B3B2-B3 で接続しました
+（`buildPackReview(stagedProjectPackBatch, stagedProjectPackContext, options)` → `assertPackReview`。鮮度は画面側の責務）。
 
 ### 確認
 
@@ -1412,7 +1411,10 @@ ProjectPackBatch.assertBatchOrigin(batchResult, ctx)   … 発行物で、ctx（
   完全一致・別の genuine な context の結果を返す executor での照合の失敗・符号 / 出どころ / P の 1 ulp・trust・deep-freeze と
   発行物の gate・別 instance と初期化後の global・Workspace / Review Package / DOM に触れないこと・privacy）。期待値は review の出力
   からは作らず、固定値・executor の単独計算・素朴な集計・Workspace（test の中だけ）から取ります。
-- 画面を持たないので、browser harness は追加していません。
+- S3-B3B2-A1 の時点では画面を持たないので browser harness は追加しませんでした。画面は S3-B3B2-B3 の
+  `tools/browser-checks/project-pack-review.mjs` が確かめます。R21 の「index.html はまだ読み込まない」は、B3 で「index.html は依存
+  （execution → batch）と report の後に 1 度だけ読み込む」へ移行しました（module 自身が DOM・storage・Workspace に触れないことの確認は
+  そのまま）。
 
 ## 結果の鮮度と告示風圧計算の出どころ（Phase 2L-B2 / S3-B3B2-B1）
 
@@ -1533,6 +1535,58 @@ ProjectPackBatch.assertBatchOrigin(batchResult, ctx)   … 発行物で、ctx（
 - 実ブラウザ: `node tools/browser-checks/single-ux.mjs`（1280×800 / 390×844、4 mode、details の開閉・キーボード、Node 側の計算・Closure 評価との
   一致、評価の差し替え・失敗）。`browser-w4.mjs` の B2 は、要約が見え・詳細が 1 回で開き・開いた見える表の値が従来どおりであることを確かめる形に
   移行しました。`result-freshness.mjs` と `context-runtime.mjs` は、詳細の中の文・表を読むように移行しました（確かめる値は変えていません）。
+
+## Pack Review の画面（Phase 2L-B2 / S3-B3B2-B3）
+
+Project Pack の画面（`#view-pack`）に、**Pack Review の欄を独立した section** として加えました（`#pack-review-section`。既存の
+`#project-pack-section` の中身と id は変えていません）。既存の pure module `project-config/project-pack-review.js` を**接続しただけ**で、
+module・計算式・batch・report の契約は変えていません。結果は**未レビュー（`pack_unreviewed`）・計算済み ≠ 検証済み**です。
+
+- **読み込み**: `project-pack-execution.js` → `project-pack-batch.js` → `project-pack-report.js` → `project-pack-review.js` の順。
+  `ProjectPackReview` は画面の script の初期化時に 1 度だけ掴みます（後から差し替えられた global は使いません）。新しい npm 依存・bundler・
+  通信はありません。
+- **作る経路**: `stagedProjectPackBatch` + `stagedProjectPackContext` → `ProjectPackReview.buildPackReview(batch, ctx, options)` →
+  `assertPackReview()` → 表示。発行元の確認は module の `assertBatchOrigin` が行い、画面の確認（`projectPackReviewIsCurrent`: 発行物・
+  現在の結果と context・作成時の試行・計算中でない）はその**代わりではありません**。画面の確認は**作る直前と、表示を確定する直前**の 2 回
+  行います。生の Pack・JSON に戻した batch・別の context・WorkspaceCore・active context は使いません。
+- **作るとき**: 全ケース計算が完了した後、「**Pack Reviewを生成**」を押したときだけです。Pack の読込・preview・ケースの選択・計算の完了・
+  一括の結果のページ切替・画面（タブ）の切替では作りません。失敗したら固定文だけを出し、途中まで作った review も前の review も残しません。
+- **消えるとき**: 新しい Pack の読込開始・読込失敗・解除・全ケース計算の再開始・キャンセル・計算の失敗（一括の結果が消えるとき）・staged
+  context の変化・生成の失敗・**詳細 / 比較の選択を変えて前の review が新しい指定と一致しなくなったとき**。画面の切替では消さず、作り直し
+  ません。Pack Report（派生レポート）とは別の state です。
+- **表示（値はすべて review の発行物から読む。UI で計算し直さない）**:
+  - 集計: 全ケース数・推奨候補あり / なし・適用範囲外の候補を含むケース数・**最大設計風圧**と該当 caseId・**最小余裕比**と該当 caseId
+    （2 つは別の指標で、1 つの「支配ケース」にまとめません。同じ値のケースはすべて batch の並びで残し、10 件を超えるときは件数を出して
+    一覧は開いて読みます）。推奨候補が無いときは「—」で、0 にしません。
+  - グループ: 推奨候補の構成別・階別・部位別を review のまま（組を作り直さない・件数を推測しない）。未宣言は「未宣言」、推奨候補なしは
+    独立した組です。Evidence の分類や案件の正式な階・部位の一覧ではありません。
+  - ケース一覧: review の全行を 50 行ずつ表示します（2000 ケースでも review は切り詰めません。ページの切替では作り直しません）。
+    caseId・Pane・階 / 部位（宣言されているときだけ）・寸法・ガラス・設計風圧・推奨候補・許容風圧・余裕比・余裕差・OK / NG / 適用範囲外の件数。
+  - 選んだケースの詳細（最大 50 件）: caseId を入力して「詳細に追加」で選びます。batch に無い caseId（入力した文字列は表示しません）・
+    重複・51 件目は拒否し、切り詰めません。生成のときに module へ渡し、`review.selectedDetails`（同じ context で計算し直して batch と
+    完全に一致したもの）を表示します。候補の一覧は label・許容風圧・判定だけです。
+  - 2 ケースの比較: 比較 A・B に異なる 2 ケースを選んだときだけ。差は **B − A** で、`review.comparison` から読みます。片方に値が無いときは
+    「—」で、0 にしません。どちらが案件に適合するかの判定はしません。比較しないときは `comparisonCaseIds` を渡しません。
+- **信頼の文言**（常に表示・折りたたまない）: `pack_unreviewed` / `calculated_not_verified`、計算済み ≠ 検証済み、OK は計算上の候補判定、
+  案件原典とメーカー検討で確認すること、この Review は正式な案件承認の資料ではないこと。本文は 12px・描画上のコントラスト 4.5:1 以上で、
+  集計の見出し（最大設計風圧・最小余裕比など）も 4.5:1 以上です（RF-30-01。他の注意文の見た目は変えていません）。
+- active context・ProjectInput・Workspace・Evidence Ledger・Closure・Promotion へ流しません。保存・送信・URL・console への書き出しは
+  しません。表示は `textContent` / `createElement` だけで、例外の文面・出典の申告（sourceClaim など）は表示しません。
+- **画面の幅**: 1280×800 では信頼の文言と生成のボタンが同じ画面に入り、集計 → グループ → 一覧の順で、詳細と比較は開いて読みます。
+  390×844 ではページが横にはみ出さず、表は欄の中で横スクロールします。
+
+### 確認
+
+- Node: `tests/project-pack-review-ui.test.js`（U01–U16。script の順と 1 度だけの掴み・section の配置と id・明示操作だけ・作る直前と
+  確定の直前の確認・options の形・保存 / 通信 / innerHTML / 計算 module を使わない・UI で計算し直さない・信頼の文言、および intake から
+  Review までの block を本物の module と偽 DOM で動かす挙動: 確定まで押せない・自動では作らない・UI の確認と module の
+  assertBatchOrigin の両方・失敗の固定文・集計と同値・null・グループ・2000 ケースの一覧とページ・詳細の選択と上限・照合の不一致・
+  比較の向きと null・消える経路・出典の申告を出さない）。
+- 実ブラウザ: `node tools/browser-checks/project-pack-review.mjs`（R01–R34。UI だけを操作し、harness 側では Pack の検証器・adapter・
+  executor・batch・review を呼びません。期待値は fixture の literal と Node 側の wind-pressure.js / calc.js から作ります。2000 ケース・
+  1280×800 / 390×844・キーボードと ARIA を含みます）。
+- `tests/s3b1-project-pack-intake.test.js` の P2L-S3B1-04 は、staged を読んでよい block の終わりを Review block の終わりへ広げ、
+  Review の関数名を許す prefix に加える形に移行しました（block の外で staged を読まないこと・間に別の関数が入らないことの確認はそのまま）。
 
 ## 設計定数
 
@@ -1671,6 +1725,7 @@ glass_wind_calc_M/
 │   ├── project-pack-report.test.js       # Project Pack Derived Report の pure module（Phase 2L-B2 / S3-B3B1）
 │   ├── project-pack-report-ui.test.js    # Project Pack 派生レポートの UI（明示操作・鮮度・消える経路・失敗の固定文）
 │   ├── project-pack-review.test.js       # Project Pack Review の pure contract（Phase 2L-B2 / S3-B3B2-A1）
+│   ├── project-pack-review-ui.test.js    # Pack Review の画面（Phase 2L-B2 / S3-B3B2-B3）。明示操作・鮮度・値は review から
 │   ├── result-freshness-ui.test.js       # 単一ケース / Workspace の結果の鮮度・告示の出どころの表示（Phase 2L-B2 / S3-B3B2-B1）
 │   ├── three-view-navigation.test.js     # 目的別の 3 画面のタブ・切替・Pack 欄の移動（Phase 2L-B2 / S3-B3B2-B2）
 │   ├── single-ux.test.js                 # 単一ケースの入力の順・検証状況の要約・詳細の折りたたみ（Phase 2L-B4 / S3-B3B2-B4）
@@ -1917,6 +1972,7 @@ node --test
 | `tests/three-view-navigation.test.js` | 目的別の 3 画面（Phase 2L-B2 / S3-B3B2-B2）: 単一ケース / 複数ケース / Project Pack の tabpanel は常に 1 つだけ表示・未知の値では何も変えない・タブの ARIA と tabindex・←→ / Home / End・隠れる画面の focus・`[hidden]` を CSS が上書きしない・タブは定義済みの変数だけ・Pack 欄は中身を変えずに Pack の画面へ・切替は表示だけ（計算・Import / Export・保存なし）・Pack の画面は印刷しない |
 | `tests/single-ux.test.js` | 単一ケースの見せ方（Phase 2L-B4 / S3-B3B2-B4）: ①〜⑤ の入力の順・必須入力は details の外・mode の意味と trust の文は常に表示・案件の検証状況の要約は評価結果から書き失敗は失敗と書く（初期値は fail closed）・詳細は最初は閉じる・結論（検証状況・判定・推奨・許容 / 設計風圧・係数・適用範囲外の除外）は常に表示し計算根拠は詳細へ・表は横スクロールの wrapper・grid は minmax(0, …)・鮮度の表示は結果欄の外 |
 | `tests/project-pack-review.test.js` | Project Pack Review（Phase 2L-B2 / S3-B3B2-A1）: batch の発行元の gate（同じ context instance だけ）・全行を batch の並びで・余裕比 / 余裕差の定義・summary は最大設計風圧と最小余裕比を分ける・grouping・2 ケースの比較・詳細は同じ context での再計算と完全照合（1 field でも違えば全体を拒否）・50 件の上限・trust 固定・deep-frozen と発行物の gate・依存は初期化時に固定・Workspace / Review Package に触れない・privacy |
+| `tests/project-pack-review-ui.test.js` | Pack Review の画面（Phase 2L-B2 / S3-B3B2-B3）: script の順と初期化時の掴み・独立 section・「Pack Reviewを生成」を押したときだけ・作る直前と確定の直前の確認（module の assertBatchOrigin の代わりにしない）・値は review の発行物から（null は「—」・最大設計風圧と最小余裕比を分ける・同値はすべて・未宣言を補わない・差は B − A）・2000 ケースを切り詰めずに 50 行ずつ・詳細は batch の caseId だけ・重複と 51 件目を拒否・消える経路・信頼の文言は常に表示・保存 / 通信 / innerHTML なし |
 
 ### 必須ケース
 

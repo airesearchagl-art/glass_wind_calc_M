@@ -149,16 +149,21 @@ test('P2L-S3B1-04: staged は active ではない（activeProjectContext を読�
   assert.equal(assignsAll, assignsInit + 1, 'initActiveProjectContext と宣言以外で active context を置いている');
   assert.equal(/activeProjectContext\s*=\s*[^;]*staged/.test(CODE), false);
   // staged を読むのは intake と、そのすぐ後に続く S3-B2 の Pack ケース計算 block・S3-B3A の全ケース計算
-  // block・S3-B3B1 の派生レポート block だけ（通常の計算・入力・Evidence・Closure・Review は読まない。
-  // 各 block の境界は tests/project-pack-execution-ui.test.js・tests/project-pack-batch-ui.test.js・
-  // tests/project-pack-report-ui.test.js が確かめる）
+  // block・S3-B3B1 の派生レポート block・S3-B3B2-B3 の Pack Review block だけ（通常の計算・入力・Evidence・
+  // Closure・Review Package は読まない。各 block の境界は tests/project-pack-execution-ui.test.js・
+  // tests/project-pack-batch-ui.test.js・tests/project-pack-report-ui.test.js・tests/project-pack-review-ui.test.js が確かめる）。
+  // S3-B3B2-B3 で移行: 旧 境界の終わり = clearProjectPackReportByUser の次の関数 → 新 = clearProjectPackReviewByUser の次の関数、
+  // 許す関数名の prefix に Review の名前（renderProjectPackReview・clearProjectPackReview・projectPackReview・
+  // add/remove/toggle/generate/showProjectPackReview・packReview）を追加。理由: Review は確定した一括結果と staged context を
+  // 読む（Review block は report block の直後に置く）。代わりの保証: block の外で staged を読まないこと・間に別の関数が
+  // 入らないことはこの test がそのまま確かめる。
   const intakeStart = CODE.indexOf('var MAX_PROJECT_PACK_IMPORT_BYTES');
   const intakeEnd = CODE.indexOf('\nfunction ', CODE.indexOf('function renderProjectPackPreview(') + 1);
-  const execEnd = CODE.indexOf('\nfunction ', CODE.indexOf('function clearProjectPackReportByUser(') + 1);
+  const execEnd = CODE.indexOf('\nfunction ', CODE.indexOf('function clearProjectPackReviewByUser(') + 1);
   assert.equal(intakeStart !== -1 && intakeEnd > intakeStart && execEnd > intakeEnd, true, 'block の範囲を取れない');
   assert.equal(CODE.slice(intakeEnd, execEnd).split('\nfunction ').slice(1).every((f) =>
-    /^(renderProjectPackExecution|clearProjectPackExecution|projectPackExecution|executeSelectedProjectPackCase|packPressureText|packZoneText|renderProjectPackBatch|clearProjectPackBatch|projectPackBatch|startProjectPackBatch|cancelProjectPackBatch|abandonProjectPackBatch|failProjectPackBatch|stepProjectPackBatch|showProjectPackBatchPage|packBatch|renderProjectPackReport|clearProjectPackReport|projectPackReport|showProjectPackReport)/.test(f)),
-  true, 'intake とケース計算・全ケース計算・派生レポートの間に別の関数が入っている');
+    /^(renderProjectPackExecution|clearProjectPackExecution|projectPackExecution|executeSelectedProjectPackCase|packPressureText|packZoneText|renderProjectPackBatch|clearProjectPackBatch|projectPackBatch|startProjectPackBatch|cancelProjectPackBatch|abandonProjectPackBatch|failProjectPackBatch|stepProjectPackBatch|showProjectPackBatchPage|packBatch|renderProjectPackReport|clearProjectPackReport|projectPackReport|showProjectPackReport|renderProjectPackReview|clearProjectPackReview|projectPackReview|addProjectPackReview|removeProjectPackReview|toggleProjectPackReview|generateProjectPackReview|showProjectPackReview|packReview)/.test(f)),
+  true, 'intake とケース計算・全ケース計算・派生レポート・Pack Review の間に別の関数が入っている');
   const outside = CODE.slice(0, intakeStart) + CODE.slice(execEnd);
   assert.equal(/stagedProjectPack/.test(outside), false, 'intake・ケース計算以外が staged Pack を読んでいる');
 });
