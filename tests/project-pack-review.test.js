@@ -230,8 +230,11 @@ test('P2L-S3B3B2A1-R01: genuine な batch と同じ ctx から review を作れ�
     assert.equal(Review.isPackReview(r), true);
     assert.equal(Review.assertPackReview(r), r);
   }
+  // S3-B3B2-C1-A で移行: 旧 API 一覧の末尾に assertReviewOrigin を加えた。理由: C1-A は review の発行元（batch・ctx）を
+  // module private に記録し、出力の前に完全な instance 一致を確かめる API を足す phase。記録した batch・ctx を返す API は
+  // 足さない。代わりの保証: 発行元の検査そのものは tests/project-pack-review-export.test.js が確かめる。
   assert.deepEqual(Object.keys(Review), ['REVIEW_TYPE', 'SCHEMA_VERSION', 'SOURCE_KIND', 'TRUST', 'INTERPRETATION',
-    'MAX_DETAIL_CASES', 'buildPackReview', 'isPackReview', 'assertPackReview']);
+    'MAX_DETAIL_CASES', 'buildPackReview', 'isPackReview', 'assertPackReview', 'assertReviewOrigin']);
   assert.equal(Review.MAX_DETAIL_CASES, 50);
 });
 
@@ -937,7 +940,13 @@ test('P2L-S3B3B2A1-R21: Workspace・Review Package・計算 module・DOM に触�
     .forEach((token) => assert.equal(REVIEW_CODE.includes(token), false, 'review module が ' + token + ' を使っている'));
   // 計算は executor の executeCase だけ、gate は assertBatchOrigin（最初に 1 回）
   assert.equal((REVIEW_CODE.match(/E\.executeCase\(/g) || []).length, 1);
-  assert.equal((REVIEW_CODE.match(/B\.assertBatchOrigin\(/g) || []).length, 1);
+  // S3-B3B2-C1-A で移行: 旧「B.assertBatchOrigin( は module 全体で 1 か所」→ 新「buildPackReview の中に 1 か所（最初の
+  // gate）と assertReviewOrigin の中に 1 か所、合わせて 2 か所」。理由: C1-A の assertReviewOrigin は review の発行元の
+  // 一致に加えて batch 自身の発行元も確かめ直す（batch の gate を維持する）。代わりの保証: buildPackReview の中では
+  // 1 回だけで最初に呼ぶことを、下の順序の確認がそのまま確かめる。
+  assert.equal((REVIEW_CODE.match(/B\.assertBatchOrigin\(/g) || []).length, 2);
+  const originBody = REVIEW_CODE.slice(REVIEW_CODE.indexOf('function assertReviewOrigin('));
+  assert.equal((originBody.match(/B\.assertBatchOrigin\(/g) || []).length, 1, 'assertReviewOrigin の中に 1 か所');
   assert.equal(/\.assertBatchResult\(/.test(REVIEW_CODE), false);
   const body = REVIEW_CODE.slice(REVIEW_CODE.indexOf('function buildPackReview('), REVIEW_CODE.indexOf('function walkForbidden('));
   const at = (s) => { const i = body.indexOf(s); assert.notEqual(i, -1, s); return i; };
