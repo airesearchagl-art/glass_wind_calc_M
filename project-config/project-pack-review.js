@@ -38,6 +38,19 @@
  * 読まない。Evidence・Closure・Promotion・Workspace・Review Package・入力 package のどれにもつながらない。
  * DOM を読まない。context や生の Pack を review に入れない。
  *
+ * ── 発行元（S3-B3B2-C1-A） ──────────────────────────────────
+ *
+ * 発行した review ごとに、その review を作った batch result と context（buildPackReview に渡され、最初の
+ * gate を通った instance）を module private の WeakMap に記録する。assertReviewOrigin(review, batch, ctx) は、
+ * review が発行物であること・記録された batch と ctx が渡された batch・ctx と同じ instance であること・
+ * batch 自身が ctx から発行されたこと（ProjectPackBatch.assertBatchOrigin）を確かめる。比較は object の
+ * 同一性だけで、内容・ラベル・JSON の一致では代用しない。記録は review の object に載せない（key・schema・
+ * trust・deep-freeze・計算は変わらない）。記録を作るのは、review が形の検査と deep-freeze を通った後だけ。
+ * 記録された batch・ctx を返す API は無い。
+ *
+ * これは発行元の真正性の確認で、画面の現在性の確認ではない。古い review と、それを作った batch・ctx を
+ * すべて持っていれば、この確認は通る（その review が「いま有効か」は呼び出し側が確かめる）。
+ *
  * ── 依存 ─────────────────────────────────────────────────
  *
  * 依存は ProjectPackBatch と ProjectPackExecution で、この module の初期化時に 1 度だけ掴む（後から
@@ -652,6 +665,8 @@
   // ============================================================
 
   var issued = new WeakSet();
+  // 発行した review → その review を作った batch result と context（module private。外へ出さない・保存しない）
+  var originByReview = new WeakMap();
 
   /**
    * batchResult（ProjectPackBatch の発行物で、ctx から発行されたもの）から review を作る。
@@ -723,9 +738,10 @@
       comparison: comparison
     };
 
-    // 7. 形の検査 → 8. deep-freeze → 9. 発行
+    // 7. 形の検査 → 8. deep-freeze → 9. 発行元を記録して発行（ここまで来た review だけに記録を作る）
     assertPackReviewShape(review);
     deepFreeze(review);
+    originByReview.set(review, Object.freeze({ batch: batchResult, ctx: ctx }));
     issued.add(review);
     return review;
   }
@@ -892,6 +908,22 @@
     return assertPackReviewShape(r);
   }
 
+  /**
+   * r が発行物で、batchResult と ctx（どちらも同じ instance）から発行されたものであることを確かめる。
+   * batch 自身の発行元（ProjectPackBatch.assertBatchOrigin）も確かめ直す。違えば throw する。
+   * 比較は object の同一性だけ。発行元の真正性であって、画面の現在性ではない（上の説明を参照）。
+   */
+  function assertReviewOrigin(r, batchResult, ctx) {
+    var B = requireBatch();
+    assertPackReview(r);
+    var origin = originByReview.get(r);
+    if (origin === undefined) fail('review', 'has no recorded origin');
+    if (origin.batch !== batchResult) fail('review', 'was not issued from the given batch result');
+    if (origin.ctx !== ctx) fail('review', 'was not issued from the given context');
+    B.assertBatchOrigin(batchResult, ctx);
+    return r;
+  }
+
   return deepFreeze({
     REVIEW_TYPE: REVIEW_TYPE,
     SCHEMA_VERSION: SCHEMA_VERSION,
@@ -901,6 +933,7 @@
     MAX_DETAIL_CASES: MAX_DETAIL_CASES,
     buildPackReview: buildPackReview,
     isPackReview: isPackReview,
-    assertPackReview: assertPackReview
+    assertPackReview: assertPackReview,
+    assertReviewOrigin: assertReviewOrigin
   });
 });
