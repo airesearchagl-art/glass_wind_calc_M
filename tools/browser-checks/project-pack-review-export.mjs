@@ -448,6 +448,8 @@ await page.evaluate(() => { window.__failExport = false; });
 check('XE16-failure-fixed-text', noOutput(s8) && s8.status === FAILURE && s8.statusError && !/SECRET|private|<img/.test(s8.status) &&
   s8.hasReview && s8.reviewShown && s8.batch && s8.packStaged && !s8.md,
 '失敗は固定文で出力だけを消す（Review・一括の結果・Pack は残り、もう一度押せる）');
+// Review が残っていなければ（XE16 が失敗として記録した）、以後の確認のために生成し直す（run を壊さずに続ける）
+if (!s8.hasReview) await generateReview(page);
 
 // state の差し替え（発行物でない review・古い試行）: module を呼ばずに失敗する
 const callsBefore = (await exportState(page)).calls;
