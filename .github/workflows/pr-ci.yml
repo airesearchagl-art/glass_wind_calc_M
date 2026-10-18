@@ -2,7 +2,7 @@
 #
 # Runs the repository's own checks against the PR head commit itself (not the
 # temporary merge ref): npm test, publication lint, project-state probe,
-# verifier package, and all 14 browser harnesses.
+# verifier package, and all 15 browser harnesses.
 #
 # - Ready PRs only. Draft PRs are skipped. A new push to the same PR cancels the
 #   older run.
@@ -112,7 +112,7 @@ jobs:
           # this fails the step if no candidate resolves.
           node --input-type=module -e "const m = await import('./tools/browser-checks/resolve-playwright.mjs'); const r = await m.resolvePlaywright(); console.log('playwright resolved via ' + r.source);"
 
-      - name: Browser harnesses (14)
+      - name: Browser harnesses (15)
         run: |
           set -euo pipefail
           harnesses=(
@@ -130,9 +130,10 @@ jobs:
             three-view-navigation
             single-ux
             project-pack-review
+            project-pack-review-export
           )
-          if [ "${#harnesses[@]}" -ne 14 ]; then
-            echo "::error::expected 14 harnesses, listed ${#harnesses[@]}"
+          if [ "${#harnesses[@]}" -ne 15 ]; then
+            echo "::error::expected 15 harnesses, listed ${#harnesses[@]}"
             exit 1
           fi
           {

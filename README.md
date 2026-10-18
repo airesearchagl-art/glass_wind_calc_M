@@ -1404,7 +1404,8 @@ ProjectPackBatch.assertBatchOrigin(batchResult, ctx)   … 発行物で、ctx（
 
 印刷、Redacted、Workspace との相互変換は行っていません。画面での表示は S3-B3B2-B3 で接続しました
 （`buildPackReview(stagedProjectPackBatch, stagedProjectPackContext, options)` → `assertPackReview`。鮮度は画面側の責務）。
-Markdown / JSON の出力は S3-B3B2-C1-A の pure module（`project-config/project-pack-review-export.js`）で、画面への接続は C1-B です。
+Markdown / JSON の出力は S3-B3B2-C1-A の pure module（`project-config/project-pack-review-export.js`）で、画面への接続は
+S3-B3B2-C1-B で行いました（「Pack Review の出力の画面」）。
 
 ### 確認
 
@@ -1594,8 +1595,8 @@ module・計算式・batch・report の契約は変えていません。結果�
 ## Pack Review の出力 — Markdown / JSON（Phase 2L-B2 / S3-B3B2-C1-A）
 
 S3-B3B2-A1 の review（`ProjectPackReview` の発行物）を、伝達用のテキストにする pure module です。
-`project-config/project-pack-review-export.js`（`ProjectPackReviewExport`）。**画面にはまだ接続していません**（index.html は読み込み
-ません。接続は C1-B）。結果は**未レビュー（`pack_unreviewed`）で、計算済み ≠ 検証済み**です。出力は再計算用の入力ではなく、
+`project-config/project-pack-review-export.js`（`ProjectPackReviewExport`）。画面への接続は S3-B3B2-C1-B で行いました
+（下の「Pack Review の出力の画面」。この module は変えていません）。結果は**未レビュー（`pack_unreviewed`）で、計算済み ≠ 検証済み**です。出力は再計算用の入力ではなく、
 取り込み（import / deserialize）の機能は作りません。
 
 ### 発行元（review module に追加した 1 つの API）
@@ -1708,6 +1709,75 @@ JSON 約 1.3–1.8 MB で、上限の内側です。時間は性能目標とし�
 - GitHub / Obsidian での描画: Node の test は描画しません。Draft PR に、合成の敵対的な文字列で作った出力を CommonMark / GFM の
   実装（GitHub の cmark-gfm を含む）で描画し、無害な文字列の出力と HTML の構造を比べた結果を残します。Obsidian での表示は
   Human verification の項目です。
+
+## Pack Review の出力の画面（Phase 2L-B2 / S3-B3B2-C1-B）
+
+C1-A の pure module（`ProjectPackReviewExport`）を、Project Pack の画面へ接続しました。書き出し（escape・表示の桁・外枠・notices・
+8 MiB の上限）は module の契約のままで、画面では作り直しません。計算式・判定・Review の schema は変えていません。
+
+### 配置
+
+- `#view-pack` の中、Pack Review の欄（`#pack-review-section`）の下に、独立した欄 `#pack-review-export-section` を置きました。
+  `#project-pack-section` と `#pack-review-section` の中の構造と id は変えていません。
+- 欄の中身: 「Markdownを表示」「JSONを表示」「出力を消去」のボタン、読み取り専用の textarea（`#pack-review-export-out`）、状態と
+  失敗を表示する欄（`role="status"`）、常に見える未レビューの信頼の注意（`pack_unreviewed ／ calculated_not_verified — 計算済み ≠
+  検証済み。OK は計算上の候補判定です。この出力は正式な案件承認の資料ではありません。`）と、外部共有の注意（案件入力値を含む・
+  共有先の確認・publication advisory が 0 件でも公開安全の証明ではない）。
+- `index.html` は `project-config/project-pack-review-export.js` を `project-pack-review.js` の後に 1 度だけ読み込み、初期化時に 1 度だけ
+  掴みます（後から置いた global は使いません）。
+
+### 動作
+
+- Pack Review を生成した後にだけボタンが押せます。作るのは利用者がボタンを押したときだけです（Review の生成・画面の切替・Review の
+  一覧のページ切替・Report の操作では作らず、消しもしません）。
+- 出力は常に 1 つです。Markdown の後に JSON を押すと完全に置き換えます。コピーは利用者が手で行います（ダウンロード・Blob・
+  クリップボードへの自動コピー・保存・送信はしません）。
+- 作る直前と、textarea に置く直前に、次を確かめます: 対象の state が表示中の review（`currentProjectPackReview`）と同じ・
+  既存の鮮度の確認 `projectPackReviewIsCurrent(state.batch, state.ctx)`・作成時の試行（`state.attempt === projectPackAttempt`）・
+  詳細 / 比較の選択の一致（`projectPackReviewSelectionMatches(state)`）・review が発行物。そのうえで module の `assertReviewOrigin`
+  （state の review・batch・ctx の instance 一致）を必ず通ります。出力の block は staged の Pack を直接読みません。
+- 失敗は固定文（「出力を生成できませんでした。現在有効な出力はありません（Pack Review はそのままです）。」）で、出力だけを消します。
+  Review・一括の結果・Pack は残します。例外の文面・入力値は出しません。
+- export module が無いときも、Review の生成・表示・消去はそのまま動き、出力のボタンは押せないままです。
+
+### 消える経路
+
+既存の関数に加えたのは 2 つの連携だけです: `clearProjectPackReview()` の最後で出力を消す（`clearProjectPackReviewExportForReview()`）、
+`renderProjectPackReviewControls()` の最後で出力のボタンを合わせる（`renderProjectPackReviewExportControls()`）。Review が消える
+経路では出力も必ず消えます（状態は「Pack Review が消えたので、出力も消しました。」）:
+
+| # | 経路 |
+|---|---|
+| E01 | 新しい Pack の読込 |
+| E02 | 読込の失敗 |
+| E03 | Pack の解除 |
+| E04 | 新しい全ケース計算の開始 |
+| E05 | 計算のキャンセル |
+| E06 | 計算の失敗 |
+| E07 | Pack の変化による計算の中止 |
+| E08 | 詳細・比較の選択の変更（前の Review と一致しなくなった） |
+| E09 | Review の生成し直し（前の Review から作った出力は消え、新しい Review からは押すまで作らない） |
+| E10 | Review の生成の失敗 |
+| E11 | Review の消去 |
+| E12 | Review の一覧のページ切替で古いと分かった |
+
+### 確認
+
+- Node: `tests/project-pack-review-export-ui.test.js`（V01–V14: script の順と 1 度だけの掴み・配置と id・3 つのボタンと読み取り専用の
+  textarea・常に見える信頼と共有の注意・作る直前と確定の直前の確認の位置・staged を読まない・既存の関数への hook は 2 つだけ・
+  明示操作だけ・C1-A の出力と文字列が完全に一致・置き換え・state / 発行元 / 選択の不一致から出力しない・12 の経路・失敗の固定文・
+  module なし・8 MiB の上限で一部も出さない・ページ / 画面の切替・2000 ケース × 3 mode × 2 形式・保存 / 通信なし）。
+- 実ブラウザ: `node tools/browser-checks/project-pack-review-export.mjs`（UI だけを操作し、harness 側では Pack の検証器・adapter・
+  executor・batch・review・export module を呼びません。期待値は fixture の literal と、Node で直接呼んだ wind-pressure.js・calc.js
+  から作ります。Markdown は画面の表示の桁で、JSON は相対 1e-12 で照合します）。2000 ケース × 3 mode × 2 形式の全行、12 の経路、
+  失敗の注入、state の差し替え、入力を記法として扱わないこと、1280×800 / 390×844、keyboard と ARIA、保存・通信なし。
+  所要時間と大きさは実行環境と一緒に記録するだけで、性能の保証値ではありません。
+- 実際の Markdown の描画（GitHub / Obsidian）は、この画面では行いません（出力はテキストのまま）。
+- 既存の test の移行（Human Gate で承認）: `tests/project-pack-review-export.test.js` の X17（旧「index.html はまだ読み込まない」→
+  新「review の後に 1 度だけ読み込む」。module 自身の純粋さの確認はそのまま）、`tests/project-pack-report-ui.test.js` の U02（inline code
+  全体の `serializeJson(` は 1 → 2。Report の `PACK_REPORT_MODULE.serializeJson(` は `showProjectPackReport` の中の 1 か所だけであることを
+  明示的に確かめる）、`tests/verification-manifest.test.js` の M01 / M09（`project-pack-review-export` を literal の一覧に
+  `UNVERIFIED` / `observational` で追加）。`tools/browser-checks/README.md` は harness を 15 本にした（文書のみ）。
 
 ## 設計定数
 
@@ -1849,6 +1919,7 @@ glass_wind_calc_M/
 │   ├── project-pack-review.test.js       # Project Pack Review の pure contract（Phase 2L-B2 / S3-B3B2-A1）
 │   ├── project-pack-review-ui.test.js    # Pack Review の画面（Phase 2L-B2 / S3-B3B2-B3）。明示操作・鮮度・値は review から
 │   ├── project-pack-review-export.test.js # Pack Review の Markdown / JSON 出力（Phase 2L-B2 / S3-B3B2-C1-A）
+│   ├── project-pack-review-export-ui.test.js # Pack Review の出力の画面（Phase 2L-B2 / S3-B3B2-C1-B）
 │   ├── result-freshness-ui.test.js       # 単一ケース / Workspace の結果の鮮度・告示の出どころの表示（Phase 2L-B2 / S3-B3B2-B1）
 │   ├── three-view-navigation.test.js     # 目的別の 3 画面のタブ・切替・Pack 欄の移動（Phase 2L-B2 / S3-B3B2-B2）
 │   ├── single-ux.test.js                 # 単一ケースの入力の順・検証状況の要約・詳細の折りたたみ（Phase 2L-B4 / S3-B3B2-B4）
@@ -2097,6 +2168,7 @@ node --test
 | `tests/project-pack-review.test.js` | Project Pack Review（Phase 2L-B2 / S3-B3B2-A1）: batch の発行元の gate（同じ context instance だけ）・全行を batch の並びで・余裕比 / 余裕差の定義・summary は最大設計風圧と最小余裕比を分ける・grouping・2 ケースの比較・詳細は同じ context での再計算と完全照合（1 field でも違えば全体を拒否）・50 件の上限・trust 固定・deep-frozen と発行物の gate・依存は初期化時に固定・Workspace / Review Package に触れない・privacy |
 | `tests/project-pack-review-ui.test.js` | Pack Review の画面（Phase 2L-B2 / S3-B3B2-B3）: script の順と初期化時の掴み・独立 section・「Pack Reviewを生成」を押したときだけ・作る直前と確定の直前の確認（module の assertBatchOrigin の代わりにしない）・値は review の発行物から（null は「—」・最大設計風圧と最小余裕比を分ける・同値はすべて・未宣言を補わない・差は B − A）・2000 ケースを切り詰めずに 50 行ずつ・詳細は batch の caseId だけ・重複と 51 件目を拒否・消える経路・信頼の文言は常に表示・保存 / 通信 / innerHTML なし |
 | `tests/project-pack-review-export.test.js` | Pack Review の出力（Phase 2L-B2 / S3-B3B2-C1-A）: 発行元は review・batch・ctx の完全な instance 一致（古い review と別の batch / ctx は拒否・元の 3 つをすべて持てば通るという限界を記録）・batch の gate の維持・記録は成功した発行だけで返す API なし・JSON は exportSchemaVersion と固定の notices 4 件の外枠・値 / 精度の保持（-0 を含む）と決定性・Markdown は全件を省略せず画面と同じ表示の桁で、文字列は 1 つの関数で escape（@ は全角）・不可視の文字は ⟨U+XXXX⟩・敵対的な文字列で構造が変わらない・2000 ケース × 3 mode・8 MiB の hard 上限・固定文・取り込み口なし・依存は初期化時に固定 |
+| `tests/project-pack-review-export-ui.test.js` | Pack Review の出力の画面（Phase 2L-B2 / S3-B3B2-C1-B）: 独立した欄・明示操作だけ・出力は 1 つ（置き換え）・作る直前と確定の直前に表示中の state・既存の鮮度・試行・選択・発行物を確かめ、発行元は module の assertReviewOrigin・staged を直接読まない・既存の関数への hook は 2 つだけ・Review が消える 12 の経路で出力も消える・失敗は出力だけを消す固定文・module なしでも Review は動く・C1-A の出力と文字列が完全に一致・2000 ケース × 3 mode × 2 形式・8 MiB で一部も出さない・保存 / 通信 / ダウンロード / クリップボードなし |
 
 ### 必須ケース
 

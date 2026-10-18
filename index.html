@@ -511,6 +511,17 @@
   .pack-review-note { font-size: 11px; color: var(--text2); line-height: 1.8; overflow-wrap: anywhere; }
   @media (max-width: 480px) { .pack-review-compare { grid-template-columns: minmax(0, 1fr); } }
 
+  /* ===== Pack Review の出力（Phase 2L-B2 / S3-B3B2-C1-B）: 表示中の Review を Markdown / JSON のテキストにする欄 ===== */
+  .pack-review-export { margin-top: 16px; }
+  .notice.pack-review-export-trust { margin: 0 0 10px; font-size: 12px; color: var(--text2); line-height: 1.8; overflow-wrap: anywhere; }
+  .pack-review-export-trust strong { color: var(--warn); }
+  textarea#pack-review-export-out {
+    width: 100%; margin-top: 8px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); color: var(--text); font-family: var(--font-mono);
+    font-size: 11px; padding: 8px; resize: vertical;
+  }
+  textarea#pack-review-export-out[hidden] { display: none; }
+
   /* ===== 結果の鮮度（Phase 2L-B2 / S3-B3B2-B1） ===== */
   .result-wrap { display: flex; flex-direction: column; gap: 12px; }
   .result-freshness {
@@ -1267,6 +1278,37 @@
     <div class="pack-review-result" id="pack-review-result" hidden></div>
   </div>
 </section>
+<!-- Pack Review の出力（Phase 2L-B2 / S3-B3B2-C1-B）: 表示中の Pack Review を、ボタンを押したときだけ
+     ProjectPackReviewExport で Markdown / JSON のテキストにして読み取り専用の欄に表示する（コピーは利用者が手で行う）。
+     書き出しは module の契約のまま。Pack Review 欄・Project Pack 欄（上の 2 つの section）の中身は変えない。 -->
+<section class="pack-wrap pack-review-export" id="pack-review-export-section" aria-labelledby="pack-review-export-title">
+  <div class="card" id="pack-review-export-card">
+    <h2 class="card-title" id="pack-review-export-title">Pack Review の出力（Markdown / JSON・未レビュー）</h2>
+    <div class="notice pack-review-export-trust" id="pack-review-export-trust" role="note">
+      <strong>pack_unreviewed ／ calculated_not_verified — 計算済み ≠ 検証済み。</strong>
+      OK は計算上の候補判定です。この出力は正式な案件承認の資料ではありません。値は案件原典（構造計算書・図面など）と
+      メーカー検討で確認してください。
+    </div>
+    <p class="pack-note" id="pack-review-export-share">この出力にはガラス寸法・設計風圧などの案件入力値が含まれます。外部へ共有する場合は、内容と共有先を確認してください。publication advisory が 0 件でも公開安全の証明にはなりません。</p>
+    <p class="pack-note">
+      表示中の Pack Review から、「Markdownを表示」「JSONを表示」を押したときだけ作ります（Review の生成・画面の切替・
+      ページの切替では作りません）。出力は 1 つだけで、別の形式を押すと置き換えます。コピーは手で行ってください
+      （ダウンロード・自動コピー・保存・送信はしません）。Markdown の数値は表示用に丸めています（全桁は JSON にあります）。
+      出力は計算の入力として読み込むものではありません。
+    </p>
+    <div class="pack-exec-controls">
+      <button type="button" id="btn-pack-review-export-md" class="btn-secondary"
+        onclick="showProjectPackReviewExport('markdown')" disabled>Markdownを表示</button>
+      <button type="button" id="btn-pack-review-export-json" class="btn-secondary"
+        onclick="showProjectPackReviewExport('json')" disabled>JSONを表示</button>
+      <button type="button" id="btn-pack-review-export-clear" class="btn-secondary"
+        onclick="clearProjectPackReviewExportByUser()" disabled>出力を消去</button>
+    </div>
+    <div class="pack-status" id="pack-review-export-status" role="status" aria-live="polite">出力は、表示中の Pack Review から「Markdownを表示」「JSONを表示」を押したときだけ作ります。</div>
+    <textarea id="pack-review-export-out" rows="10" spellcheck="false" autocomplete="off" readonly hidden
+      aria-label="Pack Review の出力（読み取り専用）"></textarea>
+  </div>
+</section>
 </div>
 
 <!-- ===== Batch / Scenario Workspace（Phase 2G） ===== -->
@@ -1634,6 +1676,7 @@
 <script src="project-config/project-pack-batch.js"></script>
 <script src="project-config/project-pack-report.js"></script>
 <script src="project-config/project-pack-review.js"></script>
+<script src="project-config/project-pack-review-export.js"></script>
 <script src="workspace.js"></script>
 <script src="project-profile.js"></script>
 <script src="review-package.js"></script>
@@ -2825,6 +2868,8 @@ function clearProjectPackReview(statusText, isError) {
   var clear = document.getElementById('btn-pack-review-clear');
   if (clear) clear.disabled = true;
   renderProjectPackReviewStatus(statusText || '', isError === true);
+  // review が無くなれば、そこから作った出力も消す（S3-B3B2-C1-B）
+  clearProjectPackReviewExportForReview();
 }
 
 /* この batch と context から review を作ってよいか（発行物・現在の結果と context・作成時の試行・計算中でない）。
@@ -2872,6 +2917,8 @@ function renderProjectPackReviewControls() {
     projectPackReviewChoicesBatch = batch;
   }
   renderProjectPackReviewDetailList();
+  // 出力のボタン（表示中の review が現在のものか）を合わせる（S3-B3B2-C1-B）
+  renderProjectPackReviewExportControls();
 }
 
 function packReviewOption(value, text) {
@@ -3369,6 +3416,115 @@ function packReviewComparisonView(review) {
 function clearProjectPackReviewByUser() {
   clearProjectPackReview('Pack Review を消去しました。現在有効な Review はありません。');
   renderProjectPackReviewControls();
+  return true;
+}
+
+/* ============================================================
+   Pack Review の出力（Phase 2L-B2 / S3-B3B2-C1-B）
+   - 表示中の Pack Review（currentProjectPackReview の state）を、ProjectPackReviewExport.toMarkdown() /
+     serializeJson() でテキストにして読み取り専用の欄に表示する。書き出し（escape・表示の桁・外枠・notices・8 MiB の
+     上限）は module の契約のままで、この block では作り直さない・書き換えない。
+   - 作るのは「Markdownを表示」「JSONを表示」を押したときだけ。Review の生成・画面の切替・ページの切替では作らない。
+     出力は常に 1 つで、別の形式を押すと置き換える。
+   - 作る直前と表示を確定する直前に、対象の state が表示中の review と同じこと・既存の鮮度の確認
+     （projectPackReviewIsCurrent）・作成時の試行・詳細 / 比較の選択の一致・review が発行物であることを確かめる。
+     発行元の確認は module の assertReviewOrigin（state の review・batch・ctx の instance 一致）が必ず行う。
+     この block は staged の Pack を直接読まない（state と既存の鮮度の確認だけを使う）。
+   - Review が消える経路では clearProjectPackReview から出力も消える。失敗は固定文で、出力だけを消す（Review・
+     一括の結果・Pack は残す）。例外の文面は出さない。
+   - ダウンロード・Blob・クリップボード・保存・送信はしない。コピーは利用者が手で行う。
+   - ProjectPackReviewExport はこの script の初期化時に 1 度だけ掴む（後から global を読み直さない）。無ければ
+     出力のボタンは押せないままで、Review の表示と消去はそのまま動く。
+============================================================ */
+
+var PACK_REVIEW_EXPORT_MODULE = (typeof ProjectPackReviewExport === 'object' && ProjectPackReviewExport) ? ProjectPackReviewExport : null;
+var PROJECT_PACK_REVIEW_EXPORT_LABELS = { markdown: 'Markdown', json: 'JSON' };
+var PROJECT_PACK_REVIEW_EXPORT_FAILURE = '出力を生成できませんでした。現在有効な出力はありません（Pack Review はそのままです）。';
+var PROJECT_PACK_REVIEW_EXPORT_CLEARED = 'Pack Review が消えたので、出力も消しました。現在有効な出力はありません。';
+var PROJECT_PACK_REVIEW_EXPORT_IDLE = '出力は、表示中の Pack Review から「Markdownを表示」「JSONを表示」を押したときだけ作ります。';
+var projectPackReviewExportOutput = null;
+var projectPackReviewExportStatusText = PROJECT_PACK_REVIEW_EXPORT_IDLE;
+
+function renderProjectPackReviewExportStatus(text, isError) {
+  projectPackReviewExportStatusText = text;
+  var status = document.getElementById('pack-review-export-status');
+  if (!status) return;
+  status.className = isError ? 'pack-status is-error' : 'pack-status';
+  status.textContent = text;
+}
+
+/* 出力を消す（state と表示）。Review・一括の結果・Pack には触れない。 */
+function clearProjectPackReviewExport(statusText, isError) {
+  projectPackReviewExportOutput = null;
+  var out = document.getElementById('pack-review-export-out');
+  if (out) { out.value = ''; out.hidden = true; }
+  var clear = document.getElementById('btn-pack-review-export-clear');
+  if (clear) clear.disabled = true;
+  renderProjectPackReviewExportStatus(statusText || '', isError === true);
+}
+
+/* review が消えたとき（clearProjectPackReview から呼ぶ）。出力があれば、消したことを書く。1 つの操作で review が
+   何度か消えても（読込の開始と context の確定など）、出力を消したという知らせは残す。 */
+function clearProjectPackReviewExportForReview() {
+  var cleared = projectPackReviewExportOutput !== null || projectPackReviewExportStatusText === PROJECT_PACK_REVIEW_EXPORT_CLEARED;
+  clearProjectPackReviewExport(cleared ? PROJECT_PACK_REVIEW_EXPORT_CLEARED : PROJECT_PACK_REVIEW_EXPORT_IDLE);
+  renderProjectPackReviewExportControls();
+}
+
+/* この state から出力を作ってよいか（表示中の review・発行物・既存の鮮度の確認・作成時の試行・選択の一致）。 */
+function projectPackReviewExportIsCurrent(state) {
+  return state !== null && typeof state === 'object' && state === currentProjectPackReview &&
+    !!PACK_REVIEW_MODULE && PACK_REVIEW_MODULE.isPackReview(state.review) &&
+    projectPackReviewIsCurrent(state.batch, state.ctx) && state.attempt === projectPackAttempt &&
+    projectPackReviewSelectionMatches(state);
+}
+
+/* 表示中の review が現在のものであるときだけ、出力のボタンを押せるようにする。 */
+function renderProjectPackReviewExportControls() {
+  var ready = !!PACK_REVIEW_EXPORT_MODULE && projectPackReviewExportIsCurrent(currentProjectPackReview);
+  ['btn-pack-review-export-md', 'btn-pack-review-export-json'].forEach(function (id) {
+    var button = document.getElementById(id);
+    if (button) button.disabled = !ready;
+  });
+  var clear = document.getElementById('btn-pack-review-export-clear');
+  if (clear) clear.disabled = projectPackReviewExportOutput === null;
+}
+
+function showProjectPackReviewExport(kind) {
+  clearProjectPackReviewExport('');
+  var state = currentProjectPackReview;
+  var text;
+  try {
+    if (!Object.prototype.hasOwnProperty.call(PROJECT_PACK_REVIEW_EXPORT_LABELS, kind)) throw new Error('unknown export kind');
+    if (!PACK_REVIEW_EXPORT_MODULE) throw new Error('export module is not available');
+    if (!projectPackReviewExportIsCurrent(state)) throw new Error('stale or missing review');
+    // 発行元（state の review・batch・ctx の instance 一致）は module の assertReviewOrigin が確かめる
+    text = kind === 'markdown'
+      ? PACK_REVIEW_EXPORT_MODULE.toMarkdown(state.review, state.batch, state.ctx)
+      : PACK_REVIEW_EXPORT_MODULE.serializeJson(state.review, state.batch, state.ctx);
+    if (typeof text !== 'string' || text === '') throw new Error('empty output');
+    // 表示を確定する直前にもう一度確かめる（作っている間に review・選択・Pack・計算が変われば捨てる）
+    if (!projectPackReviewExportIsCurrent(state)) throw new Error('stale review');
+    var out = document.getElementById('pack-review-export-out');
+    if (!out) throw new Error('no output area');
+    out.value = text;
+    if (out.value !== text) throw new Error('output area changed the text');
+    out.hidden = false;
+    projectPackReviewExportOutput = { kind: kind, state: state };
+  } catch (e) {
+    clearProjectPackReviewExport(PROJECT_PACK_REVIEW_EXPORT_FAILURE, true);
+    renderProjectPackReviewExportControls();
+    return false;
+  }
+  renderProjectPackReviewExportControls();
+  renderProjectPackReviewExportStatus(PROJECT_PACK_REVIEW_EXPORT_LABELS[kind] + ' を表示しました（全 ' + state.review.totalCases +
+    ' ケース・未レビュー。計算済み ≠ 検証済み）。コピーして共有する前に内容と共有先を確認してください。', false);
+  return true;
+}
+
+function clearProjectPackReviewExportByUser() {
+  clearProjectPackReviewExport('出力を消去しました。現在有効な出力はありません。');
+  renderProjectPackReviewExportControls();
   return true;
 }
 
