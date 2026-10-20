@@ -2,7 +2,11 @@
 #
 # Runs the repository's own checks against the PR head commit itself (not the
 # temporary merge ref): npm test, publication lint, project-state probe,
-# verifier package, and all 15 browser harnesses.
+# verifier package, and all 16 browser harnesses. The Pack Review print harness
+# (S3-B3B2-C2) prints a real PDF through the page's own button and native
+# window.print() in headed Chromium on a virtual display (Xvfb, --kiosk-printing,
+# Save as PDF) and reads it with Poppler; if Xvfb, headed Chromium, Poppler or
+# XTest is missing the job fails as CI infrastructure BLOCKED, never as a pass.
 #
 # - Ready PRs only. Draft PRs are skipped. A new push to the same PR cancels the
 #   older run.
@@ -112,7 +116,36 @@ jobs:
           # this fails the step if no candidate resolves.
           node --input-type=module -e "const m = await import('./tools/browser-checks/resolve-playwright.mjs'); const r = await m.resolvePlaywright(); console.log('playwright resolved via ' + r.source);"
 
-      - name: Browser harnesses (15)
+      - name: Install Poppler and Xvfb for the native PDF route (S3-B3B2-C2)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends poppler-utils xvfb xauth libxtst6 libx11-6
+          blocked=0
+          for tool in pdfinfo pdftotext pdftoppm xvfb-run python3; do
+            if ! command -v "${tool}" > /dev/null; then
+              echo "::error::CI infrastructure BLOCKED: ${tool} is not available"
+              blocked=1
+            fi
+          done
+          if ! python3 -c 'import ctypes; ctypes.CDLL("libXtst.so.6"); ctypes.CDLL("libX11.so.6")'; then
+            echo "::error::CI infrastructure BLOCKED: XTest (libXtst.so.6) is not loadable"
+            blocked=1
+          fi
+          if [ "${blocked}" -ne 0 ]; then
+            exit 1
+          fi
+          pdfinfo -v 2>&1 | head -n 1
+          {
+            echo "### Native PDF route"
+            echo ""
+            echo "| item | value |"
+            echo "|---|---|"
+            echo "| Poppler | \`$(pdfinfo -v 2>&1 | head -n 1)\` |"
+            echo "| Xvfb | \`$(dpkg-query -W -f='${Version}' xvfb)\` |"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Browser harnesses (16)
         run: |
           set -euo pipefail
           harnesses=(
@@ -131,9 +164,10 @@ jobs:
             single-ux
             project-pack-review
             project-pack-review-export
+            project-pack-review-print
           )
-          if [ "${#harnesses[@]}" -ne 15 ]; then
-            echo "::error::expected 15 harnesses, listed ${#harnesses[@]}"
+          if [ "${#harnesses[@]}" -ne 16 ]; then
+            echo "::error::expected 16 harnesses, listed ${#harnesses[@]}"
             exit 1
           fi
           {
@@ -146,7 +180,12 @@ jobs:
           for h in "${harnesses[@]}"; do
             log="${RUNNER_TEMP}/browser-${h}.log"
             echo "::group::${h}"
-            if node "tools/browser-checks/${h}.mjs" > "${log}" 2>&1; then rc=0; else rc=$?; fi
+            runner=(node)
+            if [ "${h}" = "project-pack-review-print" ]; then
+              # headed Chromium needs a display: the virtual one (no physical display, no printer)
+              runner=(xvfb-run -a -s '-screen 0 1280x1024x24' node)
+            fi
+            if "${runner[@]}" "tools/browser-checks/${h}.mjs" > "${log}" 2>&1; then rc=0; else rc=$?; fi
             cat "${log}"
             echo "::endgroup::"
             case "${rc}" in
@@ -176,6 +215,19 @@ jobs:
               # Over-rejections are fail-closed and reported separately.
               grep -Eq '^BYPASSES \(accept but Chromium makes an element\): 0 ' "${log}" || ok=0
               sed -n -e '/^BYPASSES/p' -e '/^over-rejections/p' "${log}"
+            fi
+            if [ "${h}" = "project-pack-review-print" ]; then
+              # The authorised Pack PDF must come from the native route (button -> window.print() -> headed
+              # Chromium -> Save as PDF -> Poppler). A run that did not print natively is not a pass.
+              grep -Eq '^environment: .*native headed [0-9.]+ .*Poppler [0-9.]+' "${log}" || ok=0
+              for id in PR-K01-native-button-print-d2-trace PR-K02-native-pdf-bound-to-request PR-K03-native-pdf-2000-rows-in-order \
+                        PR-K05-native-pdf-trust-and-page-number-every-page PR-N01-direct-page-pdf-cannot-print-pack; do
+                grep -Eq "^  ok   ${id} " "${log}" || ok=0
+              done
+              sed -n -e '/^environment:/p' "${log}"
+              if [ "${rc}" -eq 3 ]; then
+                echo "::error::CI infrastructure BLOCKED: the native PDF route was not available (${h} exit 3, UNVERIFIED)"
+              fi
             fi
             if [ "${ok}" -ne 1 ]; then
               not_pass=$((not_pass + 1))

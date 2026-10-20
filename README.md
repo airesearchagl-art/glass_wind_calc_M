@@ -1343,7 +1343,8 @@ JSON 約 1.1 MB・CSV 約 0.5 MB で、上限の内側です。
 S3-B3B2-A1 は pure contract だけでした。画面（index.html）への接続は S3-B3B2-B3 で行いました（下の「Pack Review の画面」。
 この module は変更していません）。Markdown / JSON の出力は S3-B3B2-C1-A で pure module として作りました（下の「Pack Review の出力」。
 画面にはまだ接続していません）。そのために review の発行元の記録（`assertReviewOrigin`）だけをこの module に足しました（review の
-schema・trust・deep-freeze・計算は変えていません）。印刷は未実装です。Workspace・Review Package は変更せず、使いません。
+schema・trust・deep-freeze・計算は変えていません）。印刷・PDF は S3-B3B2-C2 で別に追加しました（下の「Pack Review の印刷・PDF」。
+この module は変更していません）。Workspace・Review Package は変更せず、使いません。
 
 ### 流れ
 
@@ -1402,7 +1403,7 @@ ProjectPackBatch.assertBatchOrigin(batchResult, ctx)   … 発行物で、ctx（
 
 ### 後続（未実装）
 
-印刷、Redacted、Workspace との相互変換は行っていません。画面での表示は S3-B3B2-B3 で接続しました
+Redacted、Workspace との相互変換は行っていません（印刷・PDF は S3-B3B2-C2 で追加しました）。画面での表示は S3-B3B2-B3 で接続しました
 （`buildPackReview(stagedProjectPackBatch, stagedProjectPackContext, options)` → `assertPackReview`。鮮度は画面側の責務）。
 Markdown / JSON の出力は S3-B3B2-C1-A の pure module（`project-config/project-pack-review-export.js`）で、画面への接続は
 S3-B3B2-C1-B で行いました（「Pack Review の出力の画面」）。
@@ -1495,6 +1496,7 @@ S3-B3B2-C1-B で行いました（「Pack Review の出力の画面」）。
 - 狭い画面ではタブの列だけが横にスクロールし、ページ全体の幅は広げません（単一ケースの画面の横はみ出しは B4 で解消しました）。
 - 印刷では Project Pack の画面・タブを出しません。設計レビュー資料の印刷の gate（`beforeprint` / `afterprint`）は変えていません。
   既存の印刷の課題（ヘッダーが印刷される・単一ケースのタブから印刷すると資料が出ない）は後続の Focused Repair の候補として残しています。
+  Pack Review の印刷は S3-B3B2-C2 の専用ボタンだけで、Project Pack の画面でブラウザの印刷（Ctrl+P）をすると案内文だけを印刷します。
 
 ### 確認
 
@@ -1779,6 +1781,94 @@ C1-A の pure module（`ProjectPackReviewExport`）を、Project Pack の画面�
   明示的に確かめる）、`tests/verification-manifest.test.js` の M01 / M09（`project-pack-review-export` を literal の一覧に
   `UNVERIFIED` / `observational` で追加）。`tools/browser-checks/README.md` は harness を 15 本にした（文書のみ）。
 
+## Pack Review の印刷・PDF（Phase 2L-B2 / S3-B3B2-C2）
+
+表示中の Pack Review を、**専用のボタンを押したときだけ**印刷用の資料にして、ブラウザの印刷画面を要求します。PDF は印刷画面の
+「PDF に保存」で作ります（PDF の engine・Blob・ダウンロード・保存・送信はありません）。印刷・PDF も**未レビュー（`pack_unreviewed`）・
+計算済み ≠ 検証済み（`calculated_not_verified`）**で、正式な案件承認の資料ではありません。計算式・判定・Review の schema・C1-A / C1-B の
+出力・Workspace の印刷は変えていません。
+
+### 構成
+
+- **印刷用 model**（新設の pure module）: `project-config/project-pack-review-print.js`（`ProjectPackReviewPrint.buildPrintModel(review,
+  batch, ctx)`）。最初に `ProjectPackReview.assertReviewOrigin`（発行物で、同じ batch・ctx の instance から発行された review だけ）を
+  通し、見出し・段落・表のセルの**文字列だけ**の block の並びを deep-freeze で返します。数値の桁・null の「—」・比較の差（B − A）・
+  固定の注意 4 件・不可視 / Bidi / 制御文字の `⟨U+XXXX⟩`・`@` の `＠` は C1-A の Markdown と同じ規則です（Markdown の `\` の escape は
+  付けません）。全ケース（最大 2000）を元の並びで、詳細（最大 50）と比較を省略しません。上限は 2000 ケース・50 詳細・文字列の
+  UTF-8 の合計 8 MiB・印刷用 DOM の element の数 60,000（text node は数えない）で、超えたら切り詰めず何も返しません。60,000 の根拠:
+  合成の 2000 ケースで 12 の組合せ（3 mode × 詳細 0 / 50 × 比較なし / あり）は最大 50,077、階 110・候補 49 件の詳細 50 件の最大の構成で
+  54,775（文字列 0.41 MiB）。
+- **画面**: `#view-pack` の最後に独立した欄 `#pack-review-print-section`（「Pack Reviewを印刷」のボタン・`role="status"` の状態の欄・
+  常に見える信頼の注意・外部共有の注意・用紙と大量ページの注意・「ヘッダーとフッター」を OFF にする案内・再読み込みの注意）。
+  印刷用の root `#pack-review-print-root`・固定の拒否文 `#pack-review-print-blocked`・Project Pack 画面の案内文
+  `#pack-review-print-hint` は body の直下（`#view-batch` の後ろ）にあり、画面には出しません。
+- **印刷の CSS**: 既存の `@media print`（Workspace の資料）の後ろに、Pack 専用の別の規則を足しました（既存の規則は 1 文字も
+  変えていません）。Pack の要求中（`body.pack-print-requested`）は body 直下の root と拒否文だけ、DENY_PENDING 中
+  （`body.pack-print-deny-pending`）は拒否文だけを出します。root は印刷の直前に確かめて `pack-print-allowed` を付けたときだけ。
+  要求も DENY_PENDING も無いとき、Project Pack 画面の印刷は案内文だけです（案内文の規則は状態の class で絞り、allowlist に
+  詳細度で勝てないようにしています）。Workspace・単一ケースの画面の要求の無い印刷は従来どおりです。
+- **用紙**: 名前付きの page `pack-review`（A3 横・本文 10pt）。**A3 横・10pt は読みやすさを確かめる前の第一候補**で、紙面の最終の
+  採用は目視と Human の判断です。全ページの下の余白に「pack_unreviewed ／ calculated_not_verified — 未レビュー・計算済み ≠
+  検証済み・正式な案件承認の資料ではありません」とページ番号（n / N）を印刷し、表の見出しは各ページで繰り返します。
+
+### 1 回限りの印刷 session（D-1〜D-9）
+
+状態は `IDLE → BUILDING → ARMED → PRINT_EVENT → IDLE` と、粘着の `DENY_PENDING` です（C2 G0 の設計レビュー §3.3・Task Packet §5 の
+D-1〜D-9 のとおり）。
+
+- 印刷の要求を作るのは「Pack Reviewを印刷」だけです。押すと、表示中の state（`currentProjectPackReview`）が現在のもの（同じ
+  state・発行物・既存の鮮度の確認・作成時の試行・詳細 / 比較の選択の一致）かを、model の前・後・DOM を置く前・印刷を要求する直前に
+  確かめ、model を `createElement` / `textContent` だけで detached の DOM にしてから root に置き、`window.print()` を 1 回だけ呼びます。
+  session の番号は増やすだけで使い回しません。
+- 印刷の event を受け付けるのは `window.print()` を呼んでから戻るまでの**同期区間だけ**です。`beforeprint` では最初に許可の class を
+  外し、session・root の DOM・Review の現在性・発行元・選択を確かめたときだけ付け直します（`beforeprint` が何度来ても毎回）。
+  `beforeprint`（1 回以上）→ `afterprint`（1 回）→ 例外なく return、のときだけ正常終了で、root・model・class を消して IDLE に戻ります。
+  これは「印刷画面を要求した処理の終わり」で、**PDF の保存や印刷の完了は確認できません**（画面にもそう書きます）。
+- `afterprint` の無い return・`beforeprint` の無い return（連続抑止など）・順序の崩れ・2 回目の `afterprint`・`window.print()` や
+  handler の例外は **DENY_PENDING** です。`window.print()` を呼ぶ前の失敗は、固定文で IDLE に戻ります（印刷は起きない）。
+- **DENY_PENDING の間は、このページのどの印刷も固定の拒否文だけ**になります（Ctrl+P・メニュー、どの画面でも。**Workspace の資料が
+  FRESH でも Workspace の資料は印刷しません**: Human Decision U-3）。ボタンは `window.print()` を呼びません。解除は**ページ全体の
+  再読み込みだけ**で、クリック・時間・画面の切替・Review の生成し直し・`afterprint`・class の付け直しでは解除しません。
+  **再読み込みすると、読み込んだ Pack と Pack Review も消えます**（Pack の読込・全ケース計算・Review の生成からやり直し）。
+  画面はそれを書いて案内し、自動では再読み込みしません（Human Decision U-2）。印刷の許可・session は storage・cookie・URL に置きません。
+- 印刷の event は要求の番号を運ばないので、区間内に届いたもっともらしい event の**発生元は区別しません**（C-08）。保証するのは、
+  古い session の番号・model・DOM・許可を使い回さないこと、対応付けのできない順序を拒否側へ倒すこと、印刷されるのは現在の session
+  の root だけであることに限ります。`event.isTrusted` は Gate にしていません（Human Decision）。
+
+### 確認
+
+- Node: `tests/project-pack-review-print.test.js`（model。21 件）と `tests/project-pack-review-print-ui.test.js`（画面と session。
+  19 件。C-01〜C-10・X-1〜X-3 を vm の模擬の event の列で）。
+- 実ブラウザと実際の PDF: `xvfb-run -a -s '-screen 0 1280x1024x24' node tools/browser-checks/project-pack-review-print.mjs`。
+  許可された Pack の PDF は**ネイティブの経路だけ**で取ります: 仮想ディスプレイのヘッド付き Chromium・使い捨ての profile・
+  `--kiosk-printing`・送信先「PDF に保存」（ヘッダーとフッター OFF・隔離した出力先・file: 以外の通信は遮断）で、画面のボタン →
+  製品の `window.print()` → 保存された PDF を Poppler（`pdfinfo`・`pdftotext -layout`・`pdftoppm`）で読みます。PDF とその要求の
+  ひも付けは、要求ごとの合成の公開表示名が本文に 1 回だけ・PDF の作成時刻が `window.print()` の呼び出し〜戻りの間・同じ実行の
+  event の列が正常終了、の 3 点です。`page.pdf()` は拒否文・案内文・Workspace の資料の確認と、許可された Pack を出せないことの
+  確認だけに使います。素の Ctrl+P は仮想ディスプレイの XTest で送る実際のキー入力です。ブラウザに起こさせられない event の列
+  （`beforeprint` だけの return・逆順・重複・handler や `window.print()` の例外）は init script の注入で、ネイティブの event とは
+  区別して記録します。`PACK_PRINT_MATRIX=full` で 2000 ケース × 3 mode × 詳細 0 / 50 × 比較なし / ありの 12 組の PDF を加えます。
+- 仮想ディスプレイ・ヘッド付き Chromium・Poppler・XTest が無い環境では、この harness は何も測らずに UNVERIFIED（exit 3）で終わり
+  ます。GitHub Actions の PR CI（Ready の PR だけ）は Poppler・Xvfb を入れてから 16 本の harness を動かし、入らなければ
+  「CI infrastructure BLOCKED」で失敗にします。
+- **手動の確認（未実施・PENDING）**: ヘッド付きの Chrome / Edge の実際の印刷ダイアログでの保存・キャンセル・非同期の印刷・
+  ブラウザのヘッダーとフッター（Human Decision U-7）と、A3 横・10pt の読みやすさ。自動の確認からは PASS としません。
+
+### 限界
+
+- ページ下の余白の表示（`@page` の margin box）は Chromium 131 以降、Project Pack 画面の案内文の範囲（`:has()`）は対応する
+  ブラウザが前提です。ほかのブラウザ・版・フォント・プリンタでは確かめていません。
+- ケースが多いとページ数が多くなります（合成の 2000 ケース・詳細 50・比較の例で A3 横 137 ページ、詳細なしで 50〜62 ページ。参考値で、保証値ではありません）。
+- 印刷画面の非同期の動作（`window.print()` が印刷の完了を待たずに戻るブラウザ）では、印刷を止める側（DENY_PENDING）に倒れます。
+- 既存の Workspace の印刷の課題（W-P1〜W-P3）は、この変更では直していません。
+
+### 既存の test の移行（Human Gate で承認）
+
+`tests/review-ui.test.js` の UI-6（旧「inline code 全体の `window.print()` は 1 か所」→ 新「Workspace の `printReview` の鮮度ゲートの
+後で 1 回と、Pack の `printProjectPackReview` の Pack 専用ゲートの後で 1 回の 2 か所だけ。ほかの関数からは呼ばない」）、
+`tests/verification-manifest.test.js` の M01 / M09（`project-pack-review-print` を literal の一覧に `UNVERIFIED` / `observational` で
+追加）。`tools/browser-checks/README.md` は harness を 16 本にした（文書のみ）。
+
 ## 設計定数
 
 ### 設計風圧（正圧・負圧）＝「みよし案件プリセット」値
@@ -1892,6 +1982,7 @@ glass_wind_calc_M/
 │   ├── project-pack-report.js    # Project Pack Derived Report（Phase 2L-B2 / S3-B3B1）。JSON / CSV・一方向・未レビュー
 │   ├── project-pack-review.js    # Project Pack Review（Phase 2L-B2 / S3-B3B2-A1）。pure contract・origin gate・詳細の完全照合
 │   ├── project-pack-review-export.js # Pack Review の Markdown / JSON 出力（Phase 2L-B2 / S3-B3B2-C1-A）。発行元の一致・取り込みなし
+│   ├── project-pack-review-print.js  # Pack Review の印刷用 model（Phase 2L-B2 / S3-B3B2-C2）。文字列だけ・deep-freeze・上限で fail closed
 │   └── project-context.js        # ProjectContext 契約 + legacy / pack adapter（Phase 2L-B2 / S2-A）
 ├── tests/
 │   ├── calc.test.js              # 汎用計算コアの known-answer test + core purity（node:test）
@@ -1920,6 +2011,8 @@ glass_wind_calc_M/
 │   ├── project-pack-review-ui.test.js    # Pack Review の画面（Phase 2L-B2 / S3-B3B2-B3）。明示操作・鮮度・値は review から
 │   ├── project-pack-review-export.test.js # Pack Review の Markdown / JSON 出力（Phase 2L-B2 / S3-B3B2-C1-A）
 │   ├── project-pack-review-export-ui.test.js # Pack Review の出力の画面（Phase 2L-B2 / S3-B3B2-C1-B）
+│   ├── project-pack-review-print.test.js    # Pack Review の印刷用 model（Phase 2L-B2 / S3-B3B2-C2）
+│   ├── project-pack-review-print-ui.test.js # Pack Review の印刷の画面と印刷 session（Phase 2L-B2 / S3-B3B2-C2。C-01〜C-10・X-1〜X-3）
 │   ├── result-freshness-ui.test.js       # 単一ケース / Workspace の結果の鮮度・告示の出どころの表示（Phase 2L-B2 / S3-B3B2-B1）
 │   ├── three-view-navigation.test.js     # 目的別の 3 画面のタブ・切替・Pack 欄の移動（Phase 2L-B2 / S3-B3B2-B2）
 │   ├── single-ux.test.js                 # 単一ケースの入力の順・検証状況の要約・詳細の折りたたみ（Phase 2L-B4 / S3-B3B2-B4）
@@ -2169,6 +2262,8 @@ node --test
 | `tests/project-pack-review-ui.test.js` | Pack Review の画面（Phase 2L-B2 / S3-B3B2-B3）: script の順と初期化時の掴み・独立 section・「Pack Reviewを生成」を押したときだけ・作る直前と確定の直前の確認（module の assertBatchOrigin の代わりにしない）・値は review の発行物から（null は「—」・最大設計風圧と最小余裕比を分ける・同値はすべて・未宣言を補わない・差は B − A）・2000 ケースを切り詰めずに 50 行ずつ・詳細は batch の caseId だけ・重複と 51 件目を拒否・消える経路・信頼の文言は常に表示・保存 / 通信 / innerHTML なし |
 | `tests/project-pack-review-export.test.js` | Pack Review の出力（Phase 2L-B2 / S3-B3B2-C1-A）: 発行元は review・batch・ctx の完全な instance 一致（古い review と別の batch / ctx は拒否・元の 3 つをすべて持てば通るという限界を記録）・batch の gate の維持・記録は成功した発行だけで返す API なし・JSON は exportSchemaVersion と固定の notices 4 件の外枠・値 / 精度の保持（-0 を含む）と決定性・Markdown は全件を省略せず画面と同じ表示の桁で、文字列は 1 つの関数で escape（@ は全角）・不可視の文字は ⟨U+XXXX⟩・敵対的な文字列で構造が変わらない・2000 ケース × 3 mode・8 MiB の hard 上限・固定文・取り込み口なし・依存は初期化時に固定 |
 | `tests/project-pack-review-export-ui.test.js` | Pack Review の出力の画面（Phase 2L-B2 / S3-B3B2-C1-B）: 独立した欄・明示操作だけ・出力は 1 つ（置き換え）・作る直前と確定の直前に表示中の state・既存の鮮度・試行・選択・発行物を確かめ、発行元は module の assertReviewOrigin・staged を直接読まない・既存の関数への hook は 2 つだけ・Review が消える 12 の経路で出力も消える・失敗は出力だけを消す固定文・module なしでも Review は動く・C1-A の出力と文字列が完全に一致・2000 ケース × 3 mode × 2 形式・8 MiB で一部も出さない・保存 / 通信 / ダウンロード / クリップボードなし |
+| `tests/project-pack-review-print.test.js` | Pack Review の印刷用 model（Phase 2L-B2 / S3-B3B2-C2）: API と固定の文面（注意 4 件は C1-A と同じ文面・同じ順）・発行元の gate（発行物・同じ batch / ctx の instance だけ）・依存は初期化時に 1 度だけ・C1-A の Markdown との表のすべてのセルと文の並びの parity・2000 ケースの全行の並び・独立の oracle による表示の桁（null は —、0 にしない）・詳細 50・比較 B − A・独立の literal による可視化（⟨U+XXXX⟩・＠・正規化しない）・敵対的な文字列・deep-freeze・決定的・element / byte の上限（ちょうど上限は全量、超えたら何も返さない）・正規の最大の Pack が上限に収まる・固定文の失敗・副作用なし |
+| `tests/project-pack-review-print-ui.test.js` | Pack Review の印刷の画面（Phase 2L-B2 / S3-B3B2-C2）: script の順と 1 度だけの掴み・section と body 直下の 3 要素の配置・常に見える信頼 / 共有 / 用紙 / ヘッダーとフッター / 再読み込みの注意・後ろに足した別の印刷の CSS（Workspace の印刷の CSS と設計レビュー資料の block は main と SHA-256 で同一）・listener は Workspace の後・staged を読まない・hook は C1-B V04 の 2 行の前・vm で D-1〜D-9 の受入試験 C-01〜C-10 と X-1〜X-3（event の列は模擬）・state / 発行元 / 選択 / root の不一致で許可しない・2000 ケース × 3 mode の DOM が model と一致・Review が消える経路でボタンが押せなくなる・再入しない・保存 / 通信なし |
 
 ### 必須ケース
 
