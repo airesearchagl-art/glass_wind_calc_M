@@ -89,8 +89,15 @@ test('P2L-S3B3B1-U02: 出力は明示操作だけ（読込・選択・計算の�
   assert.match(STATIC, /<textarea id="pack-report-out" rows="8" spellcheck="false" autocomplete="off" readonly hidden/);
   // showProjectPackReport を呼ぶのはボタンだけ。buildReport / serializeJson / toCsv は showProjectPackReport の中だけ
   assert.equal((CODE.match(/showProjectPackReport\(/g) || []).length, 1, 'コードから showProjectPackReport を呼んでいる');
+  // S3-B3B2-C1-B で移行: 旧「inline code 全体の serializeJson( は 1 か所」→ 新「2 か所（この Report と、Pack Review の出力の
+  // PACK_REVIEW_EXPORT_MODULE.serializeJson(）」。理由: C1-B が Review の出力（ProjectPackReviewExport）を画面へ接続した。
+  // 代わりの保証: Report の PACK_REPORT_MODULE.serializeJson( は inline code 全体で 1 か所だけで、それは showProjectPackReport の
+  // 中にあることを下で確かめる（Report と Review の出力は別の module・別の関数のまま）。
   ['buildReport(', 'serializeJson(', 'toCsv('].forEach((t) =>
-    assert.equal(CODE.split(t).length - 1, t === 'toCsv(' ? 2 : 1, t + ' の呼び出し箇所'));   // toCsv( は Workspace の既存 1 か所 + ここ
+    assert.equal(CODE.split(t).length - 1, t === 'buildReport(' ? 1 : 2, t + ' の呼び出し箇所'));   // toCsv( は Workspace の既存 1 か所 + ここ
+  assert.equal(CODE.split('PACK_REPORT_MODULE.serializeJson(').length - 1, 1, 'Report の serializeJson の呼び出しは 1 か所');
+  assert.equal(CODE.split('PACK_REVIEW_EXPORT_MODULE.serializeJson(').length - 1, 1, 'もう 1 か所は Review の出力');
+  assert.equal(fnBody('showProjectPackReport').includes('PACK_REVIEW_EXPORT_MODULE'), false, 'Report が Review の出力を使っている');
   const show = fnBody('showProjectPackReport');
   ['PACK_REPORT_MODULE.buildReport(batch)', 'PACK_REPORT_MODULE.serializeJson(report)', 'PACK_REPORT_MODULE.toCsv(report)']
     .forEach((s) => assert.equal(show.includes(s), true, s));

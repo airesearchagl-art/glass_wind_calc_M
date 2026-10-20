@@ -955,8 +955,16 @@ test('P2L-S3B3B2C1A-X17: 依存は初期化時の ProjectPackReview だけ。計
   const empty = loadExport({});
   empty.ProjectPackReview = Review;
   assert.throws(() => empty.ProjectPackReviewExport.serializeJson(r, b, c), /project-pack-review\.js is required but not available/);
-  // C1-A は pure module だけ。index.html にはまだ読み込まない（画面への接続は C1-B）
-  assert.equal(read('index.html').includes('project-pack-review-export'), false);
+  // S3-B3B2-C1-B で移行: 旧「C1-A は pure module だけ。index.html にはまだ読み込まない」→ 新「index.html は
+  // project-pack-review-export.js を 1 度だけ、project-pack-review.js の後に読み込む」。理由: C1-B は画面への接続の
+  // phase（この module は変えない）。代わりの保証: module 自身が計算・Workspace・DOM・保存・通信に触れず、依存は初期化時の
+  // ProjectPackReview だけで入力を書き換えないことは、この test の上の spy と token の確認がそのまま確かめる。画面の経路
+  // （明示操作・鮮度・発行元・消える経路）は tests/project-pack-review-export-ui.test.js が確かめる。
+  const html = read('index.html');
+  const tag = (src) => html.indexOf('<script src="project-config/' + src + '"></script>');
+  assert.equal(html.split('project-pack-review-export.js').length - 1, 1, 'export の script は 1 つだけ');
+  assert.equal(tag('project-pack-review.js') !== -1 && tag('project-pack-review.js') < tag('project-pack-review-export.js'), true,
+    'review → review-export の順');
 });
 
 test('P2L-S3B3B2C1A-X18: privacy（出典の申告・context・Pack の痕跡・計算の途中値を出さない）', () => {
