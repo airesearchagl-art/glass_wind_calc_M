@@ -621,6 +621,8 @@ const onlyShown = (s, id) => same(s.shown, [id]);
 {
   // C-03・C-05(c)・C-07・C-08(a)・C-09・C-10: DENY_PENDING は粘着で、解除は再読み込みだけ
   const { p, ws } = await stubPage('notification1458', { workspaceFresh: true });
+  // fake clock は DENY_PENDING に入る前に入れる（入った時に page が置く timer も、この clock で進める）
+  await p.clock.install();
   await stubPrint(p, ['before']);
   const steps = {};
   for (let i = 0; i < 3; i++) await fire(p, 'afterprint');
@@ -634,7 +636,6 @@ const onlyShown = (s, id) => same(s.shown, [id]);
   await p.emulateMedia({ media: 'screen' });
   await forceClick(p);
   steps.forced = await printState(p);
-  await p.clock.install();
   await p.clock.fastForward(61000);
   steps.time = await printState(p);
   for (const v of ['batch', 'single', 'pack']) await p.click('#view-tab-' + v);
