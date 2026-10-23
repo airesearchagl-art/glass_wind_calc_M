@@ -1822,6 +1822,7 @@ D-1〜D-9 のとおり）。
   session の番号は増やすだけで使い回しません。
 - 印刷の event を受け付けるのは `window.print()` を呼んでから戻るまでの**同期区間だけ**です。`beforeprint` では最初に許可の class を
   外し、session・root の DOM・Review の現在性・発行元・選択を確かめたときだけ付け直します（`beforeprint` が何度来ても毎回）。
+  一度確かめて通らなかった session は、その後の `beforeprint` で現在性が戻っても許可しません（その回以降は拒否文だけ。RF-C2-IR01-01）。
   `beforeprint`（1 回以上）→ `afterprint`（1 回）→ 例外なく return、のときだけ正常終了で、root・model・class を消して IDLE に戻ります。
   これは「印刷画面を要求した処理の終わり」で、**PDF の保存や印刷の完了は確認できません**（画面にもそう書きます）。
 - `afterprint` の無い return・`beforeprint` の無い return（連続抑止など）・順序の崩れ・2 回目の `afterprint`・`window.print()` や
@@ -1838,7 +1839,7 @@ D-1〜D-9 のとおり）。
 ### 確認
 
 - Node: `tests/project-pack-review-print.test.js`（model。21 件）と `tests/project-pack-review-print-ui.test.js`（画面と session。
-  19 件。C-01〜C-10・X-1〜X-3 を vm の模擬の event の列で）。
+  20 件。C-01〜C-10・X-1〜X-3 と、一度拒否した session を再許可しないこと（RF-C2-IR01-01）を vm の模擬の event の列で）。
 - 実ブラウザと実際の PDF: `xvfb-run -a -s '-screen 0 1280x1024x24' node tools/browser-checks/project-pack-review-print.mjs`。
   許可された Pack の PDF は**ネイティブの経路だけ**で取ります: 仮想ディスプレイのヘッド付き Chromium・使い捨ての profile・
   `--kiosk-printing`・送信先「PDF に保存」（ヘッダーとフッター OFF・隔離した出力先・file: 以外の通信は遮断）で、画面のボタン →

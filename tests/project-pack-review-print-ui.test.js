@@ -251,7 +251,7 @@ test('P2-C2-U04: controller の静的な契約（listener は Workspace の後�
   ['state === currentProjectPackReview', 'PACK_REVIEW_MODULE.isPackReview(state.review)', 'projectPackReviewIsCurrent(state.batch, state.ctx)',
     'state.attempt === projectPackAttempt', 'projectPackReviewSelectionMatches(state)'].forEach((s) => assert.equal(cur.includes(s), true, s));
   const live = fnBody('projectPackPrintSessionIsLive');
-  ["projectPackPrint.state === 'PRINT_EVENT'", 'projectPackPrint.live === live', 'live.inCall === true',
+  ["projectPackPrint.state === 'PRINT_EVENT'", 'projectPackPrint.live === live', 'live.inCall === true', 'live.refused === false',
     "root.getAttribute('data-print-session') === String(live.id)", 'root.childElementCount === 1', 'root.firstElementChild === live.dom',
     "live.dom.getAttribute('data-print-session') === String(live.id)", 'projectPackReviewPrintIsCurrent(live.state)',
     'projectPackPrintOriginMatches(live.state)'].forEach((s) => assert.equal(live.includes(s), true, s));
@@ -1013,4 +1013,54 @@ test('P2-C2-U19: module は初期化時に 1 度だけ掴む（後から置い�
   assert.equal(vm.runInContext('PACK_REVIEW_PRINT_MODULE', p.w), null);
   assert.equal(p.w.clearProjectPackReviewByUser(), true);
   assert.equal(p.review(), null);
+});
+
+test('P2-C2-U20 (RF-C2-IR01-01): 一度拒否した session は、その後の beforeprint で現在性が戻っても許可しない（正常な繰り返しは従来どおり許可）', () => {
+  // 1. 正常な beforeprint の繰り返しは毎回確かめて許可する（C-05(a) と同じ。拒否の記録は付かない）
+  const ok = ready('notification1458');
+  ok.onPrint = (f) => { f('beforeprint'); f('beforeprint'); f('beforeprint'); f('afterprint'); };
+  assert.equal(ok.print(), true);
+  const okBps = ok.trace.filter((t) => t.ev === 'beforeprint');
+  assert.equal(okBps.length, 3);
+  okBps.forEach((t) => assert.equal(allowedAt(t, 1), true, '正常な繰り返しで許可しなかった'));
+  idleClean(ok, '正常な繰り返し');
+  assert.equal(ok.status(), REQUESTED(ok.review().review.totalCases));
+  // 2. 現在性を戻す操作（試行の番号を戻す・root の session の書き換えを戻す）
+  const stale = (q) => q.invalidate();
+  const restore = (q) => vm.runInContext('projectPackAttempt -= 1;', q.w);
+  const runs = {
+    // 必須の列: beforeprint（古いので拒否）→ 状態を戻す → beforeprint → afterprint
+    '古い → beforeprint（拒否）→ 戻す → beforeprint → afterprint': (f, q) => { stale(q); f('beforeprint'); restore(q); f('beforeprint'); f('afterprint'); },
+    // 許可 → 古い → 拒否 → 戻す → beforeprint（許可しない）
+    'beforeprint（許可）→ 古い → beforeprint（拒否）→ 戻す → beforeprint → afterprint': (f, q) => {
+      f('beforeprint'); stale(q); f('beforeprint'); restore(q); f('beforeprint'); f('afterprint');
+    },
+    // root の DOM の不一致で拒否した後、root を戻しても許可しない
+    'root の session の書き換え → beforeprint（拒否）→ 戻す → beforeprint → afterprint': (f, q) => {
+      const id = q.root.getAttribute('data-print-session');
+      q.root.setAttribute('data-print-session', '999'); f('beforeprint'); q.root.setAttribute('data-print-session', id); f('beforeprint'); f('afterprint');
+    }
+  };
+  for (const [name, run] of Object.entries(runs)) {
+    const p = ready('notification1458');
+    p.onPrint = run;
+    assert.equal(p.print(), false, name);
+    const bps = p.trace.filter((t) => t.ev === 'beforeprint');
+    const firstRefused = bps.findIndex((t) => !packAllowed(t));
+    assert.notEqual(firstRefused, -1, name + ': 前提: 拒否した回がある');
+    bps.slice(firstRefused).forEach((t, i) => {
+      assert.equal(packAllowed(t), false, name + ': 拒否の後の beforeprint ' + (i + 1) + ' で許可した');
+      assert.equal(t.classes.includes('pack-print-requested'), true, name + ': 要求中は拒否文が出る');
+    });
+    // 現在性は戻っている（戻した後の確認そのものは通る）が、この session は許可しない
+    assert.equal(p.w.projectPackReviewPrintIsCurrent(p.review()), true, name + ': 前提: 状態は戻っている');
+    // 終わり方は D-2 の正常終了（DENY_PENDING ではない）で、状態の文は「印刷していない」
+    idleClean(p, name);
+    assert.equal(p.status(), REFUSED, name);
+    assert.equal(p.statusError(), true, name);
+    // 次の押下は新しい session として全 gate から（拒否の記録は持ち越さない）
+    p.onPrint = null;
+    assert.equal(p.print(), true, name + ': 次の session');
+    assert.equal(allowedAt(p.trace.filter((t) => t.ev === 'beforeprint').slice(-1)[0], 2), true, name + ': 次の session で許可しなかった');
+  }
 });

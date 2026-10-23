@@ -6630,7 +6630,8 @@ if (typeof ReviewPackage !== 'undefined' && document.getElementById('rep-detail-
        D-7 IDLE で見た beforeprint / afterprint（素の Ctrl+P など）は、許可の class と空の root を消すだけ。
        D-8 遅れて来た・重複した event を新しい session に結び付けない。session の番号は増やすだけで使い回さない。
    - 印刷の直前（beforeprint）は、まず許可の class を外し、session・root の DOM・Review の現在性・発行元・選択を確かめた
-     ときだけ付け直す。印刷の可否は controller の JS の状態で決め、body の class から状態を作り直さない。
+     ときだけ付け直す。一度確認に通らなかった session は、その後の beforeprint で現在性が戻っても許可しない（その回以降は
+     拒否文だけ。RF-C2-IR01-01）。印刷の可否は controller の JS の状態で決め、body の class から状態を作り直さない。
    - event は発生元を運ばないので、区間内に届いたもっともらしい event の発生元は区別しない（C-08。保証は、古い session の
      番号・model・DOM・許可を使い回さないことと、現在の session の root だけを確かめて印刷することに限る）。
    - 印刷の許可・session を storage・cookie・URL に置かない。保存・送信・ダウンロード・console はしない。staged の Pack を
@@ -6775,11 +6776,12 @@ function buildProjectPackPrintDom(model, sessionId) {
   return doc;
 }
 
-/* 印刷の直前（各 beforeprint）に、生きている session がそのまま印刷してよいものか（session・root の DOM・現在性・発行元）。 */
+/* 印刷の直前（各 beforeprint）に、生きている session がそのまま印刷してよいものか（一度も拒否していない・session・root の
+   DOM・現在性・発行元）。一度拒否した session は、現在性が戻っても許可しない（RF-C2-IR01-01）。 */
 function projectPackPrintSessionIsLive(live) {
   var root = document.getElementById('pack-review-print-root');
   return projectPackPrint.state === 'PRINT_EVENT' && projectPackPrint.live === live && live.inCall === true &&
-    live.model !== null && live.dom !== null && !!root && root.getAttribute('data-print-session') === String(live.id) &&
+    live.refused === false && live.model !== null && live.dom !== null && !!root && root.getAttribute('data-print-session') === String(live.id) &&
     root.childElementCount === 1 && root.firstElementChild === live.dom &&
     live.dom.getAttribute('data-print-session') === String(live.id) &&
     projectPackReviewPrintIsCurrent(live.state) && projectPackPrintOriginMatches(live.state);

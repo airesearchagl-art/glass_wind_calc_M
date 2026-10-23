@@ -308,6 +308,8 @@ const PLAN = () => {
       if (step === 'throw') throw new Error('synthetic print failure');
       // 区間の途中で Review を古くする（load の試行の番号を進める。page の中だけの操作）
       if (step === 'stale') { window.projectPackAttempt += 1; continue; }
+      // 古くした試行の番号を戻す（現在性が回復する。RF-C2-IR01-01 の検査用）
+      if (step === 'restore') { window.projectPackAttempt -= 1; continue; }
       dispatchEvent(new Event(step === 'before' ? 'beforeprint' : 'afterprint'));
       window.__snaps.push(window.__snap(step));
     }
@@ -333,6 +335,12 @@ const NATIVE = () => {
       if (inj === 'before-only') { dispatchEvent(new Event('beforeprint')); return undefined; }
       if (inj === 'after-first') dispatchEvent(new Event('afterprint'));
       if (inj === 'extra-before-first') dispatchEvent(new Event('beforeprint'));
+      // 古い Review のまま合成の beforeprint（拒否される）→ 現在性を戻す → ネイティブの印刷（RF-C2-IR01-01）
+      if (inj === 'stale-before-restore') {
+        window.projectPackAttempt += 1;
+        dispatchEvent(new Event('beforeprint'));
+        window.projectPackAttempt -= 1;
+      }
       const r = native();
       if (inj === 'after-after') dispatchEvent(new Event('afterprint'));
       if (inj === 'after-before') dispatchEvent(new Event('beforeprint'));
@@ -700,6 +708,26 @@ const onlyShown = (s, id) => same(s.shown, [id]);
   const [b1, b2] = stale.filter((x) => x.ev === 'before');
   check('PR-S15-C05a-stale-between-beforeprints-blocked-from-then', onlyShown(b1, 'pack-review-print-root') && onlyShown(b2, 'pack-review-print-blocked') &&
     isIdleClean(s2) && s2.status.startsWith(REFUSED_HEAD) && s2.statusError, short({ b1: b1.shown, b2: b2.shown, s2 }));
+  // RF-C2-IR01-01: 一度拒否した session は、現在性が戻った後の beforeprint でも許可しない（拒否文だけ）。次の押下は新しい session
+  const plans = [['stale', 'before', 'restore', 'before', 'after'], ['before', 'stale', 'before', 'restore', 'before', 'after']];
+  const rf = [];
+  // 前提: 上の PR-S15 で古くした試行の番号を戻し、Review を現在のものに戻してボタンの表示を合わせる（page の中だけの操作）
+  await p.evaluate(() => { window.projectPackAttempt -= 1; renderProjectPackReviewControls(); });
+  for (const plan of plans) {
+    const snaps = await stubPrint(p, plan);
+    const st = await printState(p);
+    const bs = snaps.filter((x) => x.ev === 'before');
+    const first = bs.findIndex((x) => !x.classes.includes('pack-print-allowed'));
+    const current = await p.evaluate(() => projectPackReviewPrintIsCurrent(currentProjectPackReview));
+    rf.push({ plan: plan.join(','), shown: bs.map((x) => x.shown.join('|')), ok: first !== -1 &&
+      bs.slice(0, first).every((x) => onlyShown(x, 'pack-review-print-root')) &&
+      bs.slice(first).every((x) => onlyShown(x, 'pack-review-print-blocked') && !x.classes.includes('pack-print-allowed')) &&
+      current === true && isIdleClean(st) && st.status.startsWith(REFUSED_HEAD) && st.statusError });
+  }
+  const next = await stubPrint(p, ['before', 'after']);
+  const sn = await printState(p);
+  check('PR-S22-refused-session-not-reallowed-after-recovery', rf.every((x) => x.ok) && onlyShown(next.find((x) => x.ev === 'before'), 'pack-review-print-root') &&
+    isIdleClean(sn) && sn.status.startsWith(REQUESTED(3)), short({ rf, next: sn.status.slice(0, 20) }));
   await p.close();
 }
 {
@@ -1083,6 +1111,18 @@ for (const [id, inj, expect] of [['PR-K16-native-C06b-second-afterprint-deny-pac
   const js = ps ? judgeOther(ps, 'blocked') : null;
   check('PR-K24-native-stale-at-beforeprint-blocked-pdf-idle', traceSeq(s.trace) === 'callEnter > beforeprint- > afterprint > callReturn' &&
     isIdleClean(s.state) && s.state.status.startsWith(REFUSED_HEAD) && !!js && js.ok && js.k.blockedReload === 0, short({ seq: traceSeq(s.trace), js: js && js.items }));
+  // K25 (RF-C2-IR01-01): 区間内で、古い Review のまま合成の beforeprint（拒否）→ 現在性を戻す → ネイティブの beforeprint → afterprint。
+  // 戻した後のネイティブの印刷でも Pack を許可しない（PDF は拒否文だけ・label 0）。終わり方は正常終了で IDLE・「印刷していない」の固定文
+  await np.waitForTimeout(800);
+  // 前提: K24 で古くした試行の番号を戻し、Review を現在のものに戻してボタンの表示を合わせる（page の中だけの操作）
+  await np.evaluate(() => { window.projectPackAttempt -= 1; renderProjectPackReviewControls(); });
+  const k = await nativePrint('stale-before-restore', true);
+  const pk = k.files.length === 1 ? pdfOf(k.files[0]) : null;
+  const jk = pk ? judgeOther(pk, 'blocked') : null;
+  const currentAfter = await np.evaluate(() => projectPackReviewPrintIsCurrent(currentProjectPackReview));
+  check('PR-K25-native-refused-session-not-reallowed-after-recovery', traceSeq(k.trace) === 'callEnter > beforeprint-(synthetic) > beforeprint- > afterprint > callReturn' &&
+    isIdleClean(k.state) && k.state.status.startsWith(REFUSED_HEAD) && currentAfter === true && !!jk && jk.ok && jk.k.blockedReload === 0 &&
+    flatCount(pk.text, label) === 0, short({ seq: traceSeq(k.trace), jk: jk && jk.items, current: currentAfter }));
 }
 
 // 全量 matrix（ローカル。PACK_PRINT_MATRIX=full）: 2000 ケース × 3 mode × 詳細 0 / 50 × 比較なし / あり
