@@ -522,6 +522,13 @@
   }
   textarea#pack-review-export-out[hidden] { display: none; }
 
+  /* ===== Pack Review の印刷・PDF（S3-B3B2-C2）: 印刷を要求する欄。印刷用の root・拒否文・案内文は画面には出さない ===== */
+  .pack-review-print { margin-top: 16px; }
+  .notice.pack-review-print-trust { margin: 0 0 10px; font-size: 12px; color: var(--text2); line-height: 1.8; overflow-wrap: anywhere; }
+  .pack-review-print-trust strong { color: var(--warn); }
+  .pack-note.pack-review-print-reload { color: var(--warn); }
+  #pack-review-print-root, #pack-review-print-blocked, #pack-review-print-hint { display: none; }
+
   /* ===== 結果の鮮度（Phase 2L-B2 / S3-B3B2-B1） ===== */
   .result-wrap { display: flex; flex-direction: column; gap: 12px; }
   .result-freshness {
@@ -732,6 +739,68 @@
     padding: 40px 20px;
     color: var(--text3);
     font-size: 13px;
+  }
+
+  /* ===== Pack Review の印刷（S3-B3B2-C2）: 上の印刷規則（Workspace の資料）は変えず、後ろに Pack 専用の規則を足す =====
+     - Pack の印刷の要求（body.pack-print-requested）中は、body 直下の印刷用 root と固定の拒否文の 2 つ以外を出さない。
+       root を出すのは、印刷の直前（beforeprint）に controller が確かめて body.pack-print-allowed を付けたときだけ。
+     - DENY_PENDING（body.pack-print-deny-pending）中は、どの画面からの印刷でも固定の拒否文だけ（Workspace の資料も出さない）。
+     - 要求も DENY_PENDING も無いとき、Project Pack 画面の印刷（Ctrl+P・ブラウザのメニュー）は案内文だけ。
+       案内文の規則は状態の class で絞り、上の 2 つの allowlist に詳細度で勝てないようにする（F1）。
+     - Workspace・単一ケースの画面の、要求の無い印刷は従来どおり（この block の規則は当たらない）。 */
+  @media print {
+    body:not(.pack-print-requested):not(.pack-print-deny-pending):has(> #view-pack:not([hidden])) > :not(#pack-review-print-hint) {
+      display: none !important;
+    }
+    body:not(.pack-print-requested):not(.pack-print-deny-pending) > #view-pack:not([hidden]) ~ #pack-review-print-hint {
+      display: block !important; border: 1px solid #000; padding: 12px; background: #fff; color: #000; font-size: 13px; line-height: 1.8;
+    }
+    body.pack-print-requested > :not(#pack-review-print-root):not(#pack-review-print-blocked) { display: none !important; }
+    body.pack-print-deny-pending > :not(#pack-review-print-blocked) { display: none !important; }
+    body.pack-print-requested.pack-print-allowed:not(.pack-print-deny-pending) > #pack-review-print-root { display: block !important; }
+    body.pack-print-requested:not(.pack-print-allowed) > #pack-review-print-blocked,
+    body.pack-print-deny-pending > #pack-review-print-blocked {
+      display: block !important; border: 1px solid #000; padding: 12px; background: #fff; color: #000; font-size: 13px; line-height: 1.8;
+    }
+    #pack-review-print-blocked .pack-print-blocked-reload { display: none; }
+    body.pack-print-deny-pending > #pack-review-print-blocked .pack-print-blocked-reload { display: block; }
+
+    #pack-review-print-root { page: pack-review; font-size: 10pt; line-height: 1.35; color: #000; background: #fff; }
+    #pack-review-print-root h1 { font-size: 16pt; margin: 0 0 6pt; }
+    #pack-review-print-root h2 { font-size: 13pt; margin: 10pt 0 4pt; break-after: avoid; }
+    #pack-review-print-root h3 { font-size: 11pt; margin: 6pt 0 3pt; break-after: avoid; }
+    #pack-review-print-root h4 { font-size: 10pt; margin: 4pt 0 2pt; break-after: avoid; }
+    #pack-review-print-root p { margin: 2pt 0 4pt; overflow-wrap: anywhere; }
+    #pack-review-print-root .pack-print-trust { border: 1pt solid #000; padding: 4pt 8pt; margin: 0 0 8pt; break-inside: avoid; }
+    #pack-review-print-root .pack-print-trust ul { margin: 2pt 0; padding-left: 14pt; }
+    #pack-review-print-root table { border-collapse: collapse; width: 100%; margin: 2pt 0 8pt; }
+    #pack-review-print-root thead { display: table-header-group; }
+    /* 表のセルは単語の途中では折り返さない（列が細くなりすぎない）。長い値が入りうる項目表・グループ表の最後の列だけ、どこでも折り返す */
+    #pack-review-print-root th, #pack-review-print-root td {
+      border: 0.5pt solid #666; padding: 1pt 3pt; text-align: left; vertical-align: top; overflow-wrap: break-word;
+    }
+    #pack-review-print-root :is(.pack-print-kv, .pack-print-groups, .pack-print-metrics) td:last-child { overflow-wrap: anywhere; }
+    /* 画面の表の規則（暗い背景用の薄い文字色・先頭行の強調・見出しの折り返しなし）を印刷用 root には使わない。白い紙に黒い文字 */
+    #pack-review-print-root th, #pack-review-print-root td, #pack-review-print-root tr:first-child td {
+      color: #000; background: none; font-size: inherit; letter-spacing: normal; font-weight: 400;
+    }
+    #pack-review-print-root tr, #pack-review-print-root tr:first-child { background: none; }
+    #pack-review-print-root th { font-weight: 700; white-space: normal; }
+    /* 短い列（項目名・件数・宣言など）は折り返さず、caseId の並びなど最後の列に幅を残す */
+    #pack-review-print-root .pack-print-kv :is(th, td):first-child,
+    #pack-review-print-root :is(.pack-print-groups, .pack-print-metrics) :is(th, td):not(:last-child) { white-space: nowrap; }
+    #pack-review-print-root tr { break-inside: avoid; }
+    #pack-review-print-root .pack-print-detail { border: 1pt solid #000; padding: 4pt 6pt; margin: 6pt 0; break-inside: avoid; }
+  }
+  /* Pack の印刷用 root の用紙（A3 横・本文 10pt は可読性を確かめる前の第一候補）と、全ページの余白の未レビューの表示・ページ番号。
+     名前付きの page なので、root を印刷しないとき（拒否文・案内文・Workspace の資料）には使わない。 */
+  @page pack-review {
+    size: A3 landscape;
+    margin: 12mm 10mm 16mm;
+    @bottom-center {
+      content: "pack_unreviewed ／ calculated_not_verified — 未レビュー・計算済み ≠ 検証済み・正式な案件承認の資料ではありません　" counter(page) " / " counter(pages);
+      font-size: 8pt; color: #000;
+    }
   }
 </style>
 </head>
@@ -1309,6 +1378,41 @@
       aria-label="Pack Review の出力（読み取り専用）"></textarea>
   </div>
 </section>
+<!-- Pack Review の印刷・PDF（S3-B3B2-C2）: 表示中の Pack Review を、このボタンを押したときだけ印刷用の資料にして
+     ブラウザの印刷画面を要求する（PDF は印刷画面の「PDF に保存」で作る）。印刷用の root・拒否文・案内文は body の直下
+     （#view-batch の後ろ）にあり、画面には出さない。上の 3 つの section の中身は変えない。 -->
+<section class="pack-wrap pack-review-print" id="pack-review-print-section" aria-labelledby="pack-review-print-title">
+  <div class="card" id="pack-review-print-card">
+    <h2 class="card-title" id="pack-review-print-title">Pack Review の印刷・PDF（未レビュー）</h2>
+    <div class="notice pack-review-print-trust" id="pack-review-print-trust" role="note">
+      <strong>pack_unreviewed ／ calculated_not_verified — 計算済み ≠ 検証済み。</strong>
+      OK は計算上の候補判定です。印刷・PDF は正式な案件承認の資料ではありません。値は案件原典（構造計算書・図面など）と
+      メーカー検討で確認してください。各ページの下に未レビューの表示とページ番号を印刷します。
+    </div>
+    <p class="pack-note" id="pack-review-print-share">この資料にはガラス寸法・設計風圧などの案件入力値が含まれます。外部へ共有する場合は、内容と共有先を確認してください。publication advisory が 0 件でも公開安全の証明にはなりません。</p>
+    <p class="pack-note" id="pack-review-print-paper">
+      表示中の Pack Review の全ケース（最大 2000）・選んだケースの詳細（最大 50）・比較を、省略せずに印刷します。
+      ケースが多いとページ数も多くなります。用紙は A3 横・本文 10pt を想定しています（読みやすさを確かめている途中の候補です）。
+      「Pack Reviewを印刷」を押したときだけ印刷用の資料を作ります。ブラウザの印刷（Ctrl+P・メニュー）からは Pack Review の内容を印刷しません。
+    </p>
+    <p class="pack-note" id="pack-review-print-headers">
+      印刷画面では「ヘッダーとフッター」を OFF にしてください（ON のままだと、ブラウザがページの URL・ファイルの場所・日時を
+      印刷します。アプリからは OFF にできません）。送信先に「PDF に保存」を選ぶと PDF になります。PDF の保存や印刷が
+      完了したかどうかは、このページでは確認できません。保存・送信はしません。
+    </p>
+    <p class="pack-note pack-review-print-reload" id="pack-review-print-reload">
+      印刷画面の開始と終了を確認できなかったときは、ページ全体を再読み込みするまで、このページの印刷を止めます
+      （Workspace の資料を含め、固定の案内文だけを印刷します）。再開できるのはページ全体の再読み込みだけで、再読み込みすると、
+      読み込んだ Pack と Pack Review も消えます（Pack の読込・全ケース計算・Review の生成からやり直しです）。自動では再読み込みしません。
+    </p>
+    <div class="pack-exec-controls">
+      <button type="button" id="btn-pack-review-print" class="btn-secondary"
+        aria-describedby="pack-review-print-trust pack-review-print-reload"
+        onclick="printProjectPackReview()" disabled>Pack Reviewを印刷</button>
+    </div>
+    <div class="pack-status" id="pack-review-print-status" role="status" aria-live="polite">印刷用の資料は、表示中の Pack Review から「Pack Reviewを印刷」を押したときだけ作ります。</div>
+  </div>
+</section>
 </div>
 
 <!-- ===== Batch / Scenario Workspace（Phase 2G） ===== -->
@@ -1661,6 +1765,21 @@
 
 </div>
 
+<!-- ===== Pack Review の印刷（S3-B3B2-C2）: body の直下に置く 3 つの要素。画面には常に出さない =====
+     #pack-review-print-hint    … 要求の無い印刷（Ctrl+P・メニュー）を Project Pack の画面で行ったときの案内文（固定）
+     #pack-review-print-root    … 「Pack Reviewを印刷」の要求の間だけ、印刷用の資料が入る（印刷の直前の確認に通ったときだけ印刷）
+     #pack-review-print-blocked … 確認に通らなかったとき・DENY_PENDING の間の、固定の拒否文（どの画面の印刷でもこれだけ） -->
+<div id="pack-review-print-hint">
+  <p><strong>Pack Review は、Project Pack 画面の「Pack Reviewを印刷」ボタンから印刷してください。</strong></p>
+  <p>ブラウザの印刷（Ctrl+P・メニュー）からは Pack Review の内容を印刷しません（未レビュー・pack_unreviewed ／ 計算済み ≠ 検証済み）。</p>
+</div>
+<div id="pack-review-print-root"></div>
+<div id="pack-review-print-blocked">
+  <p><strong>この Pack Review は印刷できません。</strong></p>
+  <p>印刷用の資料が、現在の Pack Review と一致することを印刷の時点で確認できませんでした（未レビュー・pack_unreviewed ／ 計算済み ≠ 検証済み）。画面へ戻り、「Pack Reviewを印刷」ボタンから印刷し直してください。</p>
+  <p class="pack-print-blocked-reload">印刷画面の開始と終了を確認できなかったため、ページ全体を再読み込みするまで、このページの印刷を止めています（Workspace の資料も印刷しません）。再読み込みすると、読み込んだ Pack と Pack Review も消えます。</p>
+</div>
+
 <script src="calc.js"></script>
 <script src="wind-pressure.js"></script>
 <script src="project-config/evidence.js"></script>
@@ -1677,6 +1796,7 @@
 <script src="project-config/project-pack-report.js"></script>
 <script src="project-config/project-pack-review.js"></script>
 <script src="project-config/project-pack-review-export.js"></script>
+<script src="project-config/project-pack-review-print.js"></script>
 <script src="workspace.js"></script>
 <script src="project-profile.js"></script>
 <script src="review-package.js"></script>
@@ -2916,6 +3036,8 @@ function renderProjectPackReviewControls() {
     });
     projectPackReviewChoicesBatch = batch;
   }
+  // 印刷のボタン（表示中の review が現在のものか）を合わせる（S3-B3B2-C2。印刷の block が無い文脈では何もしない）
+  if (typeof renderProjectPackReviewPrintControls === 'function') renderProjectPackReviewPrintControls();
   renderProjectPackReviewDetailList();
   // 出力のボタン（表示中の review が現在のものか）を合わせる（S3-B3B2-C1-B）
   renderProjectPackReviewExportControls();
@@ -6487,6 +6609,325 @@ function renderReviewReport() {
 if (typeof ReviewPackage !== 'undefined' && document.getElementById('rep-detail-list')) {
   refreshReportSelectors();
 }
+
+/* ============================================================
+   Pack Review の印刷（S3-B3B2-C2）
+   - 表示中の Pack Review（currentProjectPackReview の state）を、ProjectPackReviewPrint.buildPrintModel() で印刷用の
+     model にし、createElement / textContent だけで組んだ detached の DOM を body 直下の #pack-review-print-root に置いて、
+     window.print() を 1 回だけ呼ぶ。印刷の要求を作るのは「Pack Reviewを印刷」（printProjectPackReview）だけ。
+     ブラウザの印刷（Ctrl+P・メニュー）では model を作らない（Project Pack 画面では案内文だけを印刷する）。
+   - 状態: IDLE → BUILDING → ARMED → PRINT_EVENT → （正常終了）IDLE。異常は粘着の DENY_PENDING。正規の契約は
+     D-1〜D-9（設計レビュー §3.3・Task Packet §5 末尾）:
+       D-1 印刷の event を受け付けるのは、この関数が window.print() を呼んでから戻るまでの同期区間だけ。
+       D-2 区間内で beforeprint（1 回以上、毎回確かめ直す）→ afterprint（1 回）を見て、window.print() が例外なく戻った
+           ときだけ正常終了（root・model・許可の class を消して IDLE）。PDF の保存の完了とはみなさない。
+       D-3 afterprint の無い return・beforeprint の無い return・beforeprint より前の afterprint・afterprint の後の
+           beforeprint・2 回目の afterprint・window.print() や handler の例外は DENY_PENDING。window.print() を呼ぶ前の
+           失敗は、root と model を捨てて固定文で IDLE。
+       D-4〜D-6 DENY_PENDING は root・model・session を捨て、許可の class を外し、pack-print-deny-pending を保つ。
+           どの印刷も固定の拒否文だけで、ボタンは window.print() を呼ばない。解除はページ全体の再読み込みだけ
+           （クリック・afterprint・beforeprint・時間・画面の切替・Review の生成し直し・class の付け直しでは解除しない）。
+       D-7 IDLE で見た beforeprint / afterprint（素の Ctrl+P など）は、許可の class と空の root を消すだけ。
+       D-8 遅れて来た・重複した event を新しい session に結び付けない。session の番号は増やすだけで使い回さない。
+   - 印刷の直前（beforeprint）は、まず許可の class を外し、session・root の DOM・Review の現在性・発行元・選択を確かめた
+     ときだけ付け直す。一度確認に通らなかった session は、その後の beforeprint で現在性が戻っても許可しない（その回以降は
+     拒否文だけ。RF-C2-IR01-01）。印刷の可否は controller の JS の状態で決め、body の class から状態を作り直さない。
+   - event は発生元を運ばないので、区間内に届いたもっともらしい event の発生元は区別しない（C-08。保証は、古い session の
+     番号・model・DOM・許可を使い回さないことと、現在の session の root だけを確かめて印刷することに限る）。
+   - 印刷の許可・session を storage・cookie・URL に置かない。保存・送信・ダウンロード・console はしない。staged の Pack を
+     直接読まない（表示中の state と既存の鮮度の確認だけを使う）。Workspace の印刷の handler・CSS は変えない（この block の
+     listener はそれより後に登録する）。ProjectPackReviewPrint はこの script の初期化時に 1 度だけ掴む。
+============================================================ */
+
+var PACK_REVIEW_PRINT_MODULE = (typeof ProjectPackReviewPrint === 'object' && ProjectPackReviewPrint) ? ProjectPackReviewPrint : null;
+var PROJECT_PACK_PRINT_IDLE = '印刷用の資料は、表示中の Pack Review から「Pack Reviewを印刷」を押したときだけ作ります。';
+var PROJECT_PACK_PRINT_NOT_READY = '印刷できる Pack Review がありません（現在の全ケース計算と選択から生成した Review だけを印刷します）。印刷は開始していません。';
+var PROJECT_PACK_PRINT_FAILURE = '印刷用の資料を作れませんでした。印刷は開始していません（Pack Review はそのままです）。';
+var PROJECT_PACK_PRINT_REFUSED = '印刷の時点で、印刷用の資料が現在の Pack Review と一致することを確認できなかったため、' +
+  'Pack Review の内容は印刷していません（固定の拒否文だけです）。画面を確かめてから、もう一度「Pack Reviewを印刷」を押してください。';
+var PROJECT_PACK_PRINT_DENIED = '印刷画面の開始と終了を確認できなかったため、Pack Review の印刷を止めました。ページ全体を再読み込みするまで、' +
+  'このページの印刷は固定の案内文だけになります（Workspace の資料も印刷しません）。再読み込みすると、読み込んだ Pack と Pack Review も' +
+  '消えます（Pack の読込・全ケース計算・Review の生成からやり直しです）。自動では再読み込みしません。';
+var projectPackPrint = { state: 'IDLE', lastSessionId: 0, live: null };
+
+function renderProjectPackReviewPrintStatus(text, isError) {
+  var status = document.getElementById('pack-review-print-status');
+  if (!status) return;
+  status.className = isError ? 'pack-status is-error' : 'pack-status';
+  status.textContent = text;
+}
+
+/* この state から印刷用の資料を作ってよいか（表示中の review・発行物・既存の鮮度の確認・作成時の試行・選択の一致）。 */
+function projectPackReviewPrintIsCurrent(state) {
+  return state !== null && typeof state === 'object' && state === currentProjectPackReview &&
+    !!PACK_REVIEW_MODULE && PACK_REVIEW_MODULE.isPackReview(state.review) &&
+    projectPackReviewIsCurrent(state.batch, state.ctx) && state.attempt === projectPackAttempt &&
+    projectPackReviewSelectionMatches(state);
+}
+
+/* 発行元（state の review・batch・ctx の instance 一致）。module の assertReviewOrigin で確かめる。 */
+function projectPackPrintOriginMatches(state) {
+  try {
+    PACK_REVIEW_MODULE.assertReviewOrigin(state.review, state.batch, state.ctx);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+/* IDLE で、表示中の review が現在のものであるときだけ、印刷のボタンを押せるようにする。DENY_PENDING の文は書き換えない。 */
+function renderProjectPackReviewPrintControls() {
+  if (!projectPackPrint) return;
+  var button = document.getElementById('btn-pack-review-print');
+  if (button) {
+    button.disabled = !(PACK_REVIEW_PRINT_MODULE && projectPackPrint.state === 'IDLE' &&
+      projectPackReviewPrintIsCurrent(currentProjectPackReview));
+  }
+}
+
+/* 印刷用の root と許可・要求の class を消す（何度呼んでも同じ）。DENY_PENDING の class には触れない。 */
+function clearProjectPackPrintOutput() {
+  if (document.body) {
+    document.body.classList.remove('pack-print-allowed');
+    document.body.classList.remove('pack-print-requested');
+  }
+  var root = document.getElementById('pack-review-print-root');
+  if (root) {
+    root.textContent = '';
+    root.removeAttribute('data-print-session');
+  }
+}
+
+/* DENY_PENDING へ（粘着。解除はページ全体の再読み込みだけ）。session・model・root を捨て、固定の拒否文だけを印刷させる。 */
+function enterProjectPackPrintDenyPending() {
+  projectPackPrint.state = 'DENY_PENDING';
+  projectPackPrint.live = null;
+  clearProjectPackPrintOutput();
+  if (document.body) document.body.classList.add('pack-print-deny-pending');
+  renderProjectPackReviewPrintStatus(PROJECT_PACK_PRINT_DENIED, true);
+  renderProjectPackReviewPrintControls();
+}
+
+function packPrintEl(tag, text, cls) {
+  var el = document.createElement(tag);
+  if (text !== undefined && text !== null) el.textContent = text;
+  if (cls) el.className = cls;
+  return el;
+}
+
+/* model の表 1 つ（element の数は ProjectPackReviewPrint.elementCountOf と同じ: table・thead・見出しの tr・tbody と各セル）。 */
+function packPrintTable(block) {
+  var table = packPrintEl('table', null, 'pack-print-table pack-print-' + block.role);
+  var thead = packPrintEl('thead');
+  var head = packPrintEl('tr');
+  block.headers.forEach(function (h) { head.appendChild(packPrintEl('th', h)); });
+  thead.appendChild(head);
+  table.appendChild(thead);
+  var tbody = packPrintEl('tbody');
+  block.rows.forEach(function (cells) {
+    var tr = packPrintEl('tr');
+    cells.forEach(function (c) { tr.appendChild(packPrintEl('td', c)); });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  return table;
+}
+
+/* model の block 1 つを element にする（文字列は textContent だけで入れる）。知らない種類は失敗にする。 */
+function packPrintBlock(block) {
+  if (block.type === 'title') return packPrintEl('h1', block.text);
+  if (block.type === 'heading') {
+    if ([2, 3, 4].indexOf(block.level) === -1) throw new Error('heading level');
+    return packPrintEl('h' + block.level, block.text);
+  }
+  if (block.type === 'paragraph') return packPrintEl('p', block.text);
+  if (block.type === 'table') return packPrintTable(block);
+  if (block.type === 'trust') {
+    var trust = packPrintEl('div', null, 'pack-print-trust');
+    trust.appendChild(packPrintEl('p', block.heading, 'pack-print-trust-line'));
+    var list = packPrintEl('ul');
+    block.notices.forEach(function (n) { list.appendChild(packPrintEl('li', n)); });
+    trust.appendChild(list);
+    trust.appendChild(packPrintEl('p', block.rounding));
+    trust.appendChild(packPrintEl('p', block.share));
+    return trust;
+  }
+  if (block.type === 'detail') {
+    var detail = packPrintEl('div', null, 'pack-print-detail');
+    detail.appendChild(packPrintEl('h3', block.heading));
+    block.blocks.forEach(function (b) { detail.appendChild(packPrintBlock(b)); });
+    return detail;
+  }
+  throw new Error('unknown block');
+}
+
+function packPrintElementCount(el) {
+  var n = 1;
+  for (var c = el.firstElementChild; c; c = c.nextElementSibling) n += packPrintElementCount(c);
+  return n;
+}
+
+/* model から、まだどこにも置かない（detached）印刷用の DOM を組む。element の数が model の数と違えば失敗にする。 */
+function buildProjectPackPrintDom(model, sessionId) {
+  var doc = packPrintEl('div', null, 'pack-print-doc');
+  doc.setAttribute('data-print-session', String(sessionId));
+  model.blocks.forEach(function (b) { doc.appendChild(packPrintBlock(b)); });
+  if (packPrintElementCount(doc) !== model.counts.elements) throw new Error('element count');
+  return doc;
+}
+
+/* 印刷の直前（各 beforeprint）に、生きている session がそのまま印刷してよいものか（一度も拒否していない・session・root の
+   DOM・現在性・発行元）。一度拒否した session は、現在性が戻っても許可しない（RF-C2-IR01-01）。 */
+function projectPackPrintSessionIsLive(live) {
+  var root = document.getElementById('pack-review-print-root');
+  return projectPackPrint.state === 'PRINT_EVENT' && projectPackPrint.live === live && live.inCall === true &&
+    live.refused === false && live.model !== null && live.dom !== null && !!root && root.getAttribute('data-print-session') === String(live.id) &&
+    root.childElementCount === 1 && root.firstElementChild === live.dom &&
+    live.dom.getAttribute('data-print-session') === String(live.id) &&
+    projectPackReviewPrintIsCurrent(live.state) && projectPackPrintOriginMatches(live.state);
+}
+
+/* 「Pack Reviewを印刷」。印刷の要求を作るのはここだけで、window.print() は確認に通った後に 1 回だけ呼ぶ。 */
+function printProjectPackReview() {
+  if (projectPackPrint.state === 'DENY_PENDING') {
+    // D-4: 新しい session・model・root を作らず、window.print() も呼ばない
+    renderProjectPackReviewPrintStatus(PROJECT_PACK_PRINT_DENIED, true);
+    renderProjectPackReviewPrintControls();
+    return false;
+  }
+  if (projectPackPrint.state !== 'IDLE') return false;
+  var state = currentProjectPackReview;
+  var sessionId = projectPackPrint.lastSessionId + 1;
+  projectPackPrint.lastSessionId = sessionId;
+  projectPackPrint.state = 'BUILDING';
+  var live = null;
+  try {
+    if (!PACK_REVIEW_PRINT_MODULE) throw new Error('print module is not available');
+    if (!projectPackReviewPrintIsCurrent(state)) throw new Error('stale or missing review');
+    // 発行元（state の review・batch・ctx の instance 一致）は module の assertReviewOrigin が確かめる
+    var model = PACK_REVIEW_PRINT_MODULE.buildPrintModel(state.review, state.batch, state.ctx);
+    if (!projectPackReviewPrintIsCurrent(state)) throw new Error('stale review');
+    var dom = buildProjectPackPrintDom(model, sessionId);
+    // root に置く直前にもう一度確かめる
+    if (!projectPackReviewPrintIsCurrent(state)) throw new Error('stale review');
+    var root = document.getElementById('pack-review-print-root');
+    if (!root || !document.body) throw new Error('no print root');
+    root.textContent = '';
+    root.appendChild(dom);
+    root.setAttribute('data-print-session', String(sessionId));
+    live = { id: sessionId, state: state, model: model, dom: dom, inCall: false, before: 0, after: 0, refused: false };
+    projectPackPrint.live = live;
+    projectPackPrint.state = 'ARMED';
+    document.body.classList.add('pack-print-requested');
+    // 印刷を要求する直前にもう一度確かめる
+    if (!projectPackReviewPrintIsCurrent(state)) throw new Error('stale review');
+  } catch (e) {
+    // D-3 末文: window.print() を呼ぶ前の失敗は、root と model を捨てて固定文で IDLE（印刷の event は無い）
+    projectPackPrint.live = null;
+    clearProjectPackPrintOutput();
+    projectPackPrint.state = 'IDLE';
+    renderProjectPackReviewPrintStatus(projectPackPrintFailureText(state), true);
+    renderProjectPackReviewPrintControls();
+    return false;
+  }
+  var threw = false;
+  live.inCall = true;
+  try {
+    window.print();
+  } catch (e) {
+    threw = true;
+  }
+  live.inCall = false;
+  // D-2: 区間内で beforeprint → afterprint（1 回）を見て、例外なく戻り、DENY_PENDING に入っていないときだけ正常終了
+  if (!threw && projectPackPrint.state === 'PRINT_EVENT' && projectPackPrint.live === live && live.before >= 1 && live.after === 1) {
+    projectPackPrint.live = null;
+    clearProjectPackPrintOutput();
+    projectPackPrint.state = 'IDLE';
+    if (live.refused) {
+      // 区間内のどこかの beforeprint で確認に通らなかった（その回からは固定の拒否文だけを印刷した）
+      renderProjectPackReviewPrintStatus(PROJECT_PACK_PRINT_REFUSED, true);
+    } else {
+      renderProjectPackReviewPrintStatus('印刷画面を要求しました（全 ' + state.review.totalCases + ' ケース・未レビュー。計算済み ≠ 検証済み）。' +
+        'PDF の保存や印刷が完了したかどうかは、このページでは確認できません。共有する前に内容と共有先を確認してください。', false);
+    }
+    renderProjectPackReviewPrintControls();
+    return !live.refused;
+  }
+  enterProjectPackPrintDenyPending();
+  return false;
+}
+
+/* 印刷を始める前に失敗したときの固定文（表示中の review が無い・古いときと、それ以外の失敗）。 */
+function projectPackPrintFailureText(state) {
+  try {
+    return projectPackReviewPrintIsCurrent(state) ? PROJECT_PACK_PRINT_FAILURE : PROJECT_PACK_PRINT_NOT_READY;
+  } catch (e) {
+    return PROJECT_PACK_PRINT_FAILURE;
+  }
+}
+
+// 印刷の直前。Workspace の handler（上）より後に登録する。まず許可の class を外し、確かめられたときだけ付け直す。
+window.addEventListener('beforeprint', function () {
+  if (document.body) document.body.classList.remove('pack-print-allowed');
+  try {
+    if (projectPackPrint.state === 'DENY_PENDING') {
+      // D-5: 許可は付けない。JS の状態に従って拒否の class を付け直す
+      clearProjectPackPrintOutput();
+      document.body.classList.add('pack-print-deny-pending');
+      return;
+    }
+    var live = projectPackPrint.live;
+    if (live === null || live.inCall !== true) {
+      // D-1・D-7: 同期区間の外の event はどの session にも結び付けない（IDLE なら空の root を消すだけ）
+      if (projectPackPrint.state === 'IDLE') clearProjectPackPrintOutput();
+      return;
+    }
+    if (live.after > 0) {
+      // D-3: afterprint の後の beforeprint
+      enterProjectPackPrintDenyPending();
+      return;
+    }
+    live.before += 1;
+    projectPackPrint.state = 'PRINT_EVENT';
+    if (projectPackPrintSessionIsLive(live)) document.body.classList.add('pack-print-allowed');
+    else live.refused = true;
+  } catch (e) {
+    // D-3: handler の例外。許可の class を残さない
+    enterProjectPackPrintDenyPending();
+  }
+});
+
+// 印刷の後。許可の class を外し、root・model を消す。afterprint だけでは許可・再 ARM・DENY_PENDING の解除をしない。
+window.addEventListener('afterprint', function () {
+  if (document.body) document.body.classList.remove('pack-print-allowed');
+  try {
+    if (projectPackPrint.state === 'DENY_PENDING') {
+      // D-5: cleanup だけ（何度来ても同じ）。古い要求の終わりの証明として扱わない
+      clearProjectPackPrintOutput();
+      document.body.classList.add('pack-print-deny-pending');
+      return;
+    }
+    var live = projectPackPrint.live;
+    if (live === null || live.inCall !== true) {
+      // D-7: 要求の無い afterprint は cleanup だけ
+      if (projectPackPrint.state === 'IDLE') clearProjectPackPrintOutput();
+      return;
+    }
+    if (live.before === 0 || live.after > 0) {
+      // D-3: beforeprint より前の afterprint・2 回目の afterprint
+      enterProjectPackPrintDenyPending();
+      return;
+    }
+    live.after += 1;
+    live.model = null;
+    live.dom = null;
+    clearProjectPackPrintOutput();
+  } catch (e) {
+    enterProjectPackPrintDenyPending();
+  }
+});
+
+renderProjectPackReviewPrintControls();
 
 </script>
 </body>

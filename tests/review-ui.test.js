@@ -91,7 +91,32 @@ test('UI-6: export / print は必ず鮮度ゲートを通る', () => {
   // window.print はゲートの後でしか呼ばれない
   const print = bodyOf(code, 'printReview');
   assert.equal(print.indexOf('assertReviewExportable') < print.indexOf('window.print'), true);
-  assert.equal((code.match(/window\.print\(\)/g) || []).length, 1, 'print呼び出しは1か所');
+  // print呼び出しは 2 か所だけ（S3-B3B2-C2 の Human 承認済みの移行）: Workspace の資料（printReview。上の鮮度ゲートの後で
+  // 1 回）と Pack Review（printProjectPackReview。Pack 専用のゲートの後で 1 回）。ほかの関数からは呼ばない
+  const calls = [...code.matchAll(/window\.print\(\)/g)].map((m) => m.index);
+  assert.equal(calls.length, 2, 'print呼び出しは Workspace と Pack の 2 か所');
+  const owner = (i) => { const s = code.lastIndexOf('\nfunction ', i); return code.slice(s + 10, code.indexOf('(', s)); };
+  assert.deepEqual(calls.map(owner), ['printReview', 'printProjectPackReview']);
+  assert.equal(print.split('window.print()').length - 1, 1, 'Workspace の print は 1 回');
+  assert.equal(print.indexOf('if (!assertReviewExportable(\'print\')) return;') < print.indexOf('window.print()'), true);
+  // Pack: DENY_PENDING の拒否・現在性の確認（model の前・DOM の前・要求の直前）・module の発行元の gate・要求の class の後で 1 回
+  const pack = bodyOf(code, 'printProjectPackReview');
+  const at = (s) => { const i = pack.indexOf(s); assert.notEqual(i, -1, s); return i; };
+  const callAt = at('window.print()');
+  assert.equal(pack.split('window.print()').length - 1, 1, 'Pack の print は 1 回');
+  const denyAt = at("if (projectPackPrint.state === 'DENY_PENDING') {");
+  assert.equal(denyAt < callAt && pack.indexOf('return false;', denyAt) < callAt, true, 'DENY_PENDING は print の前に返す');
+  assert.equal(at("if (projectPackPrint.state !== 'IDLE') return false;") < callAt, true);
+  const gates = [...pack.matchAll(/if \(!projectPackReviewPrintIsCurrent\(state\)\) throw/g)].map((m) => m.index);
+  assert.equal(gates.length, 4, '現在性の確認は 4 回（model の前・後・DOM を置く前・要求の直前）');
+  gates.forEach((g) => assert.equal(g < callAt, true));
+  assert.equal(at('PACK_REVIEW_PRINT_MODULE.buildPrintModel(state.review, state.batch, state.ctx)') < callAt, true);
+  assert.equal(at("document.body.classList.add('pack-print-requested');") < callAt, true);
+  // 確認に失敗したら print の前に返す（catch は print の try より前）
+  assert.equal(pack.indexOf('} catch (e) {') < callAt && pack.indexOf('return false;', pack.indexOf('} catch (e) {')) < callAt, true);
+  // Workspace の gate（assertReviewExportable）と Pack の gate は互いを呼ばない
+  assert.equal(pack.includes('assertReviewExportable'), false);
+  assert.equal(/projectPackPrint|ProjectPackReview/.test(print), false);
 });
 
 test('UI-7: @media print が report だけを残す', () => {
