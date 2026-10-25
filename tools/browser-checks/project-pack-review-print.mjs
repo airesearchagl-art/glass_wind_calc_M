@@ -1153,6 +1153,327 @@ if (MATRIX) {
   check('PR-M01-full-matrix-12-native-pdfs', matrix.length === 12 && matrix.every((m) => m.ok), short(matrix.map((m) => [m.mode, m.details, m.comparison, m.ok, m.failed])));
 }
 
+/* ============================================================
+   [native] Workspace の資料の印刷のプライバシー（GWCM-WP-REPAIR-R-A-001・W-P1〜W-P3）
+   Workspace の画面の印刷は Report か固定の拒否文の 1 つだけ（Redacted の PDF 全体に自由記述 0）、単一ケースの画面の印刷は
+   固定の案内文だけ、app の header は出ない、Pack の印刷・DENY_PENDING は C2 のまま先、を実際の UI の操作 → ネイティブの
+   印刷 → 保存された PDF の全ページ（Poppler）で確かめる。値と自由記述はすべて合成の目印。
+============================================================ */
+
+const WP = { profile: 'SYNPROF-WP', title: 'SYNTITLE-WP', subtitle: 'SYNSUB-WP', note: 'SYNNOTE-WP', label: 'SYNLBL' };
+const WP_DEFAULT_TITLE = 'ガラス設計レビュー';
+const WP_REPORT = '公開範囲:';
+const WP_REDACTED = '公開範囲: Redacted（自由記述を伏せる）';
+const WP_HINT = 'この画面（単一ケース）は印刷に対応していません。';
+const WP_HEADER = '4辺支持ガラス / 設計風圧自動判定 / 最小構成選定';
+// Report の外の欄の目印（Profile・Scenario の一覧と実効値・生成・Workspace・TSV・JSON / CSV・状態・資料の設定・印刷の注意）
+const WP_OFF_REPORT = ['案件プロファイル（風条件の共通値）', 'これは「登録済み案件プリセット」ではありません', '検討ケース（Scenario Matrix）',
+  'ケースID ラベル W (mm) H (mm) Z (m) 部位 ガラス種別 係数 操作', 'プロファイル（共通・未検証）', '組み合わせ生成（明示した値の直積）',
+  '一括検討 Workspace', 'この画面について', '1行目に列名、2行目以降にデータを貼り付けます', 'Workspace JSON / 結果CSV',
+  'プロファイルを確定しました', 'Workspaceへ追加して計算しました', 'Workspace JSONを出力しました', '詳細を載せるケース',
+  '資料を作成 / 再作成', '「ヘッダーとフッター」を OFF にしてください'];
+// 印刷では見出しが大文字・字間付きになり、表のセルは折り返すので、空白と大小文字を無視して数える。自由記述は接頭辞の出現で数える
+const wpNorm = (s) => s.normalize('NFKC').replace(/\s+/g, '').toUpperCase();
+const wpCount = (t, s) => wpNorm(t).split(wpNorm(s)).length - 1;
+function wpKinds(pdf) {
+  const t = pdf.text;
+  const k = kinds(pdf);
+  return { pages: pdf.pages, report: wpCount(t, WP_REPORT), redacted: wpCount(t, WP_REDACTED), placeholder: wpCount(t, '（非表示）'),
+    label: wpCount(t, WP.label), labelIds: (wpNorm(t).match(/SYNLBL-\d{4}/g) || []).length, title: wpCount(t, WP.title),
+    subtitle: wpCount(t, WP.subtitle), note: wpCount(t, WP.note), profile: wpCount(t, WP.profile),
+    offReport: WP_OFF_REPORT.filter((s) => wpCount(t, s) > 0), header: wpCount(t, WP_HEADER), wsBlocked: k.wsBlocked,
+    hint: wpCount(t, WP_HINT), pack: k.pack, packHint: k.hint, packBlocked: k.blocked, leaks: leaks(pdf) };
+}
+/** Report だけの PDF（Full は Report の中だけに自由記述、Redacted は PDF 全体に自由記述 0）。最初の文字が Report の表題であること。 */
+function wpReportOnly(pdf, privacy) {
+  const k = wpKinds(pdf);
+  const items = {
+    report: k.report === 1, boundary: wpNorm(pdf.text).startsWith(wpNorm(privacy === 'redacted' ? WP_DEFAULT_TITLE : WP.title)),
+    offReport: k.offReport.length === 0, header: k.header === 0, wsBlocked: k.wsBlocked === 0, hint: k.hint === 0,
+    pack: k.pack === 0 && k.packHint === 0 && k.packBlocked === 0, leaks: k.leaks.length === 0,
+    privacy: privacy === 'redacted'
+      ? k.redacted === 1 && k.label === 0 && k.title === 0 && k.subtitle === 0 && k.note === 0 && k.profile === 0
+      : k.title === 1 && k.subtitle === 1 && k.note === 1 && k.profile === 0 && k.labelIds >= 1
+  };
+  return { ok: Object.values(items).every(Boolean), items, k };
+}
+/** 1 ページの固定の文だけ（'denial' = Workspace の拒否文、'hint' = 単一ケースの画面の案内文）。目印・Report・header・Pack 0。 */
+function wpOnly(pdf, what) {
+  const k = wpKinds(pdf);
+  const items = {
+    onePage: k.pages === 1, only: what === 'denial' ? k.wsBlocked === 1 && k.hint === 0 : k.hint === 1 && k.wsBlocked === 0,
+    report: k.report === 0, offReport: k.offReport.length === 0, header: k.header === 0,
+    pack: k.pack === 0 && k.packHint === 0 && k.packBlocked === 0,
+    sentinels: k.label === 0 && k.title === 0 && k.subtitle === 0 && k.note === 0 && k.profile === 0, leaks: k.leaks.length === 0
+  };
+  return { ok: Object.values(items).every(Boolean), items, k };
+}
+/** Workspace に合成の Profile・Scenario を入れて計算し、資料の設定を入れる（UI の操作だけ）。opts.generate で資料を作る。 */
+async function wpSetup(p, opts) {
+  const o = Object.assign({ privacy: 'full', rows: 2, generated: false, generate: true }, opts || {});
+  await showView(p, 'batch');
+  await p.fill('#prof-label', WP.profile);
+  await p.fill('#prof-v0', '30');
+  await p.selectOption('#prof-roughness', 'III');
+  await p.fill('#prof-building-h', '12');
+  await p.fill('#prof-eaves-h', '12');
+  await p.selectOption('#prof-building-type', 'closed');
+  await p.selectOption('#prof-basis', 'notification_baseline');
+  await p.click('#btn-profile-apply');
+  const glass = await p.evaluate(() => document.getElementById('sc-type').options[0].value);
+  if (o.rows <= 3) {
+    for (let i = 1; i <= o.rows; i++) {
+      await p.fill('#sc-w', String(800 + 100 * i));
+      await p.fill('#sc-h', '1800');
+      await p.fill('#sc-z', String(3 + 4 * i));
+      await p.selectOption('#sc-zone', i % 2 ? 'general' : 'corner');
+      await p.fill('#sc-label', WP.label + '-' + String(i).padStart(4, '0'));
+      await p.click('#btn-scenario-add');
+    }
+  } else {
+    const lines = ['scenario_id\tlabel\twidth_mm\theight_mm\tevaluation_height_m\tzone\tglass_type\textra_factor'];
+    for (let i = 1; i <= o.rows; i++) {
+      lines.push(['T' + i, WP.label + '-' + String(1000 + i), 700 + 10 * i, 1800, (3 + (i % 20)).toFixed(1), i % 2 ? 'general' : 'corner', glass, '1.00'].join('\t'));
+    }
+    await p.fill('#sc-tsv', lines.join('\n'));
+    await p.click('#btn-scenario-tsv-import');
+  }
+  if (o.generated) {
+    for (const [id, v] of [['#gen-w', '900, 1200, 1500, 1800, 2100'], ['#gen-h', '1800, 2400'], ['#gen-z', '3.5, 7.5, 11.5, 15.5, 19.5'],
+      ['#gen-zone', 'general, corner'], ['#gen-type', glass]]) await p.fill(id, v);
+    await p.click('#btn-matrix-generate');
+  }
+  await p.click('#btn-scenario-preview');
+  await p.click('#btn-scenario-to-workspace');
+  await p.click('text=⬇ Workspace JSONをExport');
+  await p.fill('#rep-title', WP.title);
+  await p.fill('#rep-subtitle', WP.subtitle);
+  await p.fill('#rep-note', WP.note);
+  await p.selectOption('#rep-privacy', o.privacy);
+  await p.click('#btn-rep-detail-governing');
+  if (o.generate) await p.click('#btn-rep-generate');
+  await p.waitForTimeout(50);
+  return p.evaluate(() => ({ freshness: getReviewFreshness(), cases: batchWorkspace.size(), scenarios: scenarioMatrix.size() }));
+}
+/** Workspace の「印刷 / PDF」を押す（alert は内容を記録して閉じる）。 */
+async function wpButton(expectFile) {
+  const known = new Set(Object.keys(files));
+  const from = (await nativeTrace()).length;
+  const dialogs = [];
+  const onDialog = (d) => { dialogs.push(d.message()); d.dismiss().catch(() => {}); };
+  np.on('dialog', onDialog);
+  await showView(np, 'batch');
+  await np.click('#btn-rep-print');
+  const got = expectFile ? await newPdfs(known, 1, 120000) : (await sleep(2500), Object.keys(files).filter((f) => !known.has(f)));
+  np.off('dialog', onDialog);
+  return { files: got, trace: (await nativeTrace()).slice(from), dialogs };
+}
+async function wpCtrlP(view) {
+  await showView(np, view);
+  await np.waitForTimeout(150);
+  return ctrlP();
+}
+const wpSeq = (tr) => tr.map((x) => x.ev + (x.ev === 'beforeprint' ? (x.classes.includes('review-print-allowed') ? '+' : '-') : '')).join(' > ');
+const wpPdf = (r) => (r.files.length === 1 ? pdfOf(r.files[0]) : null);
+const wpWorkspace = {};
+
+// W01 / W02（W-P2・R01）: Redacted・FRESH・2 ケース。「印刷 / PDF」と Ctrl+P の PDF 全体に自由記述 0、Redacted の Report だけ
+{
+  await reloadNative();
+  const s = await wpSetup(np, { privacy: 'redacted' });
+  const b = await wpButton(true);
+  const jb = wpPdf(b) ? wpReportOnly(wpPdf(b), 'redacted') : null;
+  check('PR-W01-native-ws-redacted-button-report-only-no-free-text', s.freshness === 'FRESH' && s.scenarios === 2 && !!jb && jb.ok &&
+    jb.k.placeholder >= 1 && wpSeq(b.trace) === 'callEnter > beforeprint+ > afterprint > callReturn', short({ s, seq: wpSeq(b.trace), items: jb && jb.items, k: jb && jb.k }));
+  await np.waitForTimeout(800);
+  const c = await wpCtrlP('batch');
+  const jc = wpPdf(c) ? wpReportOnly(wpPdf(c), 'redacted') : null;
+  check('PR-W02-native-ws-redacted-ctrl-p-report-only-no-free-text', c.sent && !!jc && jc.ok && !c.trace.some((x) => x.ev === 'callEnter'),
+    short({ seq: wpSeq(c.trace), items: jc && jc.items, k: jc && jc.k }));
+  wpWorkspace.redacted2 = { pages: [jb && jb.k.pages, jc && jc.k.pages] };
+}
+
+// W03（W-P2・R01）: Redacted・FRESH・140 ケース（ラベル付きの Scenario 40 行 + 生成 100）。ボタンと Ctrl+P の全ページ
+{
+  await reloadNative();
+  const s = await wpSetup(np, { privacy: 'redacted', rows: 40, generated: true });
+  const b = await wpButton(true);
+  const jb = wpPdf(b) ? wpReportOnly(wpPdf(b), 'redacted') : null;
+  await np.waitForTimeout(800);
+  const c = await wpCtrlP('batch');
+  const jc = wpPdf(c) ? wpReportOnly(wpPdf(c), 'redacted') : null;
+  check('PR-W03-native-ws-redacted-140-cases-every-page-no-free-text', s.freshness === 'FRESH' && s.cases === 140 && s.scenarios === 140 &&
+    !!jb && jb.ok && !!jc && jc.ok, short({ s, b: jb && [jb.items, jb.k.pages, jb.k.label], c: jc && [jc.items, jc.k.pages, jc.k.label] }));
+  wpWorkspace.redacted140 = { cases: s.cases, pages: [jb && jb.k.pages, jc && jc.k.pages] };
+}
+
+// W04（W-P2・R02）: Full・FRESH。自由記述は Report の中にだけ（表題・副題・備考は 1 回ずつ・詳細にラベル）。Report の外の欄 0
+{
+  await reloadNative();
+  const s = await wpSetup(np, { privacy: 'full' });
+  const b = await wpButton(true);
+  const jb = wpPdf(b) ? wpReportOnly(wpPdf(b), 'full') : null;
+  await np.waitForTimeout(800);
+  const c = await wpCtrlP('batch');
+  const jc = wpPdf(c) ? wpReportOnly(wpPdf(c), 'full') : null;
+  check('PR-W04-native-ws-full-free-text-only-inside-report', s.freshness === 'FRESH' && !!jb && jb.ok && !!jc && jc.ok,
+    short({ b: jb && [jb.items, jb.k], c: jc && jc.items }));
+  wpWorkspace.full2 = { pages: [jb && jb.k.pages, jc && jc.k.pages] };
+}
+
+// W05（R03）: 資料なし・設定の変更・Workspace の変更・両方・Full で作って Redacted へ変更 → Ctrl+P は固定の拒否文だけ（1 ページ）、
+// ボタンは印刷しない（window.print() 0・PDF 0・固定の alert）
+{
+  const out = [];
+  for (const st of ['NO_REPORT', 'SETTINGS_DIRTY', 'WORKSPACE_STALE', 'BOTH_STALE', 'FULL_TO_REDACTED']) {
+    await reloadNative();
+    await wpSetup(np, { privacy: 'full', generate: st !== 'NO_REPORT' });
+    if (st === 'SETTINGS_DIRTY' || st === 'BOTH_STALE') await np.fill('#rep-note', WP.note + '-EDIT');
+    if (st === 'WORKSPACE_STALE' || st === 'BOTH_STALE') await np.click('text=＋ 現在の入力条件を追加');
+    if (st === 'FULL_TO_REDACTED') await np.selectOption('#rep-privacy', 'redacted');
+    const freshness = await np.evaluate(() => getReviewFreshness());
+    const c = await wpCtrlP('batch');
+    const jc = wpPdf(c) ? wpOnly(wpPdf(c), 'denial') : null;
+    const b = await wpButton(false);
+    out.push({ st, freshness, ok: !!jc && jc.ok && c.trace.some((x) => x.ev === 'beforeprint' && !x.classes.includes('review-print-allowed')) &&
+      b.files.length === 0 && !b.trace.some((x) => x.ev === 'callEnter') && b.dialogs.length === 1, items: jc && jc.items, dialogs: b.dialogs });
+  }
+  const expect = { NO_REPORT: 'NO_REPORT', SETTINGS_DIRTY: 'SETTINGS_DIRTY', WORKSPACE_STALE: 'WORKSPACE_STALE', BOTH_STALE: 'BOTH_STALE', FULL_TO_REDACTED: 'SETTINGS_DIRTY' };
+  check('PR-W05-native-ws-not-fresh-denial-only-button-no-print', out.every((x) => x.ok && x.freshness === expect[x.st]),
+    short(out.map((x) => [x.st, x.freshness, x.ok, x.items])));
+}
+
+// W06（W-P3・R04）: 単一ケースの画面の Ctrl+P は、資料なし・FRESH（Full / Redacted）のどれでも固定の案内文だけ（header 0）
+{
+  const out = [];
+  for (const [name, o] of [['no-report', { privacy: 'full', generate: false }], ['fresh-full', { privacy: 'full' }], ['fresh-redacted', { privacy: 'redacted' }]]) {
+    await reloadNative();
+    await wpSetup(np, o);
+    const c = await wpCtrlP('single');
+    const j = wpPdf(c) ? wpOnly(wpPdf(c), 'hint') : null;
+    out.push({ name, ok: c.sent && !!j && j.ok, items: j && j.items });
+  }
+  check('PR-W06-native-single-view-ctrl-p-fixed-hint-only', out.every((x) => x.ok), short(out));
+}
+
+// W07（R05）: Workspace FRESH（Redacted）と Pack Review がある状態で、Pack 画面の Ctrl+P は C2 の案内文だけ、Pack のボタンは Pack だけ
+{
+  await reloadNative();
+  await wpSetup(np, { privacy: 'redacted' });
+  await prepare(np, fixtureText('notification1458'), {});
+  const h = await wpCtrlP('pack');
+  const jh = wpPdf(h) ? judgeOther(wpPdf(h), 'hint') : null;
+  const kh = wpPdf(h) ? wpKinds(wpPdf(h)) : null;
+  await np.waitForTimeout(800);
+  const r = await nativePrint(null, true);
+  const pk = wpPdf(r) ? wpKinds(wpPdf(r)) : null;
+  const pt = wpPdf(r) ? wpPdf(r).text : '';
+  check('PR-W07-native-pack-view-hint-and-pack-button-unchanged-with-ws-fresh', !!jh && jh.ok && kh.hint === 0 && kh.report === 0 && kh.label === 0 &&
+    !!pk && pk.pack > 0 && flatCount(pt, TITLE) === 1 && pk.report === 0 && pk.wsBlocked === 0 && pk.hint === 0 && pk.header === 0 && pk.label === 0 &&
+    isIdleClean(r.state), short({ jh: jh && jh.items, kh, pk: pk && Object.assign({}, pk, { leaks: undefined }), seq: traceSeq(r.trace) }));
+}
+
+// W08（R06）: C2 の DENY_PENDING（window.print() の例外）と Workspace FRESH（Redacted）。3 画面の Ctrl+P と Workspace のボタン → Pack の拒否文だけ
+{
+  await reloadNative();
+  await wpSetup(np, { privacy: 'redacted' });
+  await prepare(np, fixtureText('notification1458'), {});
+  await nativePrint('throw', false);
+  const out = [];
+  for (const v of ['single', 'batch', 'pack']) {
+    const c = await wpCtrlP(v);
+    const j = wpPdf(c) ? judgeOther(wpPdf(c), 'blocked-deny') : null;
+    const k = wpPdf(c) ? wpKinds(wpPdf(c)) : null;
+    out.push({ v, ok: !!j && j.ok && k.hint === 0 && k.report === 0 && k.wsBlocked === 0 && k.label === 0 && k.header === 0, items: j && j.items });
+    await np.waitForTimeout(600);
+  }
+  const b = await wpButton(true);
+  const jb = wpPdf(b) ? judgeOther(wpPdf(b), 'blocked-deny') : null;
+  const kb = wpPdf(b) ? wpKinds(wpPdf(b)) : null;
+  const st = await printState(np);
+  check('PR-W08-native-deny-pending-every-view-and-ws-button-pack-denial-only', out.every((x) => x.ok) && !!jb && jb.ok && kb.hint === 0 &&
+    kb.report === 0 && kb.label === 0 && isDeny(st), short({ out, jb: jb && jb.items, st: st.state }));
+}
+
+// W09（R08）: 390 × 844 の viewport でも、Redacted の Report だけ・単一ケースの画面は案内文だけ
+{
+  await reloadNative();
+  await np.setViewportSize({ width: 390, height: 844 });
+  await wpSetup(np, { privacy: 'redacted' });
+  const b = await wpButton(true);
+  const jb = wpPdf(b) ? wpReportOnly(wpPdf(b), 'redacted') : null;
+  await np.waitForTimeout(800);
+  const c = await wpCtrlP('single');
+  const jc = wpPdf(c) ? wpOnly(wpPdf(c), 'hint') : null;
+  await np.setViewportSize({ width: 1280, height: 800 });
+  check('PR-W09-native-390px-redacted-report-only-and-single-hint', !!jb && jb.ok && !!jc && jc.ok, short({ b: jb && jb.items, c: jc && jc.items }));
+}
+measurements.workspacePrint = wpWorkspace;
+
+/* [stub] 印刷の CSS（emulateMedia('print')）で、画面・状態ごとに印刷に出る要素（beforeprint は合成。ネイティブの証拠ではない）。1280 / 390 */
+{
+  const out = [];
+  for (const vp of [[1280, 800], [390, 844]]) {
+    const { p } = await newPage({ width: vp[0], height: vp[1] }, []);
+    await wpSetup(p, { privacy: 'redacted' });
+    const shown = (view) => p.evaluate(async (v) => {
+      if (document.getElementById('view-' + v).hidden) document.getElementById('view-tab-' + v).click();
+      dispatchEvent(new Event('beforeprint'));
+      const vis = (el) => getComputedStyle(el).display !== 'none' && el.getClientRects().length > 0;
+      const body = [...document.body.children].filter((el) => el.tagName !== 'SCRIPT' && vis(el)).map((el) => el.id || el.tagName.toLowerCase());
+      const batch = [...document.getElementById('view-batch').children].filter(vis).map((el) => el.id || '.' + el.className);
+      dispatchEvent(new Event('afterprint'));
+      return { body, batch };
+    }, view);
+    await p.emulateMedia({ media: 'print' });
+    const fresh = await shown('batch');
+    // 設定を変える（資料の設定の欄は印刷の media では隠れるので、画面の media で入力してから戻す）
+    await p.emulateMedia({ media: null });
+    await p.fill('#rep-note', WP.note + '-EDIT');
+    await p.emulateMedia({ media: 'print' });
+    const stale = await shown('batch');
+    const single = await shown('single');
+    const pack = await shown('pack');
+    await p.emulateMedia({ media: null });
+    out.push({ vp: vp.join('x'), fresh, stale, single, pack });
+    await p.close();
+  }
+  check('PR-W10-stub-print-css-workspace-allowlist-and-hidden-specificity', out.every((o) =>
+    same(o.fresh, { body: ['view-batch'], batch: ['review-report'] }) && same(o.stale, { body: ['view-batch'], batch: ['review-print-blocked'] }) &&
+    same(o.single, { body: ['view-batch'], batch: ['workspace-print-hint'] }) && same(o.pack, { body: ['pack-review-print-hint'], batch: [] })), short(out));
+}
+
+/* [headless] 画面: 印刷ボタンの前に常に見えるヘッダー / フッター OFF の注意。案内文・拒否文は画面に出ない */
+{
+  const out = [];
+  for (const vp of [[1280, 800], [390, 844]]) {
+    const { p } = await newPage({ width: vp[0], height: vp[1] }, []);
+    await showView(p, 'batch');
+    // 要素が無いときも落ちずに FAIL として記録する（無い・見えないは false / null）
+    const r = await p.evaluate(() => {
+      const note = document.getElementById('rep-print-headers');
+      const btn = document.getElementById('btn-rep-print');
+      const hint = document.getElementById('workspace-print-hint');
+      const nr = note ? note.getBoundingClientRect() : null;
+      const br = btn.getBoundingClientRect();
+      return { exists: !!note && !!hint, visible: !!note && note.checkVisibility(), text: note ? note.textContent.replace(/\s+/g, ' ') : '',
+        describedBy: btn.getAttribute('aria-describedby'), above: !!nr && nr.bottom <= br.top, gap: nr ? Math.round(br.top - nr.bottom) : null,
+        sameCard: !!note && note.closest('.card') === btn.closest('.card'), hintShown: hint ? hint.checkVisibility() : null,
+        blockedShown: document.getElementById('review-print-blocked').checkVisibility() };
+    });
+    const hidden = [];
+    for (const v of ['single', 'pack']) {
+      await showView(p, v);
+      hidden.push(await p.evaluate(() => { const h = document.getElementById('workspace-print-hint'); return h ? h.checkVisibility() : null; }));
+    }
+    out.push(Object.assign(r, { otherViewsHint: hidden }));
+    await p.close();
+  }
+  check('PR-W11-headless-header-footer-off-note-visible-before-print-button', out.every((r) => r.exists && r.visible && r.describedBy === 'rep-print-headers' &&
+    r.above && r.gap < 200 && r.sameCard && r.text.includes('「ヘッダーとフッター」を OFF にしてください') && r.text.includes('アプリからは OFF にできません') &&
+    r.hintShown === false && !r.blockedShown && r.otherViewsHint.every((x) => x === false)), short(out));
+}
+
 // 合成の証拠の画像（指定したときだけ。数ページを低解像度の PNG で書き出す。PDF は残さない）
 if (EVIDENCE_DIR) {
   fs.mkdirSync(EVIDENCE_DIR, { recursive: true });

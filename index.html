@@ -631,6 +631,8 @@
 
   /* 印刷不可の文面は画面には出さない */
   #review-print-blocked { display: none; }
+  /* 単一ケースの画面の印刷の案内文も画面には出さない（GWCM-WP-REPAIR-R-A-001・W-P3） */
+  #workspace-print-hint { display: none; }
 
   @media print {
     /* Reportだけを残す。操作要素は1つも印刷しない。 */
@@ -640,6 +642,22 @@
       display: none !important;
     }
     .batch-wrap { display: block; padding: 0; max-width: none; }
+
+    /* GWCM-WP-REPAIR-R-A-001（W-P2）: Workspace の印刷は Report か固定の拒否文の 1 つだけ。
+       入力・説明・状態のカード（Profile・Scenario の一覧と実効値・TSV・JSON / CSV など）は、Full / Redacted に関係なく出さない。
+       隠すカードを並べる方式（上）ではなく、#view-batch の直下で 2 つ以外を出さない allowlist にする。 */
+    #view-batch > :not(#review-report):not(#review-print-blocked) { display: none !important; }
+
+    /* GWCM-WP-REPAIR-R-A-001（W-P3）: 単一ケースの画面の印刷（Ctrl+P・ブラウザのメニュー）は固定の案内文だけ。
+       隠れている #view-batch は .batch-wrap[hidden]（詳細度 0,2,0）に負けて上の display: block が効かないため、
+       この画面のときだけ !important で表示し、案内文以外の子を隠す。
+       Pack の印刷の要求中・DENY_PENDING の間は当たらない（C2 の規則が先。状態の class で絞る）。 */
+    body:not(.pack-print-requested):not(.pack-print-deny-pending):has(> #view-single:not([hidden])) > #view-batch { display: block !important; }
+    body:not(.pack-print-requested):not(.pack-print-deny-pending):has(> #view-single:not([hidden])) > #view-batch > :not(#workspace-print-hint) { display: none !important; }
+    body:not(.pack-print-requested):not(.pack-print-deny-pending):has(> #view-single:not([hidden])) > #view-batch > #workspace-print-hint {
+      display: block !important; border: 1px solid #000; padding: 12px;
+      background: #fff; color: #000; font-size: 13px; line-height: 1.8;
+    }
 
     /* RF-P1: 既定は「印刷しない」。
        アプリのボタンを通らない印刷（Ctrl+P / ブラウザメニュー）でも、
@@ -806,7 +824,7 @@
 </head>
 <body>
 
-<header>
+<header class="app-header">
   <div class="header-icon">🪟</div>
   <div>
     <div class="header-title">ガラス耐風圧 簡易検討ツール</div>
@@ -1737,6 +1755,14 @@
     </div>
     <p class="card-note">比較は事実の差（B − A）だけを出す。どちらが良いかは判定しない。</p>
 
+    <!-- 印刷の前に常に見える注意（GWCM-WP-REPAIR-R-A-001・HD-B5-03）。ブラウザのヘッダーとフッターはアプリからは止められない。 -->
+    <div class="notice" id="rep-print-headers" role="note" style="margin-top:14px;">
+      <strong>印刷・PDF の前に:</strong> 印刷画面では「ヘッダーとフッター」を OFF にしてください。
+      ON のままだと、ブラウザがページの URL・日時（手元のファイルで開いた場合はファイルの場所）を全ページに印刷します。アプリからは OFF にできません。
+      印刷されるのは、現在の Workspace と設定に一致する資料（Report）だけです。一致しないときは「このReportは印刷できません。」の固定の文だけを印刷します
+      （Project Pack の印刷を止めている間は、どの画面からも Pack の固定の文だけです）。
+    </div>
+
     <div class="batch-toolbar" style="margin-top:14px;">
       <button type="button" id="btn-rep-generate" class="btn-primary"
         onclick="generateReview()">資料を作成 / 再作成</button>
@@ -1744,7 +1770,7 @@
         onclick="exportReviewMarkdown()">Markdown</button>
       <button type="button" id="btn-rep-json" class="btn-secondary"
         onclick="exportReviewJson()">Review JSON</button>
-      <button type="button" id="btn-rep-print" class="btn-secondary"
+      <button type="button" id="btn-rep-print" class="btn-secondary" aria-describedby="rep-print-headers"
         onclick="printReview()">印刷 / PDF</button>
     </div>
     <div class="batch-status" id="rep-freshness"></div>
@@ -1761,6 +1787,13 @@
   <div id="review-print-blocked">
     <p><strong>このReportは印刷できません。</strong></p>
     <p>現在のWorkspaceまたは設定と一致していません。画面へ戻り、Reportを再生成してください。</p>
+  </div>
+
+  <!-- 単一ケースの画面で印刷（Ctrl+P・ブラウザのメニュー）したときだけ出る静的な案内文（GWCM-WP-REPAIR-R-A-001・W-P3）。
+       画面には出ない。Workspace の画面・Project Pack の画面の印刷には出ない。 -->
+  <div id="workspace-print-hint">
+    <p><strong>この画面（単一ケース）は印刷に対応していません。</strong></p>
+    <p>設計レビュー資料は、複数ケース（Workspace）画面で資料を作成し、「印刷 / PDF」ボタンから印刷してください。</p>
   </div>
 
 </div>

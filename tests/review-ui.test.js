@@ -129,7 +129,99 @@ test('UI-7: @media print が report だけを残す', () => {
   }
   assert.match(rules, /#review-report\s*\{[^}]*display:\s*block/);
   assert.match(rules, /break-inside:\s*avoid/);
+
+  // GWCM-WP-REPAIR-R-A-001: 文字列があるだけでは通さない（W-P1 は `.app-header` の要素が無いまま通っていた）。
+  // W-P1: 隠す class を持つ要素が実際に 1 つあり、それが app の header である
+  assert.equal((HTML.match(/class="[^"]*\bapp-header\b[^"]*"/g) || []).length, 1, '.app-header の要素がちょうど 1 つ');
+  assert.match(HTML, /\n<header class="app-header">\n  <div class="header-icon">/);
+  // W-P2: #view-batch の直下は Report と固定の拒否文の 2 つ以外を印刷しない（隠すカードを並べる方式に頼らない allowlist）
+  const allow = '\n    #view-batch > :not(#review-report):not(#review-print-blocked) { display: none !important; }\n';
+  assert.equal(rules.split(allow).length - 1, 1, 'Workspace の印刷の allowlist');
+  const kids = viewBatchChildren();
+  const ids = kids.map((k) => k.id);
+  for (const id of ['review-report', 'review-print-blocked', 'workspace-print-hint']) {
+    assert.equal(ids.filter((x) => x === id).length, 1, '#' + id + ' は #view-batch の直下に 1 つ');
+  }
+  // 入力・説明・状態のカード（Profile・Scenario・Workspace・TSV・JSON / CSV・サマリ・結果・資料の設定）はすべて allowlist の外
+  const printable = kids.filter((k) => k.id === 'review-report' || k.id === 'review-print-blocked');
+  assert.equal(printable.length, 2);
+  const cards = kids.filter((k) => /\bcard\b/.test(k.cls) && k.id !== 'review-report');
+  assert.equal(cards.length >= 8, true, '#view-batch の直下のカードを読めていない: ' + cards.length);
+  // 印刷の CSS（最初の @media print）で display を与える規則はこれだけ。ほかの子を表示し直す規則を置かない
+  const shows = [...rules.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    .filter((m) => /display:\s*block/.test(m[2]))
+    .map((m) => m[1].replace(/\/\*[\s\S]*?\*\//g, '').trim().replace(/\s+/g, ' '));
+  const single = 'body:not(.pack-print-requested):not(.pack-print-deny-pending):has(> #view-single:not([hidden]))';
+  assert.deepEqual(shows, [
+    '.batch-wrap',
+    single + ' > #view-batch',
+    single + ' > #view-batch > #workspace-print-hint',
+    '#review-print-blocked',
+    'body.review-print-allowed #review-report'
+  ]);
 });
+
+/** #view-batch の直下の要素（tag・id・class）を、静的な markup から順に読む。 */
+function viewBatchChildren() {
+  const start = HTML.indexOf('<div class="batch-wrap" id="view-batch"');
+  assert.notEqual(start, -1);
+  const voids = new Set(['input', 'br', 'img', 'hr', 'meta', 'link', 'source', 'wbr']);
+  const re = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][a-zA-Z0-9-]*)([^>]*)>/g;
+  re.lastIndex = HTML.indexOf('>', start) + 1;
+  const kids = [];
+  let depth = 1;
+  for (let m = re.exec(HTML); m && depth > 0; m = re.exec(HTML)) {
+    if (!m[2]) continue;
+    const tag = m[2].toLowerCase();
+    if (m[1]) { depth--; continue; }
+    if (depth === 1) {
+      const id = (m[3].match(/\sid="([^"]*)"/) || [])[1] || null;
+      const cls = (m[3].match(/\sclass="([^"]*)"/) || [])[1] || '';
+      kids.push({ tag, id, cls });
+    }
+    if (!voids.has(tag) && !/\/\s*$/.test(m[3])) depth++;
+  }
+  assert.equal(depth, 0, '#view-batch の閉じタグまで読めていない');
+  return kids;
+}
+
+test('UI-7b: 単一ケースの画面の印刷は固定の案内文だけ（W-P3）。Pack の要求中・DENY_PENDING は C2 の規則が先', () => {
+  const block = HTML.slice(HTML.indexOf('@media print'));
+  const rules = block.slice(0, block.indexOf('\n  .batch-table'));
+  const single = 'body:not(.pack-print-requested):not(.pack-print-deny-pending):has(> #view-single:not([hidden]))';
+  // 隠れている #view-batch（.batch-wrap[hidden] の詳細度 0,2,0）を、この画面のときだけ表示し、案内文以外の子を隠す
+  assert.match(rules, new RegExp(escapeRe(single + ' > #view-batch { display: block !important; }')));
+  assert.match(rules, new RegExp(escapeRe(single + ' > #view-batch > :not(#workspace-print-hint) { display: none !important; }')));
+  assert.match(rules, new RegExp(escapeRe(single + ' > #view-batch > #workspace-print-hint {') + '[^}]*display: block !important;'));
+  // #view-batch / #workspace-print-hint を表示する規則は、すべて C2 の状態の class と単一ケースの画面で絞る（F1 の詳細度の教訓）
+  const css = HTML.slice(HTML.indexOf('<style>'), HTML.indexOf('</style>'));
+  const showing = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    .filter((m) => /display:\s*block/.test(m[2]) && /#workspace-print-hint|>\s*#view-batch\s*$/.test(m[1].trim()))
+    .map((m) => m[1].replace(/\/\*[\s\S]*?\*\//g, '').trim());
+  assert.equal(showing.length, 2);
+  showing.forEach((sel) => assert.equal(sel.startsWith(single + ' > #view-batch'), true, sel));
+  // 案内文は #view-batch の中・固定の拒否文の後ろの静的な文面で、画面には出さない。script から書き換えない
+  assert.match(HTML, /<\/div>\n\n  <!--[^>]*-->\n  <div id="workspace-print-hint">\n    <p><strong>この画面（単一ケース）は印刷に対応していません。<\/strong><\/p>\n    <p>設計レビュー資料は、複数ケース（Workspace）画面で資料を作成し、「印刷 \/ PDF」ボタンから印刷してください。<\/p>\n  <\/div>\n\n<\/div>\n/);
+  assert.equal(HTML.indexOf('id="review-print-blocked"') < HTML.indexOf('id="workspace-print-hint"'), true);
+  const screen = css.slice(0, css.indexOf('@media print'));
+  assert.match(screen, /\n  #workspace-print-hint \{ display: none; \}\n/);
+  assert.equal(/workspace-print-hint/.test(scriptCode()), false, 'script から案内文に触れない');
+});
+
+test('UI-7c: 印刷の前に常に見える注意（ヘッダーとフッターは OFF・アプリからは止められない・Report か拒否文だけ）', () => {
+  const card = HTML.slice(HTML.indexOf('<div class="card" id="review-config-card">'), HTML.indexOf('<div class="card" id="review-report"'));
+  const note = card.indexOf('<div class="notice" id="rep-print-headers" role="note"');
+  assert.notEqual(note, -1, '注意は資料の設定のカードの中');
+  assert.equal(note < card.indexOf('id="btn-rep-print"'), true, '注意は印刷ボタンより前');
+  const text = card.slice(note, card.indexOf('</div>', note)).replace(/\s+/g, ' ');
+  for (const s of ['「ヘッダーとフッター」を OFF にしてください', 'URL・日時（手元のファイルで開いた場合はファイルの場所）',
+    'アプリからは OFF にできません', '「このReportは印刷できません。」の固定の文だけを印刷します']) {
+    assert.equal(text.includes(s), true, s);
+  }
+  assert.match(card, /<button type="button" id="btn-rep-print" class="btn-secondary" aria-describedby="rep-print-headers"\n\s+onclick="printReview\(\)">印刷 \/ PDF<\/button>/);
+});
+
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 test('UI-8: report値を innerHTML へ入れない', () => {
   const code = scriptCode();

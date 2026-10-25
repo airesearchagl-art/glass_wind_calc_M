@@ -1861,7 +1861,8 @@ D-1〜D-9 のとおり）。
   ブラウザが前提です。ほかのブラウザ・版・フォント・プリンタでは確かめていません。
 - ケースが多いとページ数が多くなります（合成の 2000 ケース・詳細 50・比較の例で A3 横 137 ページ、詳細なしで 50〜62 ページ。参考値で、保証値ではありません）。
 - 印刷画面の非同期の動作（`window.print()` が印刷の完了を待たずに戻るブラウザ）では、印刷を止める側（DENY_PENDING）に倒れます。
-- 既存の Workspace の印刷の課題（W-P1〜W-P3）は、この変更では直していません。
+- 既存の Workspace の印刷の課題（W-P1〜W-P3）は、この変更では直していません（別の修理 GWCM-WP-REPAIR-R-A-001 で直しました。
+  「設計レビュー資料」の「印刷に出るもの」）。
 
 ### 既存の test の移行（Human Gate で承認）
 
@@ -2251,7 +2252,7 @@ node --test
 | `tests/batch-ui.test.js` | Batch UIの契約（Single既定・`[hidden]` vs `display:grid`・innerHTML不使用・診断配線・永続化の不在） |
 | `tests/project-profile.test.js` | プロファイル契約（unverifiedのみ・Z/zone不在・継承による持ち込み不可・floor→Z無し・既定値無し）・effective resolverとdirect pathの等価性・snapshot semantics・Matrix生成と絶対上限（`matrix.add()` 自身の1000件上限を含む）・TSV行単位隔離と余剰セル検査・寸法/extraFactor契約・canonical result-side gate |
 | `tests/review-package.test.js` | Review Package契約（derived-only・import経路なし・exporter gate）・**行と詳細の値が評価結果と一致すること**・summary/governingの一致・Full/Redactedのredaction・Markdown escape・診断privacy・継承値の遮断・export上限 |
-| `tests/review-ui.test.js` | Review UIの契約（描画元は `activeReview` のみ・鮮度はその場で再計算・export/印刷の関門・`@media print`・支配ケースを再選択しない・保存/通信なし） |
+| `tests/review-ui.test.js` | Review UIの契約（描画元は `activeReview` のみ・鮮度はその場で再計算・export/印刷の関門・`@media print`・支配ケースを再選択しない・保存/通信なし）。印刷: Workspace の allowlist（`#view-batch` の直下は Report と拒否文だけ）・`.app-header` の要素・単一ケースの画面の案内文（C2 の状態で絞る）・ヘッダー / フッター OFF の常時の注意（UI-7 / 7b / 7c。GWCM-WP-REPAIR-R-A-001） |
 | `tests/s3b1-project-pack-intake.test.js` | Project Pack intake（Phase 2L-B2 / S3-B1）: 経路は 1 つ・staged ≠ active・Pack → ProjectInput なし・取り込み上限は解析前・memory-only・ファイル名を保持しない・失敗表示は path と理由だけ・文言・合成 fixture・intake block を vm で動かす transactional / 上限 / drop / 競合の挙動 |
 | `tests/project-pack-execution.test.js` / `tests/project-pack-execution-ui.test.js` | Project Pack Case Execution（Phase 2L-B2 / S3-B2）: 本物の Pack context だけ・caseId / paneId / 階 / 部位 / 評価高さの完全一致・case_direct を分けない・trust は pack_unreviewed 固定・Evidence / provenance を持たない・入力 package と Closure に依存しない・明示操作だけ・古い結果を消す・計算失敗の固定文 |
 | `tests/project-pack-batch.test.js` / `tests/project-pack-batch-ui.test.js` | Project Pack Multi-Case Execution（Phase 2L-B2 / S3-B3A）: 計算は executeCase の繰り返しだけ・Pack の並び / 件数 / 一意性・全件そろったときだけ確定・途中の失敗で部分結果を出さない・trust は pack_unreviewed 固定・依存は初期化時に固定・明示操作だけ・チャンクの間で yield・キャンセル / Pack の切替 / 解除 / もう一度の開始で古い run を捨てる・確定直前の token 確認・50 行のページ |
@@ -2452,9 +2453,11 @@ better / worse / safer / winner のような優劣判定は出さない。
 ### Full / Redacted
 
 生成時に選ぶ。Redacted では表題・副題・備考・各ラベルといった自由記述を
-**モデルの時点で**伏せる。画面・Markdown・JSON・印刷が同じ境界を共有するため、
+**モデルの時点で**伏せる。画面の Report・Markdown・JSON・印刷の Report が同じ境界を共有するため、
 どれか1つだけ伏せ忘れることが起きない。
 数値・ケースID・判定・登録プリセットの公開名は伏せない。
+印刷では、Report の**外**の欄（Scenario の一覧のラベル・Profile の実効値など）を出さないことを、
+印刷の CSS の allowlist で別に保証する（下の「印刷に出るもの」）。
 
 ### 出力
 
@@ -2463,7 +2466,28 @@ better / worse / safer / winner のような優劣判定は出さない。
   （内部の trace にも `5<Z<40` のような文字列があるため）
 - **Review JSON**: 監査用。key順は固定で、同じ入力からは同じ出力になる
 - **印刷 / PDF**: ブラウザの「印刷 → PDFとして保存」。PDFライブラリは入れない。
-  ユーザー入力を含む standalone HTML は書き出さない
+  ユーザー入力を含む standalone HTML は書き出さない。印刷に出るのは Report か固定の拒否文だけ（下の「印刷に出るもの」）
+
+### 印刷に出るもの（GWCM-WP-REPAIR-R-A-001）
+
+| 画面・状態 | 印刷・PDF に出るもの |
+|---|---|
+| Workspace・資料が現在の Workspace と設定に一致（FRESH） | **Report だけ**（Full / Redacted は Report の model のとおり） |
+| Workspace・資料なし・Workspace や設定が変わった | 固定の「このReportは印刷できません。」の文だけ（「印刷 / PDF」ボタンは印刷を始めない） |
+| 単一ケース（Ctrl+P・ブラウザのメニュー） | 固定の案内文だけ（単一ケースの結果の印刷には対応していない） |
+| Project Pack の画面・Pack の印刷 | Pack Review の印刷（C2）のまま。Pack の印刷を止めている間（DENY_PENDING）は、どの画面でも Pack の固定の拒否文だけ |
+
+- Workspace の入力・説明・状態の欄（Profile・Scenario の一覧と実効値・組み合わせ生成・TSV・JSON / CSV・サマリ・結果・資料の設定）と
+  アプリの header は、Full / Redacted に関係なく印刷しない。隠す欄を並べる方式ではなく、`#view-batch` の直下で Report と拒否文の
+  2 つ以外を出さない allowlist にしている（新しい欄を足しても印刷に混ざらない）。鮮度の判定（`beforeprint` でその場で計算し直す）と
+  「印刷 / PDF」ボタンの関門は変えていない。
+- **ブラウザのヘッダーとフッター**は印刷画面の設定で、ON のままだとページの URL・日時（手元のファイルで開いた場合はファイルの場所）が
+  全ページに入る。アプリからは OFF にできないので、「印刷 / PDF」の前に常に注意を出している。OFF にすることは、上の allowlist の
+  代わりにはならない。
+- 確かめ方: `tests/review-ui.test.js` の UI-7 / UI-7b / UI-7c と、`tools/browser-checks/project-pack-review-print.mjs` の
+  PR-W01〜PR-W11（実際の UI の操作 → ネイティブの印刷 → 保存された PDF の全ページを Poppler で読む。合成の目印だけ）。
+  ヘッド付きの Chrome / Edge の実際の印刷ダイアログでの確認は未実施（PENDING）。ほかのブラウザ・版では確かめていない。
+- 単一ケースの画面の案内文は `:has()` を使うので、対応していないブラウザでは出ない（その場合も Workspace の資料・入力は出ない）。
 
 ### 古くなったら、黙って作り直さない
 
