@@ -633,6 +633,11 @@
   #review-print-blocked { display: none; }
   /* 単一ケースの画面の印刷の案内文も画面には出さない（GWCM-WP-REPAIR-R-A-001・W-P3） */
   #workspace-print-hint { display: none; }
+  /* 印刷の前の注意は本文まで読める大きさと色にする（GWCM-U7-RF01・画面だけ）。共通の .notice（11px・--text3）は変えない。
+     --text2 は、注意の背景（.notice の淡い amber を .card に重ねた色）に対して約 4.86 : 1 */
+  @media screen {
+    #rep-print-headers { font-size: 12px; color: var(--text2); }
+  }
 
   @media print {
     /* Reportだけを残す。操作要素は1つも印刷しない。 */
