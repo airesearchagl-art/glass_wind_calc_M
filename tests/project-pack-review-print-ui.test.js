@@ -180,8 +180,10 @@ test('P2-C2-U02: ボタン 1 つ・状態の欄・常に見える信頼／共有
 
 test('P2-C2-U03: 印刷の CSS は後ろに足した別の規則（Workspace の規則は 1 文字も変えない）。body 直下の allowlist・状態で絞った案内文・名前付きの A3 横の page と全ページの未レビューの表示', () => {
   // Workspace の印刷の CSS（最初の @media print）・印刷の handler・設計レビュー資料の block は main と同じ（SHA-256）
+  // 最初の @media print の固定値は、Workspace の印刷の修理（GWCM-WP-REPAIR-R-A-001・Human 承認 HD-B5-01a）で
+  // 2ab6c05f…184269783 から更新した（Workspace の allowlist と単一ケースの案内文を足した。C2 の規則・handler は変えていない）
   const first = HTML.indexOf('  @media print {');
-  assert.equal(sha256(HTML.slice(first, HTML.indexOf('\n  }\n', first) + 4)), '2ab6c05f976aefcd0524d6574e9adeaf09f362e9863c6446959b799184269783');
+  assert.equal(sha256(HTML.slice(first, HTML.indexOf('\n  }\n', first) + 4)), '35b4eda6ed543450e1f9ab5aeeed26b17a9ecdefb7b4266e12697ae4300486ad');
   const mk = '// ============================================================\n// 設計レビュー資料（Phase 2I / Wave 4）';
   assert.equal(sha256(HTML.slice(HTML.indexOf(mk), HTML.indexOf(PRINT_MARKER))), '8b628b0d2baf6d945a45b8bfac33d00d15c77abfa2e896e89cf5156c01d62c0a',
     '設計レビュー資料の block（Workspace の印刷の gate・handler を含む）を変えた');
