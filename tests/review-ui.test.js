@@ -221,6 +221,30 @@ test('UI-7c: 印刷の前に常に見える注意（ヘッダーとフッター�
   assert.match(card, /<button type="button" id="btn-rep-print" class="btn-secondary" aria-describedby="rep-print-headers"\n\s+onclick="printReview\(\)">印刷 \/ PDF<\/button>/);
 });
 
+test('UI-7d: 印刷の前の注意は画面で 12px 以上・実際の背景に対して 4.5 : 1 以上（この注意だけ。共通の .notice と印刷の CSS は変えない）', () => {
+  const css = HTML.slice(HTML.indexOf('<style>'), HTML.indexOf('</style>'));
+  const screen = css.slice(0, css.indexOf('@media print'));
+  const rule = screen.match(/\n  @media screen \{\n    #rep-print-headers \{ font-size: (\d+)px; color: var\((--[\w-]+)\); \}\n  \}\n/);
+  assert.notEqual(rule, null, '#rep-print-headers の画面だけの規則');
+  assert.equal(Number(rule[1]) >= 12, true, '本文は 12px 以上');
+  assert.equal((css.match(/#rep-print-headers/g) || []).length, 1, '#rep-print-headers を指す規則は画面の 1 つだけ（印刷の CSS は触れない）');
+  // 共通の .notice（11px・--text3）と見出しの色は変えない
+  const notice = css.match(/\n  \.notice \{\n    background: rgba\((\d+),(\d+),(\d+),([\d.]+)\);\n    border: 1px solid rgba\(245,158,11,0\.2\);\n    border-radius: var\(--radius-sm\);\n    padding: 14px 16px;\n    font-size: 11px;\n    color: var\(--text3\);\n    line-height: 1\.8;\n  \}\n/);
+  assert.notEqual(notice, null, '共通の .notice は元のまま');
+  assert.match(css, /\n  \.notice strong \{ color: var\(--warn\); \}\n/);
+  // 実際の背景 = .notice の半透明の背景を、注意を置いた .card の背景（--surface）に重ねた色
+  assert.match(css, /\n  \.card \{\n    background: var\(--surface\);/);
+  assert.match(HTML, /<div class="card" id="review-config-card">[\s\S]*?<div class="notice" id="rep-print-headers"/);
+  const hex = (name) => { const h = css.match(new RegExp('\\n    ' + name + ': #([0-9a-f]{6});'))[1]; return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)); };
+  const alpha = Number(notice[4]);
+  const bg = hex('--surface').map((c, i) => Number(notice[i + 1]) * alpha + c * (1 - alpha));
+  const lin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+  const lum = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+  const ratio = (x, y) => { const [p, q] = [lum(x), lum(y)].sort((s, t) => t - s); return (p + 0.05) / (q + 0.05); };
+  const r = ratio(hex(rule[2]), bg);
+  assert.equal(r >= 4.5, true, rule[2] + ' のコントラスト ' + r.toFixed(2) + ' : 1');
+});
+
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
 test('UI-8: report値を innerHTML へ入れない', () => {

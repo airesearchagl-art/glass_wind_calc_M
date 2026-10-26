@@ -1443,7 +1443,7 @@ measurements.workspacePrint = wpWorkspace;
     same(o.single, { body: ['view-batch'], batch: ['workspace-print-hint'] }) && same(o.pack, { body: ['pack-review-print-hint'], batch: [] })), short(out));
 }
 
-/* [headless] 画面: 印刷ボタンの前に常に見えるヘッダー / フッター OFF の注意。案内文・拒否文は画面に出ない */
+/* [headless] 画面: 印刷ボタンの前に常に見えるヘッダー / フッター OFF の注意（本文は 12px 以上・背景に対して 4.5 : 1 以上）。案内文・拒否文は画面に出ない */
 {
   const out = [];
   for (const vp of [[1280, 800], [390, 844]]) {
@@ -1456,10 +1456,21 @@ measurements.workspacePrint = wpWorkspace;
       const hint = document.getElementById('workspace-print-hint');
       const nr = note ? note.getBoundingClientRect() : null;
       const br = btn.getBoundingClientRect();
+      // 適用された文字の大きさと色、実際の背景（祖先の背景を上から重ねた色）に対する本文のコントラスト（GWCM-U7-RF01）
+      function legibility(el) {
+        const rgba = (s) => { const v = s.match(/[\d.]+/g).map(Number); return v.length > 3 ? v : v.concat(1); };
+        let bg = [255, 255, 255];
+        const chain = []; for (let e = el; e; e = e.parentElement) chain.unshift(rgba(getComputedStyle(e).backgroundColor));
+        chain.forEach((c) => { bg = bg.map((x, i) => c[i] * c[3] + x * (1 - c[3])); });
+        const lin = (c) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+        const lum = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+        const [hi, lo] = [lum(rgba(getComputedStyle(el).color)), lum(bg)].sort((a, b) => b - a);
+        return { fontPx: parseFloat(getComputedStyle(el).fontSize), contrast: Math.round((hi + 0.05) / (lo + 0.05) * 100) / 100 };
+      }
       return { exists: !!note && !!hint, visible: !!note && note.checkVisibility(), text: note ? note.textContent.replace(/\s+/g, ' ') : '',
         describedBy: btn.getAttribute('aria-describedby'), above: !!nr && nr.bottom <= br.top, gap: nr ? Math.round(br.top - nr.bottom) : null,
         sameCard: !!note && note.closest('.card') === btn.closest('.card'), hintShown: hint ? hint.checkVisibility() : null,
-        blockedShown: document.getElementById('review-print-blocked').checkVisibility() };
+        blockedShown: document.getElementById('review-print-blocked').checkVisibility(), legibility: note ? legibility(note) : null };
     });
     const hidden = [];
     for (const v of ['single', 'pack']) {
@@ -1471,6 +1482,7 @@ measurements.workspacePrint = wpWorkspace;
   }
   check('PR-W11-headless-header-footer-off-note-visible-before-print-button', out.every((r) => r.exists && r.visible && r.describedBy === 'rep-print-headers' &&
     r.above && r.gap < 200 && r.sameCard && r.text.includes('「ヘッダーとフッター」を OFF にしてください') && r.text.includes('アプリからは OFF にできません') &&
+    !!r.legibility && r.legibility.fontPx >= 12 && r.legibility.contrast >= 4.5 &&
     r.hintShown === false && !r.blockedShown && r.otherViewsHint.every((x) => x === false)), short(out));
 }
 
